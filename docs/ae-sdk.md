@@ -6,6 +6,8 @@
 - PiPL/resource generation is wired through the AE SDK PiPL tool
 - `PluginDataEntryFunction2` now registers effect metadata for host discovery
 - Smart Render and legacy render now drive the shared frame bridge
+- AE param set now includes top-level Camera, Aperture, Flare Settings, and Post-processing sections
+- output `View` popup is wired through the shared runtime/compositor
 - shared runtime/core are buildable and tested locally without the Adobe SDK
 
 ## Intended wrapper shape
@@ -39,9 +41,13 @@ Bit-depth policy in code:
 
 ## Host-test status
 - After Effects 2025 is installed locally
-- JSX smoke scripts can be launched from `AfterFX.com`
-- current session could not copy the built `.aex` into Adobe's protected plug-in folder
-- final in-host discovery/load validation still needs an elevated/manual install step
+- JSX smoke scripts can be launched from `AfterFX.exe`
+- the installed plug-in at `C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\Plug-ins\Effects\FlareSimAE.aex` matches the local build output
+- on March 30, 2026, host-side JSX validation confirmed:
+  - effect add by match name
+  - property enumeration including the `View` popup
+  - `View` popup value readback for values `1..5`
+  - rendered outputs differ between Composite / Flare Only / Bloom Only / Sources / Diagnostics in a clean AE project
 
 ## Remaining SDK tasks
 - tighten Smart PreRender state handling beyond current minimal checkout/result-rect flow

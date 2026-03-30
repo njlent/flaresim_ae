@@ -100,6 +100,14 @@ Ship an AE implementation in staged slices, with frequent commits.
 - `src/runtime/render_frame.*` now records which ghost backend ran so smoke tests can verify the selection path
 - local smoke renders now report `Ghost renderer backend: CUDA` on this RTX 3090 workstation
 
+### Slice 15
+- added AE Camera, Aperture, Flare Settings, and Post-processing controls derived from the Nuke plugin feature set
+- wired camera FOV/sensor controls, aperture blades/rotation, ghost blur, haze, starburst, and spectral samples into the shared runtime
+- added a visible `Max Sources` AE control in Flare Settings
+- improved 32-bpc source extraction so near-white values below `1.0` can still trigger flares
+- `Sources` view now follows the actually applied source list after `Max Sources` filtering
+- host-side AE verification on March 30, 2026 confirmed that installed output views switch correctly in After Effects 2025 (`25.5x4`)
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`
@@ -108,5 +116,5 @@ Verification:
 - `cmake --build build-ae --config Debug`
 
 ## Next slices
-- elevated/manual in-host `.aex` install + discovery validation
 - per-instance/persistent CUDA allocation ownership in AE sequence or compute-cache state
+- tighten Smart PreRender invalidation / host-cache behavior across parameter changes

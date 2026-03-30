@@ -672,11 +672,19 @@ PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
         return PF_Err_BAD_CALLBACK_PARAM;
     }
 
+    // SmartFX caching only invalidates on dependencies declared during pre-render.
+    // Touch the render params here so AE re-renders when view or flare controls change.
+    AeParameterState state {};
+    PF_Err err = build_render_state_from_checked_out_params(in_data, state);
+    if (err != PF_Err_NONE) {
+        return err;
+    }
+
     PF_RenderRequest request = render_extra->input->output_request;
     PF_CheckoutResult input_result;
     AEFX_CLR_STRUCT(input_result);
 
-    PF_Err err = render_extra->cb->checkout_layer(
+    err = render_extra->cb->checkout_layer(
         in_data->effect_ref,
         PARAM_INPUT,
         PARAM_INPUT,

@@ -17,3 +17,5 @@ obj/
 *.exp
 *.dll
 *.aex
+tests/ae_view_debug.jsx
+tests/ae_view_render_debug.jsx

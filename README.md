@@ -25,11 +25,21 @@ Current status:
   - stable effect name/category/match name
 - Smart Render + legacy render now call the shared frame bridge
 - bundled `space55` + `flaresim_nuke` lens presets included by default
-- AE lens UI now nests bundled presets under a collapsible Lens section, then by manufacturer, with a separate collapsible Flare Settings section
+- AE UI now includes:
+  - grouped bundled lens presets under Lens
+  - top-level Camera, Aperture, Flare Settings, and Post-processing sections
+  - output `View` modes for Composite / Flare Only / Bloom Only / Sources / Diagnostics
+  - visible `Max Sources` control in Flare Settings
+- low-threshold 32-bpc source detection now works for near-white values below `1.0`
 - local smoke tests green
 
-Current blocker:
-- final in-host validation still needs an elevated/manual copy into the Adobe plug-in folder on this machine
+Host validation:
+- After Effects 2025 (`25.5x4`) is installed locally
+- the built plugin has been verified in-host on March 30, 2026
+- JSX host checks confirmed:
+  - effect discovery/add by match name
+  - live `View` popup values reaching the host effect
+  - per-view renders differ in-host for Composite / Flare Only / Bloom Only / Sources / Diagnostics
 
 Implemented so far:
 - `src/core/`: extracted lens/ghost/bloom/source code
@@ -65,9 +75,10 @@ Built plugin output:
 - `build-ae/src/ae/Debug/FlareSimAE.aex`
 
 Current host-test note:
-- this session could launch After Effects and run JSX smoke scripts
-- this session could not write into `C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\Plug-ins\Effects`
-- final load verification therefore still requires an elevated/manual copy of `FlareSimAE.aex`
+- installed plugin path:
+  - `C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\Plug-ins\Effects\FlareSimAE.aex`
+- current installed binary matches the local build output by SHA-256
+- earlier cache/view-mode issues were narrowed down with JSX host tests and the current binary now switches output views in a clean AE project
 
 Start here:
 - [docs/spec.md](docs/spec.md)
@@ -81,6 +92,5 @@ Bundled lens presets:
 - [assets/lenses/flaresim_nuke/manifest.json](assets/lenses/flaresim_nuke/manifest.json)
 
 Next major steps:
-- complete elevated/manual in-host validation against the installed AE plug-in folder
 - tighten Smart PreRender state / optional mask-layer flow
 - add persistent per-instance CUDA/cache ownership instead of the current thread-local scratch cache

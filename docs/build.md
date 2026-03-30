@@ -43,8 +43,15 @@ Current AE target coverage:
 - AE effect registration metadata
 - Smart Render + legacy render bridge into shared runtime
 - internal CUDA ghost rendering with CPU output back to AE worlds
+- Camera / Aperture / Flare Settings / Post-processing AE sections
+- output `View` popup for Composite / Flare Only / Bloom Only / Sources / Diagnostics
 
-Current host-validation gap:
-- this repo can build the `.aex`
-- this session could not copy into `C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\Plug-ins\Effects` because of Windows permissions
-- final in-host effect discovery/load still needs an elevated or manual install step
+Current host-validation status:
+- After Effects 2025 (`25.5x4`) is installed locally
+- the plugin is installed in:
+  - `C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\Plug-ins\Effects\FlareSimAE.aex`
+- on March 30, 2026, host-side JSX checks verified:
+  - effect discovery/add by match name
+  - `View` popup readback through the installed effect
+  - rendered outputs differ across Composite / Flare Only / Bloom Only / Sources / Diagnostics
+- installed `.aex` matches `build-ae/src/ae/Debug/FlareSimAE.aex` by SHA-256
