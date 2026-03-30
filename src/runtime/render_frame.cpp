@@ -27,6 +27,7 @@ bool render_frame(
     outputs.bloom_r.assign(np, 0.0f);
     outputs.bloom_g.assign(np, 0.0f);
     outputs.bloom_b.assign(np, 0.0f);
+    outputs.ghost_backend = GhostRenderBackend::CPU;
 
     const float fov_h = settings.fov_h_deg * 3.14159265358979323846f / 180.0f;
     const float aspect = (float)input.width / (float)input.height;
@@ -59,7 +60,8 @@ bool render_frame(
             outputs.flare_b.data(),
             input.width,
             input.height,
-            ghost);
+            ghost,
+            &outputs.ghost_backend);
     }
 
     if (settings.bloom.strength > 0.0f) {

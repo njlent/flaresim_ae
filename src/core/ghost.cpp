@@ -12,6 +12,7 @@
 // ============================================================================
 
 #include "ghost.h"
+#include "ghost_cuda.h"
 #include "trace.h"
 
 #include <cstdio>
@@ -38,6 +39,18 @@ std::vector<GhostPair> enumerate_ghost_pairs(const LensSystem &lens)
         for (int b = a + 1; b < N; ++b)
             pairs.push_back({a, b});
     return pairs;
+}
+
+const char* ghost_render_backend_name(GhostRenderBackend backend)
+{
+    switch (backend) {
+        case GhostRenderBackend::CPU:
+            return "CPU";
+        case GhostRenderBackend::CUDA:
+            return "CUDA";
+        default:
+            return "Unknown";
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -218,8 +231,13 @@ void render_ghosts(const LensSystem &lens,
                    float fov_h, float fov_v,
                    float *out_r, float *out_g, float *out_b,
                    int width, int height,
-                   const GhostConfig &config)
+                   const GhostConfig &config,
+                   GhostRenderBackend* out_backend)
 {
+    if (out_backend) {
+        *out_backend = GhostRenderBackend::CPU;
+    }
+
     auto pairs = enumerate_ghost_pairs(lens);
     printf("Total ghost pairs: %zu\n", pairs.size());
 
@@ -306,7 +324,38 @@ void render_ghosts(const LensSystem &lens,
         }
     }
 
+    if (!active_pairs.empty() && !sources.empty()) {
+        thread_local GpuBufferCache gpu_cache;
+        std::string cuda_error;
+
+        if (launch_ghost_cuda(lens,
+                              active_pairs,
+                              pair_area_boost,
+                              sources,
+                              sensor_half_w,
+                              sensor_half_h,
+                              out_r,
+                              out_g,
+                              out_b,
+                              width,
+                              height,
+                              config,
+                              gpu_cache,
+                              &cuda_error)) {
+            if (out_backend) {
+                *out_backend = GhostRenderBackend::CUDA;
+            }
+            printf("Ghost renderer backend: CUDA\n");
+            return;
+        }
+
+        if (!cuda_error.empty()) {
+            fprintf(stderr, "FlareSim CUDA unavailable, falling back to CPU: %s\n", cuda_error.c_str());
+        }
+    }
+
     // ---- CPU path ----
+    printf("Ghost renderer backend: CPU\n");
     printf("Splat mode: per-source adaptive (collect-then-splat)\n");
 
     auto t0 = std::chrono::steady_clock::now();

@@ -8,6 +8,12 @@
 
 #include <vector>
 
+enum class GhostRenderBackend
+{
+    CPU,
+    CUDA,
+};
+
 // A ghost bounce pair: surfaces where light reflects instead of transmitting.
 struct GhostPair
 {
@@ -40,6 +46,7 @@ struct GhostConfig
 // Enumerate all valid ghost bounce pairs for the lens system.
 // Returns C(N, 2) pairs where N = number of surfaces.
 std::vector<GhostPair> enumerate_ghost_pairs(const LensSystem &lens);
+const char* ghost_render_backend_name(GhostRenderBackend backend);
 
 // Render all ghost reflections onto the output flare image.
 //
@@ -54,4 +61,5 @@ void render_ghosts(const LensSystem &lens,
                    float fov_h, float fov_v,
                    float *out_r, float *out_g, float *out_b,
                    int width, int height,
-                   const GhostConfig &config);
+                   const GhostConfig &config,
+                   GhostRenderBackend* out_backend = nullptr);

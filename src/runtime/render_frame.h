@@ -25,6 +25,7 @@ struct FrameRenderOutputs
 {
     int width = 0;
     int height = 0;
+    GhostRenderBackend ghost_backend = GhostRenderBackend::CPU;
     std::vector<float> flare_r;
     std::vector<float> flare_g;
     std::vector<float> flare_b;
