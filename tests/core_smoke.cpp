@@ -191,9 +191,11 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
 
-    state.ray_grid = 256;
-    const auto clamped = build_frame_render_settings(state);
-    assert(clamped.ray_grid == 64);
+    state.ray_grid = 2048;
+    state.max_sources = 4096;
+    const auto unclamped = build_frame_render_settings(state);
+    assert(unclamped.ray_grid == 2048);
+    assert(unclamped.max_sources == 4096);
 
     state.max_sources = 0;
     const auto unlimited = build_frame_render_settings(state);

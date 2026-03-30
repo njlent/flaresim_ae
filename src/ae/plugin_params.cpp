@@ -5,6 +5,13 @@
 #include <string>
 #include <vector>
 
+namespace {
+
+constexpr float kManualFloatMax = 1.0e9f;
+constexpr A_long kManualIntMax = 1000000;
+
+} // namespace
+
 PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef*[], PF_LayerDef*)
 {
     PF_Err err = PF_Err_NONE;
@@ -81,7 +88,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Flare Gain",
                          0.0f,
-                         100000.0f,
+                         kManualFloatMax,
                          0.0f,
                          5000.0f,
                          defaults.flare_gain,
@@ -93,7 +100,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Threshold",
                          0.0f,
-                         1000.0f,
+                         kManualFloatMax,
                          0.0f,
                          64.0f,
                          defaults.threshold,
@@ -105,16 +112,16 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Ray Grid",
                   1,
-                  64,
+                  kManualIntMax,
                   1,
-                  32,
+                  512,
                   defaults.ray_grid,
                   PARAM_ID_RAY_GRID);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Downsample",
                   1,
-                  16,
+                  kManualIntMax,
                   1,
                   12,
                   defaults.downsample,
