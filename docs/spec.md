@@ -60,7 +60,7 @@ Must have:
 Should have:
 - haze
 - starburst
-- bundled starter lens library
+- bundled starter lens library, including the `space55/blackhole-rt/flaresim/lenses` set
 - custom lens import on Windows
 - project-safe serialization of lens selection + pair state
 
@@ -190,6 +190,16 @@ Because AE lacks a normal filesystem path param for arbitrary files:
 - ship bundled lens preset library
 - add custom `Import Lens...` button on Windows
 - persist imported path + display name in arbitrary data / flattened state
+
+Built-in presets for v1 should include the `space55/blackhole-rt/flaresim/lenses` set:
+- `arri-zeiss-master-prime-t1.3-50mm.lens`
+- `canon-ef-200-400-f4.lens`
+- `cooketriplet.lens`
+- `doublegauss.lens`
+- `test.lens`
+
+Plugin UX requirement:
+- these bundled presets must be directly choosable in-plugin from a preset popup/browser, not hidden as repo-only assets
 
 Stored lens selection should include:
 - source kind: bundled vs external
@@ -489,7 +499,7 @@ Mitigation: use CUDA Driver API if possible; lock first release to validated AE/
 
 ## Open Questions
 - Is v1 allowed to ship without manual per-pair toggles?
-- Do we want external `.lens` files in v1, or bundled library only?
+- Do we want external `.lens` import in v1, or can it land shortly after the bundled presets?
 - Is CPU-output + internal CUDA acceptable for first release, or must AE show full GPU-badged render support immediately?
 - Should mask input support alpha only, or selectable RGBA/luma channels?
 

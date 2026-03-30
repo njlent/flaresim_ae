@@ -1,0 +1,35 @@
+{
+  "source": {
+    "name": "space55/blackhole-rt",
+    "repo": "https://github.com/space55/blackhole-rt",
+    "subpath": "flaresim/lenses",
+    "license": "MIT"
+  },
+  "presets": [
+    {
+      "id": "arri-zeiss-master-prime-t1.3-50mm",
+      "label": "ARRI/Zeiss Master Prime T1.3 50mm",
+      "path": "arri-zeiss-master-prime-t1.3-50mm.lens"
+    },
+    {
+      "id": "canon-ef-200-400-f4",
+      "label": "Canon EF 200-400mm f/4",
+      "path": "canon-ef-200-400-f4.lens"
+    },
+    {
+      "id": "cooke-triplet",
+      "label": "Cooke Triplet",
+      "path": "cooketriplet.lens"
+    },
+    {
+      "id": "double-gauss",
+      "label": "Double Gauss",
+      "path": "doublegauss.lens"
+    },
+    {
+      "id": "test-lens",
+      "label": "Test Lens",
+      "path": "test.lens"
+    }
+  ]
+}
