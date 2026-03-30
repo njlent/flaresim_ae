@@ -3,6 +3,7 @@
 #include "ghost.h"
 #include "lens.h"
 #include "lens_resolution.h"
+#include "output_view.h"
 #include "parameter_state.h"
 #include "render_frame.h"
 #include "source_extract.h"
@@ -156,6 +157,64 @@ void test_ae_adapter_bits()
     assert(loaded.num_surfaces() > 0);
 }
 
+void test_output_views()
+{
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    std::vector<float> src_r(64, 0.1f);
+    std::vector<float> src_g(64, 0.1f);
+    std::vector<float> src_b(64, 0.1f);
+    src_r[27] = 12.0f;
+    src_g[27] = 8.0f;
+    src_b[27] = 4.0f;
+
+    const RgbImageView input {src_r.data(), src_g.data(), src_b.data(), 8, 8};
+
+    FrameRenderSettings settings {};
+    settings.fov_h_deg = 60.0f;
+    settings.threshold = 1.0f;
+    settings.downsample = 1;
+    settings.ray_grid = 4;
+    settings.flare_gain = 100.0f;
+    settings.bloom.threshold = 1.0f;
+    settings.bloom.strength = 0.5f;
+    settings.bloom.radius = 0.08f;
+    settings.bloom.passes = 1;
+    settings.bloom.octaves = 1;
+    settings.bloom.chromatic = false;
+
+    FrameRenderOutputs outputs;
+    assert(render_frame(lens, input, settings, outputs));
+
+    std::vector<float> out_r(64, 0.0f);
+    std::vector<float> out_g(64, 0.0f);
+    std::vector<float> out_b(64, 0.0f);
+    MutableRgbImageView output {out_r.data(), out_g.data(), out_b.data(), 8, 8};
+
+    assert(compose_output_view(AeOutputView::FlareOnly, input, settings, outputs, output));
+    float flare_sum = 0.0f;
+    for (float v : out_r) flare_sum += v;
+    assert(flare_sum > 0.0f);
+
+    std::fill(out_r.begin(), out_r.end(), 0.0f);
+    std::fill(out_g.begin(), out_g.end(), 0.0f);
+    std::fill(out_b.begin(), out_b.end(), 0.0f);
+    assert(compose_output_view(AeOutputView::BloomOnly, input, settings, outputs, output));
+    float bloom_sum = 0.0f;
+    for (float v : out_r) bloom_sum += v;
+    assert(bloom_sum > 0.0f);
+
+    std::fill(out_r.begin(), out_r.end(), 0.0f);
+    std::fill(out_g.begin(), out_g.end(), 0.0f);
+    std::fill(out_b.begin(), out_b.end(), 0.0f);
+    assert(compose_output_view(AeOutputView::Sources, input, settings, outputs, output));
+    float source_sum = 0.0f;
+    for (float v : out_r) source_sum += v;
+    assert(source_sum > 0.0f);
+}
+
 } // namespace
 
 int main()
@@ -165,6 +224,7 @@ int main()
     test_bloom();
     test_render_frame();
     test_ae_adapter_bits();
+    test_output_views();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;
 }

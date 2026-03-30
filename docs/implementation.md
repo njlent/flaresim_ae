@@ -43,6 +43,11 @@ Ship an AE implementation in staged slices, with frequent commits.
 - added built-in/external lens resolution + loading in the AE-facing layer
 - preset chooser path can now resolve bundled lens IDs into actual `.lens` files
 
+### Slice 5
+- added output-view compositing in `src/ae/output_view.*`
+- AE-facing layer can now produce composite / flare-only / bloom-only / source / diagnostics buffers from runtime output
+- smoke coverage now exercises output-view composition
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`
