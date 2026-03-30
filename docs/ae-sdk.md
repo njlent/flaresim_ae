@@ -2,7 +2,10 @@
 
 ## Current state
 - buildable AE-facing adapter code exists in `src/ae/`
-- SDK-gated `.aex` scaffold target now exists in `src/ae/CMakeLists.txt`
+- SDK-gated `.aex` target now builds in `src/ae/CMakeLists.txt`
+- PiPL/resource generation is wired through the AE SDK PiPL tool
+- `PluginDataEntryFunction2` now registers effect metadata for host discovery
+- Smart Render and legacy render now drive the shared frame bridge
 - shared runtime/core are buildable and tested locally without the Adobe SDK
 
 ## Intended wrapper shape
@@ -17,6 +20,7 @@
 - `PF_OutFlag2_SUPPORTS_SMART_RENDER`
 - `PF_OutFlag2_FLOAT_COLOR_AWARE`
 - 8/16/32-bpc support through one float runtime
+- PiPL effect metadata + stable match name
 
 Bit-depth policy in code:
 - 8-bpc pack/unpack helpers clamp only at final 8-bit conversion
@@ -26,10 +30,20 @@ Bit-depth policy in code:
 - bridge preserves input alpha and only changes RGB payload
 - bundled lens resolution no longer has to start from the repo root; `src/ae/asset_root.*` can discover the asset root by walking upward from an anchor path
 - param ids, popup ordering, and popup-index -> runtime-state mapping now live in `src/ae/param_schema.*`
+- plugin target also gets `FLARESIM_REPO_ROOT` as a fallback asset-root anchor during local builds
+
+## Build result
+- local SDK build currently emits `build-ae/src/ae/Debug/FlareSimAE.aex`
+- binary now includes `.rsrc` data from generated PiPL wiring
+- export table still exposes `EffectMain`, as expected for an AE effect
+
+## Host-test status
+- After Effects 2025 is installed locally
+- JSX smoke scripts can be launched from `AfterFX.com`
+- current session could not copy the built `.aex` into Adobe's protected plug-in folder
+- final in-host discovery/load validation still needs an elevated/manual install step
 
 ## Remaining SDK tasks
-- Smart PreRender / Smart Render checkout flow
-- output-view compositing back into AE buffers
+- tighten Smart PreRender state handling beyond current minimal checkout/result-rect flow
 - file/import UI for external lenses
-- PiPL/resource wiring
 - GPU render path wiring on Windows

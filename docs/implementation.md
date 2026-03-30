@@ -75,12 +75,24 @@ Ship an AE implementation in staged slices, with frequent commits.
 - plugin param defaults now come from the same shared UI schema used by tests
 - local smoke build still stays SDK-free; Adobe-side compilation remains pending an installed SDK
 
+### Slice 11
+- added PiPL/resource generation for the AE plugin target in `src/ae/CMakeLists.txt`
+- added shared AE effect metadata in `src/ae/plugin_version.h`
+- added `PluginDataEntryFunction2` registration export in `src/ae/plugin_entry.cpp`
+- local SDK builds now emit a metadata-carrying `FlareSimAE.aex`
+
+### Slice 12
+- replaced Smart Render / legacy render no-op scaffolding with real world checkout + frame-bridge calls in `src/ae/plugin_smart_render.cpp`
+- added repo-root/module-path asset-root fallback for local plugin runs
+- added `tests/ae_smoke_test.jsx` as a host-side smoke script for AE effect discovery/add checks
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`
-- `ctest --test-dir build --output-on-failure`
+- `ctest --test-dir build -C Debug --output-on-failure`
+- `cmake -S . -B build-ae -DFLARESIM_AE_ENABLE_AE_PLUGIN=ON`
+- `cmake --build build-ae --config Debug`
 
 ## Next slices
-- AE SDK/CMake integration
-- real SDK-backed `.aex` target
+- elevated/manual in-host `.aex` install + discovery validation
 - Nuke-derived CUDA path

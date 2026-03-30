@@ -14,37 +14,50 @@ Current status:
   - 8/16/32-bit pixel conversion
   - one float render bridge across all supported bit depths
   - shared AE param schema + popup mapping
-- SDK-gated AE plugin scaffold in place
-- real `PF_Cmd_PARAM_SETUP` registration code in place
+- SDK-gated AE plugin target builds on Windows with the local Adobe SDK
+- AE metadata/registration wiring now in place:
+  - PiPL resource generation
+  - `PluginDataEntryFunction2`
+  - stable effect name/category/match name
+- Smart Render + legacy render now call the shared frame bridge
 - bundled `space55` lens presets included and selectable by schema
-- smoke tests green locally
+- local smoke tests green
 
 Current blocker:
-- SmartFX selector path still scaffold-level; local SDK package is now available for Windows plugin builds
+- final in-host validation still needs an elevated/manual copy into the Adobe plug-in folder on this machine
 
 Implemented so far:
 - `src/core/`: extracted lens/ghost/bloom/source code
 - `src/runtime/`: host-agnostic frame renderer
-- `src/ae/`: adapter/runtime bridge for AE-facing work that can be tested without the SDK
+- `src/ae/`: adapter/runtime bridge plus SDK-backed AE plugin glue
 - `tests/core_smoke.cpp`: coverage for lens loading, rendering, output views, bit-depth conversion, asset-root discovery, and AE param schema mapping
+- `tests/ae_smoke_test.jsx`: host-side smoke script for AE effect discovery / add checks
 
 Local verify:
 
 ```bash
 cmake -S . -B build
 cmake --build build
-ctest --test-dir build --output-on-failure
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
 To configure the AE plugin target with the extracted SDK:
 
 ```bash
 cmake -S . -B build-ae -DFLARESIM_AE_ENABLE_AE_PLUGIN=ON
-cmake --build build-ae
+cmake --build build-ae --config Debug
 ```
 
 `AE_SDK_ROOT` auto-detects `E:/projects/ae/AfterEffectsSDK_25.6_61_win/ae25.6_61.64bit.AfterEffectsSDK`.
 Override it explicitly if your SDK lives elsewhere.
+
+Built plugin output:
+- `build-ae/src/ae/Debug/FlareSimAE.aex`
+
+Current host-test note:
+- this session could launch After Effects and run JSX smoke scripts
+- this session could not write into `C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\Plug-ins\Effects`
+- final load verification therefore still requires an elevated/manual copy of `FlareSimAE.aex`
 
 Start here:
 - [docs/spec.md](docs/spec.md)
@@ -57,6 +70,6 @@ Bundled lens presets:
 - [assets/lenses/space55/manifest.json](assets/lenses/space55/manifest.json)
 
 Next major steps:
-- finish Smart PreRender / Smart Render world checkout against the Adobe SDK
-- build the real `.aex` target on Windows with the AE SDK present
+- complete elevated/manual in-host validation against the installed AE plug-in folder
+- tighten Smart PreRender state / optional mask-layer flow
 - add the Windows CUDA render path
