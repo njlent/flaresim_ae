@@ -86,6 +86,19 @@ Ship an AE implementation in staged slices, with frequent commits.
 - added repo-root/module-path asset-root fallback for local plugin runs
 - added `tests/ae_smoke_test.jsx` as a host-side smoke script for AE effect discovery/add checks
 
+### Slice 13
+- imported the `flaresim_nuke` lens catalog into generated bundled-lens manifests/descriptors
+- expanded the AE lens chooser to a manufacturer popup plus collapsible per-manufacturer lens groups
+- kept the legacy built-in lens popup hidden for old-project compatibility
+- smoke coverage now checks grouped manufacturer selection and legacy popup fallback
+
+### Slice 14
+- added `src/cuda/ghost_cuda.*` as a CUDA ghost renderer derived from the `flaresim_nuke` kernel structure
+- CMake now auto-detects CUDA and builds a `flaresim_cuda` target with a stub fallback when no toolkit is present
+- `src/core/ghost.cpp` now prefilters pairs once, tries CUDA first, and falls back to the CPU/OpenMP renderer on failure
+- `src/runtime/render_frame.*` now records which ghost backend ran so smoke tests can verify the selection path
+- local smoke renders now report `Ghost renderer backend: CUDA` on this RTX 3090 workstation
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`
@@ -95,4 +108,4 @@ Verification:
 
 ## Next slices
 - elevated/manual in-host `.aex` install + discovery validation
-- Nuke-derived CUDA path
+- per-instance/persistent CUDA allocation ownership in AE sequence or compute-cache state

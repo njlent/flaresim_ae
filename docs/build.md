@@ -15,12 +15,12 @@ Targets covered:
 - `flaresim_runtime`
 - `flaresim_core_smoke`
 
-Not covered yet:
-- CUDA path
-
 Notes:
 - OpenMP is optional.
-- smoke tests load bundled lenses from `assets/lenses/space55/`.
+- smoke tests load bundled lenses from `assets/lenses/space55/` and `assets/lenses/flaresim_nuke/`.
+- if a CUDA toolkit is detected at configure time, the shared runtime builds `src/cuda/ghost_cuda.cu` automatically.
+- if CUDA is missing or unavailable at runtime, the ghost renderer falls back to the CPU/OpenMP path automatically.
+- `build/Debug/flaresim_core_smoke.exe` prints the selected ghost backend (`CUDA` or `CPU`) during render smoke runs.
 - with the default Visual Studio generator on Windows, `ctest` needs `-C Debug`
 
 ## AE plugin configure/build
@@ -42,6 +42,7 @@ Current AE target coverage:
 - PiPL/resource generation
 - AE effect registration metadata
 - Smart Render + legacy render bridge into shared runtime
+- internal CUDA ghost rendering with CPU output back to AE worlds
 
 Current host-validation gap:
 - this repo can build the `.aex`

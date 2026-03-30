@@ -2,6 +2,7 @@
 #include "bloom.h"
 #include "builtin_lenses.h"
 #include "frame_bridge.h"
+#include "ghost_cuda.h"
 #include "ghost.h"
 #include "lens.h"
 #include "lens_resolution.h"
@@ -135,6 +136,9 @@ void test_render_frame()
     FrameRenderOutputs outputs;
     assert(render_frame(lens, input, settings, outputs));
     assert(outputs.sources.size() == 1);
+    assert(outputs.ghost_backend == GhostRenderBackend::CPU ||
+           outputs.ghost_backend == GhostRenderBackend::CUDA);
+    assert(std::string(ghost_render_backend_name(outputs.ghost_backend)).size() > 0);
 
     float flare_sum = 0.0f;
     float bloom_sum = 0.0f;
@@ -148,11 +152,26 @@ void test_render_frame()
     assert(bloom_sum > 0.0f);
 }
 
+void test_cuda_backend_api()
+{
+    assert(std::string(ghost_render_backend_name(GhostRenderBackend::CPU)) == "CPU");
+    assert(std::string(ghost_render_backend_name(GhostRenderBackend::CUDA)) == "CUDA");
+
+    std::string reason;
+    const bool available = cuda_ghost_renderer_available(&reason);
+    if (!cuda_ghost_renderer_compiled()) {
+        assert(!available);
+        assert(!reason.empty());
+    }
+}
+
 void test_ae_adapter_bits()
 {
-    assert(builtin_lens_count() >= 5);
+    assert(builtin_lens_count() >= 1375);
+    assert(builtin_lens_manufacturer_count() >= 50);
     const auto* lens = find_builtin_lens("double-gauss");
     assert(lens);
+    assert(lens->manufacturer_index == 0);
     assert(std::string(lens->relative_path).find("doublegauss.lens") != std::string::npos);
 
     AeParameterState state {};
@@ -339,31 +358,47 @@ void test_frame_bridge()
 
 void test_param_schema()
 {
-    assert(PARAM_COUNT == 9);
+    assert(parameter_count() > 100);
+    assert(mask_layer_param() + 1 == parameter_count());
 
-    const std::string lens_popup = build_lens_preset_popup_string();
+    const std::string legacy_lens_popup = build_lens_preset_popup_string();
+    const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
+    const std::string grouped_lens_popup = build_lens_popup_string_for_manufacturer(0);
     const std::string view_popup = build_output_view_popup_string();
-    assert(lens_popup.find("Double Gauss") != std::string::npos);
+    assert(legacy_lens_popup.find("Double Gauss") != std::string::npos);
+    assert(manufacturer_popup.find("Canon") != std::string::npos);
+    assert(grouped_lens_popup.find("Double Gauss") != std::string::npos);
     assert(view_popup.find("Flare Only") != std::string::npos);
 
+    const char* canon_lens_id = "canon-1-4x-tc-canon-extender-ef1-4x-iii";
     AeUiParameterState ui {};
-    ui.lens_preset_index = lens_popup_index_for_builtin("double-gauss");
+    ui.legacy_lens_preset_index = lens_popup_index_for_builtin("double-gauss");
+    ui.lens_manufacturer_index = lens_manufacturer_popup_index_for_builtin(canon_lens_id);
+    ui.lens_model_index = lens_model_popup_index_for_builtin(canon_lens_id);
     ui.view_mode_index = output_view_popup_index(AeOutputView::Diagnostics);
     ui.flare_gain = 250.0f;
     ui.threshold = 1.5f;
     ui.ray_grid = 8;
-    ui.max_sources = 128;
     ui.downsample = 2;
 
     AeParameterState state {};
     assert(apply_ui_parameter_state(ui, state));
-    assert(std::string(state.lens.builtin_id) == "double-gauss");
+    assert(std::string(state.lens.builtin_id) == canon_lens_id);
     assert(state.view == AeOutputView::Diagnostics);
     assert(std::abs(state.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(state.threshold - 1.5f) < 1e-6f);
     assert(state.ray_grid == 8);
-    assert(state.max_sources == 128);
     assert(state.downsample == 2);
+
+    AeUiParameterState legacy_ui {};
+    legacy_ui.legacy_lens_preset_index = lens_popup_index_for_builtin("cooke-triplet");
+    legacy_ui.lens_manufacturer_index = default_lens_manufacturer_popup_index();
+    legacy_ui.lens_model_index = default_lens_model_popup_index();
+    legacy_ui.view_mode_index = output_view_popup_index(AeOutputView::Composite);
+
+    AeParameterState legacy_state {};
+    assert(apply_ui_parameter_state(legacy_ui, legacy_state));
+    assert(std::string(legacy_state.lens.builtin_id) == "cooke-triplet");
 }
 
 } // namespace
@@ -375,6 +410,7 @@ int main()
     test_source_limit();
     test_bloom();
     test_render_frame();
+    test_cuda_backend_api();
     test_ae_adapter_bits();
     test_output_views();
     test_pixel_convert();

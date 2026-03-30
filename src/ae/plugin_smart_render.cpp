@@ -4,6 +4,7 @@
 #include "AE_EffectCBSuites.h"
 
 #include "asset_root.h"
+#include "builtin_lenses.h"
 #include "frame_bridge.h"
 #include "param_schema.h"
 
@@ -27,13 +28,21 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
         return false;
     }
 
-    out_state.lens_preset_index = params[PARAM_LENS_PRESET]->u.pd.value;
-    out_state.flare_gain = params[PARAM_FLARE_GAIN]->u.fs_d.value;
-    out_state.threshold = params[PARAM_THRESHOLD]->u.fs_d.value;
-    out_state.ray_grid = params[PARAM_RAY_GRID]->u.sd.value;
-    out_state.max_sources = params[PARAM_MAX_SOURCES]->u.sd.value;
-    out_state.downsample = params[PARAM_DOWNSAMPLE]->u.sd.value;
-    out_state.view_mode_index = params[PARAM_VIEW_MODE]->u.pd.value;
+    out_state.legacy_lens_preset_index = params[PARAM_LEGACY_LENS_PRESET]->u.pd.value;
+    out_state.lens_manufacturer_index = params[PARAM_LENS_MANUFACTURER]->u.pd.value;
+
+    const int manufacturer_index = out_state.lens_manufacturer_index - 1;
+    if (manufacturer_index < 0 ||
+        manufacturer_index >= static_cast<int>(builtin_lens_manufacturer_count())) {
+        return false;
+    }
+
+    out_state.lens_model_index = params[lens_popup_param(manufacturer_index)]->u.pd.value;
+    out_state.flare_gain = params[flare_gain_param()]->u.fs_d.value;
+    out_state.threshold = params[threshold_param()]->u.fs_d.value;
+    out_state.ray_grid = params[ray_grid_param()]->u.sd.value;
+    out_state.downsample = params[downsample_param()]->u.sd.value;
+    out_state.view_mode_index = params[view_mode_param()]->u.pd.value;
     return true;
 }
 
@@ -210,94 +219,110 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
 {
     PF_Err err = PF_Err_NONE;
     PF_Err err2 = PF_Err_NONE;
-    PF_ParamDef lens_param;
-    PF_ParamDef flare_gain_param;
-    PF_ParamDef threshold_param;
-    PF_ParamDef ray_grid_param;
-    PF_ParamDef max_sources_param;
-    PF_ParamDef downsample_param;
-    PF_ParamDef view_param;
-    AEFX_CLR_STRUCT(lens_param);
-    AEFX_CLR_STRUCT(flare_gain_param);
-    AEFX_CLR_STRUCT(threshold_param);
-    AEFX_CLR_STRUCT(ray_grid_param);
-    AEFX_CLR_STRUCT(max_sources_param);
-    AEFX_CLR_STRUCT(downsample_param);
-    AEFX_CLR_STRUCT(view_param);
+    PF_ParamDef legacy_lens_param;
+    PF_ParamDef manufacturer_param;
+    PF_ParamDef lens_model_param;
+    PF_ParamDef flare_gain_param_def;
+    PF_ParamDef threshold_param_def;
+    PF_ParamDef ray_grid_param_def;
+    PF_ParamDef downsample_param_def;
+    PF_ParamDef view_param_def;
+    AEFX_CLR_STRUCT(legacy_lens_param);
+    AEFX_CLR_STRUCT(manufacturer_param);
+    AEFX_CLR_STRUCT(lens_model_param);
+    AEFX_CLR_STRUCT(flare_gain_param_def);
+    AEFX_CLR_STRUCT(threshold_param_def);
+    AEFX_CLR_STRUCT(ray_grid_param_def);
+    AEFX_CLR_STRUCT(downsample_param_def);
+    AEFX_CLR_STRUCT(view_param_def);
 
-    bool lens_checked_out = false;
+    bool legacy_lens_checked_out = false;
+    bool manufacturer_checked_out = false;
+    bool lens_model_checked_out = false;
     bool flare_gain_checked_out = false;
     bool threshold_checked_out = false;
     bool ray_grid_checked_out = false;
-    bool max_sources_checked_out = false;
     bool downsample_checked_out = false;
     bool view_checked_out = false;
 
     ERR(PF_CHECKOUT_PARAM(in_data,
-                          PARAM_LENS_PRESET,
+                          PARAM_LEGACY_LENS_PRESET,
                           in_data->current_time,
                           in_data->time_step,
                           in_data->time_scale,
-                          &lens_param));
-    lens_checked_out = (err == PF_Err_NONE);
+                          &legacy_lens_param));
+    legacy_lens_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
-                          PARAM_FLARE_GAIN,
+                          PARAM_LENS_MANUFACTURER,
                           in_data->current_time,
                           in_data->time_step,
                           in_data->time_scale,
-                          &flare_gain_param));
+                          &manufacturer_param));
+    manufacturer_checked_out = (err == PF_Err_NONE);
+
+    int lens_model_param_index = -1;
+    if (!err) {
+        lens_model_param_index = lens_popup_param(manufacturer_param.u.pd.value - 1);
+        ERR(PF_CHECKOUT_PARAM(in_data,
+                              lens_model_param_index,
+                              in_data->current_time,
+                              in_data->time_step,
+                              in_data->time_scale,
+                              &lens_model_param));
+        lens_model_checked_out = (err == PF_Err_NONE);
+    }
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          flare_gain_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &flare_gain_param_def));
     flare_gain_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
-                          PARAM_THRESHOLD,
+                          threshold_param(),
                           in_data->current_time,
                           in_data->time_step,
                           in_data->time_scale,
-                          &threshold_param));
+                          &threshold_param_def));
     threshold_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
-                          PARAM_RAY_GRID,
+                          ray_grid_param(),
                           in_data->current_time,
                           in_data->time_step,
                           in_data->time_scale,
-                          &ray_grid_param));
+                          &ray_grid_param_def));
     ray_grid_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
-                          PARAM_MAX_SOURCES,
+                          downsample_param(),
                           in_data->current_time,
                           in_data->time_step,
                           in_data->time_scale,
-                          &max_sources_param));
-    max_sources_checked_out = (err == PF_Err_NONE);
-
-    ERR(PF_CHECKOUT_PARAM(in_data,
-                          PARAM_DOWNSAMPLE,
-                          in_data->current_time,
-                          in_data->time_step,
-                          in_data->time_scale,
-                          &downsample_param));
+                          &downsample_param_def));
     downsample_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
-                          PARAM_VIEW_MODE,
+                          view_mode_param(),
                           in_data->current_time,
                           in_data->time_step,
                           in_data->time_scale,
-                          &view_param));
+                          &view_param_def));
     view_checked_out = (err == PF_Err_NONE);
 
     if (!err) {
         AeUiParameterState ui_state {};
-        ui_state.lens_preset_index = lens_param.u.pd.value;
-        ui_state.flare_gain = flare_gain_param.u.fs_d.value;
-        ui_state.threshold = threshold_param.u.fs_d.value;
-        ui_state.ray_grid = ray_grid_param.u.sd.value;
-        ui_state.max_sources = max_sources_param.u.sd.value;
-        ui_state.downsample = downsample_param.u.sd.value;
-        ui_state.view_mode_index = view_param.u.pd.value;
+        ui_state.legacy_lens_preset_index = legacy_lens_param.u.pd.value;
+        ui_state.lens_manufacturer_index = manufacturer_param.u.pd.value;
+        ui_state.lens_model_index = lens_model_param.u.pd.value;
+        ui_state.flare_gain = flare_gain_param_def.u.fs_d.value;
+        ui_state.threshold = threshold_param_def.u.fs_d.value;
+        ui_state.ray_grid = ray_grid_param_def.u.sd.value;
+        ui_state.downsample = downsample_param_def.u.sd.value;
+        ui_state.view_mode_index = view_param_def.u.pd.value;
 
         if (!apply_ui_parameter_state(ui_state, out_state)) {
             err = PF_Err_BAD_CALLBACK_PARAM;
@@ -305,28 +330,31 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
 
     if (view_checked_out) {
-        ERR2(PF_CHECKIN_PARAM(in_data, &view_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &view_param_def));
     }
     if (downsample_checked_out) {
-        ERR2(PF_CHECKIN_PARAM(in_data, &downsample_param));
-    }
-    if (max_sources_checked_out) {
-        ERR2(PF_CHECKIN_PARAM(in_data, &max_sources_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &downsample_param_def));
     }
     if (ray_grid_checked_out) {
-        ERR2(PF_CHECKIN_PARAM(in_data, &ray_grid_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &ray_grid_param_def));
     }
     if (threshold_checked_out) {
-        ERR2(PF_CHECKIN_PARAM(in_data, &threshold_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &threshold_param_def));
     }
     if (flare_gain_checked_out) {
-        ERR2(PF_CHECKIN_PARAM(in_data, &flare_gain_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &flare_gain_param_def));
     }
-    if (lens_checked_out) {
-        ERR2(PF_CHECKIN_PARAM(in_data, &lens_param));
+    if (lens_model_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &lens_model_param));
+    }
+    if (manufacturer_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manufacturer_param));
+    }
+    if (legacy_lens_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &legacy_lens_param));
     }
 
-    return err;
+    return err ? err : err2;
 }
 
 } // namespace
