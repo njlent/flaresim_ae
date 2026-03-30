@@ -362,7 +362,9 @@ void test_param_schema()
 {
     assert(parameter_count() > 100);
     assert(lens_section_start_param() == PARAM_LENS_SECTION_START);
-    assert(lens_section_end_param() + 1 == flare_gain_param());
+    assert(lens_section_end_param() + 1 == flare_section_start_param());
+    assert(flare_section_start_param() + 1 == flare_gain_param());
+    assert(flare_section_end_param() + 1 == view_mode_param());
     assert(mask_layer_param() + 1 == parameter_count());
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();

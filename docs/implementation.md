@@ -89,6 +89,7 @@ Ship an AE implementation in staged slices, with frequent commits.
 ### Slice 13
 - imported the `flaresim_nuke` lens catalog into generated bundled-lens manifests/descriptors
 - expanded the AE lens chooser to a collapsible outer lens group, manufacturer popup, and collapsible per-manufacturer lens groups
+- grouped flare gain / threshold / ray grid / downsample under a collapsible Flare Settings section
 - kept the legacy built-in lens popup hidden for old-project compatibility
 - smoke coverage now checks grouped manufacturer selection and legacy popup fallback
 

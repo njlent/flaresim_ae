@@ -86,6 +86,11 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     PF_END_TOPIC(PARAM_ID_LENS_SECTION_END);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_TOPICX("Flare Settings",
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_FLARE_SECTION_START);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Flare Gain",
                          0.0f,
                          kManualFloatMax,
@@ -126,6 +131,9 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   12,
                   defaults.downsample,
                   PARAM_ID_DOWNSAMPLE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_END_TOPIC(PARAM_ID_FLARE_SECTION_END);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX("View",

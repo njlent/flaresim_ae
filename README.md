@@ -25,7 +25,7 @@ Current status:
   - stable effect name/category/match name
 - Smart Render + legacy render now call the shared frame bridge
 - bundled `space55` + `flaresim_nuke` lens presets included by default
-- AE lens UI now nests bundled presets under a collapsible Lens section, then by manufacturer
+- AE lens UI now nests bundled presets under a collapsible Lens section, then by manufacturer, with a separate collapsible Flare Settings section
 - local smoke tests green
 
 Current blocker:

@@ -21,9 +21,13 @@ inline constexpr int PARAM_ID_LENS_MANUFACTURER = 100;
 inline constexpr int PARAM_ID_LENS_GROUP_BASE = 1000;
 inline constexpr int PARAM_ID_LENS_SECTION_START = 9000;
 inline constexpr int PARAM_ID_LENS_SECTION_END = 9001;
+inline constexpr int PARAM_ID_FLARE_SECTION_START = 9002;
+inline constexpr int PARAM_ID_FLARE_SECTION_END = 9003;
 
 int lens_section_start_param();
 int lens_section_end_param();
+int flare_section_start_param();
+int flare_section_end_param();
 
 int lens_group_start_param(int manufacturer_index);
 int lens_popup_param(int manufacturer_index);

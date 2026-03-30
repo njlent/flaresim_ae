@@ -71,9 +71,14 @@ int lens_section_end_param()
            static_cast<int>(builtin_lens_manufacturer_count()) * LENS_PARAMS_PER_MANUFACTURER;
 }
 
-int flare_gain_param()
+int flare_section_start_param()
 {
     return lens_section_end_param() + 1;
+}
+
+int flare_gain_param()
+{
+    return flare_section_start_param() + 1;
 }
 
 int threshold_param()
@@ -91,9 +96,14 @@ int downsample_param()
     return ray_grid_param() + 1;
 }
 
-int view_mode_param()
+int flare_section_end_param()
 {
     return downsample_param() + 1;
+}
+
+int view_mode_param()
+{
+    return flare_section_end_param() + 1;
 }
 
 int mask_layer_param()
