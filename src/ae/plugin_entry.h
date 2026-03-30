@@ -2,6 +2,9 @@
 
 #include "AEConfig.h"
 #include "AE_Effect.h"
+#include "AE_EffectCB.h"
+#include "AE_Macros.h"
+#include "Param_Utils.h"
 #include "entry.h"
 
 #ifdef AE_OS_WIN

@@ -20,7 +20,7 @@ Current status:
 - smoke tests green locally
 
 Current blocker:
-- no local Adobe After Effects SDK in this environment, so the `.aex` target and SmartFX selector path are not compiled end-to-end yet
+- SmartFX selector path still scaffold-level; local SDK package is now available for Windows plugin builds
 
 Implemented so far:
 - `src/core/`: extracted lens/ghost/bloom/source code
@@ -35,6 +35,16 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+To configure the AE plugin target with the extracted SDK:
+
+```bash
+cmake -S . -B build-ae -DFLARESIM_AE_ENABLE_AE_PLUGIN=ON
+cmake --build build-ae
+```
+
+`AE_SDK_ROOT` auto-detects `E:/projects/ae/AfterEffectsSDK_25.6_61_win/ae25.6_61.64bit.AfterEffectsSDK`.
+Override it explicitly if your SDK lives elsewhere.
 
 Start here:
 - [docs/spec.md](docs/spec.md)

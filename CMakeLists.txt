@@ -8,6 +8,23 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(FLARESIM_AE_ENABLE_AE_PLUGIN "Build the After Effects plugin target if the SDK is available." OFF)
 set(AE_SDK_ROOT "" CACHE PATH "Path to the Adobe After Effects SDK root")
 
+if(NOT AE_SDK_ROOT)
+    set(_flaresim_ae_sdk_candidates
+        "E:/projects/ae/AfterEffectsSDK_25.6_61_win/ae25.6_61.64bit.AfterEffectsSDK"
+        "E:/projects/ae/AfterEffectsSDK_25.6_61_win"
+    )
+
+    foreach(_flaresim_ae_sdk_candidate IN LISTS _flaresim_ae_sdk_candidates)
+        if(EXISTS "${_flaresim_ae_sdk_candidate}/Examples/Headers/AEConfig.h")
+            set(AE_SDK_ROOT "${_flaresim_ae_sdk_candidate}" CACHE PATH "Path to the Adobe After Effects SDK root" FORCE)
+            break()
+        endif()
+    endforeach()
+
+    unset(_flaresim_ae_sdk_candidate)
+    unset(_flaresim_ae_sdk_candidates)
+endif()
+
 find_package(OpenMP)
 
 add_library(flaresim_core STATIC

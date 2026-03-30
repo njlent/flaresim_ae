@@ -15,7 +15,7 @@ FLARESIM_AE_EXPORT PF_Err EffectMain(
             return PluginHandleAbout(in_data, out_data, params, output);
         case PF_Cmd_GLOBAL_SETUP:
             return PluginHandleGlobalSetup(in_data, out_data, params, output);
-        case PF_Cmd_PARAM_SETUP:
+        case PF_Cmd_PARAMS_SETUP:
             return PluginHandleParamSetup(in_data, out_data, params, output);
         case PF_Cmd_SEQUENCE_SETUP:
             return PluginHandleSequenceSetup(in_data, out_data, params, output);
