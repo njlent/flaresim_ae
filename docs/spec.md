@@ -1,7 +1,11 @@
 # FlareSim AE Spec
 
 ## Goal
-Build an Adobe After Effects version of [LocalStarlight/flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke).
+Build an Adobe After Effects version of FlareSim.
+
+Implementation basis:
+- primary source of truth: [space55/blackhole-rt `flaresim/`](https://github.com/space55/blackhole-rt/tree/main/flaresim)
+- secondary reference: [LocalStarlight/flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke)
 
 Primary target:
 - Windows 11
@@ -14,10 +18,15 @@ Core promise:
 - interactive preview on modern RTX hardware
 - AE-native workflow, not a Nuke-shaped port
 
+Product target:
+- match the spirit and core behavior of the Nuke plugin where it improves the artist experience
+- but treat the original `blackhole-rt/flaresim` code as the canonical optics/render baseline
+
 ## Why This Is Not A Straight Port
 `flaresim_nuke` assumes host behavior that AE does not share.
 
 Key deltas:
+- original `blackhole-rt/flaresim` is a CLI/offline EXR renderer, not a host plugin
 - Nuke plugin does lazy full-frame compute on first scanline request; AE wants SmartFX pre-render/render.
 - Nuke writes extra named channels (`flare.rgb`, `source.rgb`, `haze.rgb`, `starburst.rgb`); AE effects output one image only.
 - Nuke exposes a filesystem file picker for `.lens`; AE has no normal arbitrary file-path effect param.
@@ -29,19 +38,47 @@ Implication:
 - redesign host glue + UI
 - treat feature parity as phased, not milestone-1
 
-## Upstream Baseline
-Current `flaresim_nuke` splits into reusable parts:
-- `lens.*`: `.lens` parsing, surface geometry
+## Source Of Truth
+`space55/blackhole-rt/flaresim` should be treated as the canonical basis for:
+- `.lens` format + bundled lenses
+- `lens.*`: lens parsing + surface geometry
 - `trace.*`, `fresnel.h`, `vec3.h`: ray/optics math
-- `ghost.*`: ghost-pair enumeration + filtering
-- `ghost_cuda.*`: CUDA kernel + persistent device buffers
-- `starburst.*`: FFT diffraction PSF + render
-- `FlareSim.cpp`: Nuke-only host glue, source extraction, output modes, dynamic pair UI, cache ownership
+- `ghost.*`: ghost-pair enumeration + CPU render baseline
+- bright-source extraction logic
+- ghost normalization / area boost behavior
+- original bloom behavior
 
-Good port seam:
-- extract optics + render core out of host layer
-- keep AE wrapper thin
-- keep CUDA code Windows-oriented from day one
+Why:
+- it is the original code the Nuke plugin was based on
+- less host baggage
+- cleaner core extraction path
+- better correctness oracle for regression tests
+
+## Feature Lineage
+### Original `blackhole-rt/flaresim`
+Baseline features from the original code:
+- CPU/OpenMP ghost renderer
+- EXR/TGA-oriented source extraction + output flow
+- bloom
+- ghost blur
+- ghost normalization
+- config-driven parameter model
+- bundled `.lens` library
+
+### Later `flaresim_nuke`
+Useful derivative features to borrow selectively:
+- CUDA acceleration
+- Nuke host integration patterns
+- preview/final quality split
+- starburst diffraction pass
+- haze / veiling glare
+- richer camera/aperture controls
+- pair-selection UI
+- source clustering
+
+Rule:
+- start core implementation from the original codebase
+- port Nuke additions one by one as explicit enhancements
 
 ## AE v1 Scope
 Must have:
@@ -58,6 +95,7 @@ Must have:
 - stable behavior under AE MFR
 
 Should have:
+- bloom, because it exists in the original codebase
 - haze
 - starburst
 - bundled starter lens library, including the `space55/blackhole-rt/flaresim/lenses` set
@@ -120,11 +158,13 @@ Writeback rule:
 
 ### GPU strategy
 Phase split:
-1. v1: internal CUDA compute + copy result into AE CPU output buffer
-2. v2: evaluate `PF_Cmd_GPU_SMART_RENDER_GPU` / host GPU-frame path only if copy cost is material
+1. v0/v1 dev basis: keep the original CPU renderer available as correctness reference and fallback path during bring-up
+2. v1 ship path: internal CUDA compute + copy result into AE CPU output buffer
+3. v2: evaluate `PF_Cmd_GPU_SMART_RENDER_GPU` / host GPU-frame path only if copy cost is material
 
 Why:
 - fastest route to a working Windows/CUDA product
+- preserves the original renderer as a validation oracle
 - lower host-interop risk
 - keeps CUDA code close to upstream
 - AE docs recommend CUDA Driver API for forward compatibility; adopt that at design time
@@ -133,6 +173,7 @@ Why:
 AE cannot emit Nuke-style auxiliary channel groups from a normal effect. Replace channel outputs with a `View` popup:
 - Composite
 - Flare Only
+- Bloom Only
 - Sources
 - Haze Only
 - Starburst Only
@@ -157,6 +198,7 @@ Mask behavior:
 - Downsample
 - Cluster Radius
 - Preview Mode + preview overrides
+- Bloom strength/radius/passes or equivalent original-bloom controls
 - Camera mode: direct FOV or sensor size + focal length
 - Aperture blades + rotation
 - Spectral samples
@@ -223,6 +265,7 @@ src/
     lens.{h,cpp}
     trace.{h,cpp}
     ghost.{h,cpp}
+    bloom.{h,cpp}
     starburst.{h,cpp}
     source_extract.{h,cpp}
     render_config.h
@@ -256,7 +299,7 @@ Per frame:
 6. Cluster sources.
 7. Filter active ghost pairs.
 8. Run CUDA ghost render.
-9. Run haze + starburst.
+9. Run bloom, then haze/starburst if enabled.
 10. Composite output according to selected view mode.
 
 ### Cache plan
@@ -264,6 +307,7 @@ Use AE Compute Cache for expensive, deterministic objects:
 - parsed lens system
 - filtered ghost pair list
 - pair spread/boost data
+- bloom kernels / intermediate plans if worth caching
 - starburst PSF per aperture shape
 
 Do not lean on mutable sequence data for heavy render-time state. Use sequence data only for small immutable-per-instance config, if needed.
@@ -298,9 +342,10 @@ Use:
 - copy final float RGB into AE output world
 - keep float values above 1.0 intact in the AE output buffer
 - add depth adapters for `PF_Pixel8`, `PF_Pixel16`, and `PF_PixelFloat`
+- keep a CPU baseline path from the original code during development and validation
 
 Why this is the best first build:
-- closest to upstream kernel design
+- closest to the original optics pipeline while still landing on the requested Windows/CUDA product
 - lowest AE GPU-interop risk
 - easiest to debug
 - still satisfies Windows + CUDA-first goal
@@ -339,6 +384,7 @@ Set targets relative to upstream Nuke behavior on same GPU.
 
 Acceptance goals:
 - AE overhead vs upstream render core: under 15% for same scene/settings
+- CUDA output should track the original CPU renderer closely on matched settings
 - preview preset: interactive at 1080p on current midrange RTX hardware
 - final preset: stable 4K renders without GPU memory churn/frame-to-frame leaks
 
@@ -355,6 +401,7 @@ The AE port should match upstream for:
 - ghost ordering / pair contribution
 - chromatic separation
 - aperture footprint
+- original bloom response where bloom is enabled
 - haze/starburst general look
 - HDR energy retention above 1.0
 
@@ -369,15 +416,17 @@ Allowed initial differences:
 - surface intersection tests
 - CPU trace tests
 - ghost pair enumeration/filter tests
+- bloom tests
 - starburst PSF symmetry/normalization tests
 - pixel unpack/pack tests for 8/16/32-bpc adapters
 
 ### Golden renders
-Build canonical scenes and compare AE output against upstream Nuke output:
+Build canonical scenes and compare AE output first against the original `blackhole-rt/flaresim` renderer, then against the Nuke plugin for derivative features:
 - single bright point, on-axis
 - single bright point, edge-of-frame
 - bright source well above 1.0
 - multiple highlights
+- original bloom-enabled scene
 - polygon aperture
 - high spectral sample count
 - haze + starburst enabled
@@ -387,6 +436,10 @@ Comparison metrics:
 - centroid of main ghosts
 - relative energy by pair
 - explicit check that >1.0 input/output values remain >1.0 in 32-bpc mode
+
+Validation hierarchy:
+- original `blackhole-rt/flaresim` = baseline for core ghost physics + bloom
+- `flaresim_nuke` = reference for CUDA-era additions like haze/starburst/preview UX
 
 ### In-host integration
 - automated `aerender` project renders on Windows
@@ -415,6 +468,7 @@ CUDA packaging:
 ## Milestones
 ### M0: feasibility spike
 - trivial AE SmartFX effect builds on Windows
+- original CPU flare render callable from extracted core
 - CUDA Driver API init works inside AE host
 - render one CUDA-generated frame into AE output
 - decide if CPU-output path is sufficient for v1
@@ -425,9 +479,11 @@ Exit criteria:
 - confirmed plugin install/debug loop
 
 ### M1: shared core extraction
-- move reusable optics/render code out of Nuke host assumptions
+- extract reusable optics/render code from `blackhole-rt/flaresim` first
+- keep the original CPU path building in a standalone test harness
+- layer in Nuke-derived additions only after the core baseline is stable
 - add standalone test harness
-- preserve upstream golden behavior
+- preserve original upstream golden behavior
 
 Exit criteria:
 - standalone tests green
@@ -505,12 +561,14 @@ Mitigation: use CUDA Driver API if possible; lock first release to validated AE/
 
 ## Recommendation
 Build this in two tracks:
-1. ship a Windows-only, CUDA-accelerated AE SmartFX effect with CPU output first
-2. pursue zero-copy GPU render path and full manual pair UI only after the render core is stable
+1. establish the original `blackhole-rt/flaresim` core inside a standalone/shared library and keep its CPU path as a correctness oracle
+2. ship a Windows-only, CUDA-accelerated AE SmartFX effect with CPU output using that core
+3. pursue zero-copy GPU render path and full manual pair UI only after the render core is stable
 
 That path gets the real product into AE fastest, preserves upstream optics, and keeps the risky AE-host-specific work isolated.
 
 ## References
+- Original source: [space55/blackhole-rt `flaresim/`](https://github.com/space55/blackhole-rt/tree/main/flaresim)
 - Upstream repo: [LocalStarlight/flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke)
 - Adobe AE SDK: [Building GPU Effects](https://ae-plugins.docsforadobe.dev/intro/gpu-build-instructions/)
 - Adobe AE SDK: [Command Selectors](https://ae-plugins.docsforadobe.dev/effect-basics/command-selectors/)

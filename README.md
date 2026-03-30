@@ -3,6 +3,7 @@
 After Effects port plan for FlareSim.
 
 Windows + CUDA first.
+Implementation basis: original `space55/blackhole-rt/flaresim`, with later `flaresim_nuke` features layered on selectively.
 
 Current status:
 - spec only
