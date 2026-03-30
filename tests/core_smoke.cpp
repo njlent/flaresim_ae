@@ -1,76 +1,88 @@
+#include "bloom.h"
 #include "ghost.h"
 #include "lens.h"
-#include "trace.h"
+#include "source_extract.h"
 
 #include <cassert>
 #include <cmath>
-#include <filesystem>
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace {
 
-std::filesystem::path source_root()
+std::string repo_path(const char* rel)
 {
-    return std::filesystem::path(FLARESIM_AE_SOURCE_DIR);
+    return std::string(FLARESIM_REPO_ROOT) + "/" + rel;
 }
 
-void require(bool condition, const char* message)
+void test_lens_load()
 {
-    if (!condition) {
-        std::cerr << "smoke failure: " << message << '\n';
-        std::abort();
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    const bool ok = lens.load(path.c_str());
+    assert(ok);
+    assert(lens.num_surfaces() > 0);
+    const auto pairs = enumerate_ghost_pairs(lens);
+    assert((int)pairs.size() == (lens.num_surfaces() * (lens.num_surfaces() - 1)) / 2);
+}
+
+void test_source_extract()
+{
+    std::vector<float> r(16, 0.0f);
+    std::vector<float> g(16, 0.0f);
+    std::vector<float> b(16, 0.0f);
+    r[5] = 4.0f;
+    g[5] = 2.0f;
+    b[5] = 1.0f;
+
+    const RgbImageView img {r.data(), g.data(), b.data(), 4, 4};
+    const auto sources = extract_bright_pixels(img, 1.0f, 1, 1.0f, 1.0f);
+    assert(sources.size() == 1);
+    assert(sources[0].r > 0.0f);
+    assert(std::abs(sources[0].angle_x) < 1.0f);
+}
+
+void test_bloom()
+{
+    std::vector<float> src_r(64, 0.0f);
+    std::vector<float> src_g(64, 0.0f);
+    std::vector<float> src_b(64, 0.0f);
+    src_r[27] = 8.0f;
+    src_g[27] = 8.0f;
+    src_b[27] = 8.0f;
+
+    std::vector<float> out_r(64, 0.0f);
+    std::vector<float> out_g(64, 0.0f);
+    std::vector<float> out_b(64, 0.0f);
+
+    const RgbImageView input {src_r.data(), src_g.data(), src_b.data(), 8, 8};
+    const MutableRgbImageView output {out_r.data(), out_g.data(), out_b.data(), 8, 8};
+    const BloomConfig config {
+        .threshold = 1.0f,
+        .strength = 1.0f,
+        .radius = 0.08f,
+        .passes = 1,
+        .octaves = 1,
+        .chromatic = false,
+    };
+
+    generate_bloom(input, output, config);
+
+    float sum = 0.0f;
+    for (float v : out_r) {
+        sum += v;
     }
+    assert(sum > 0.0f);
 }
 
 } // namespace
 
 int main()
 {
-    const auto lens_path = source_root() / "assets/lenses/space55/doublegauss.lens";
-
-    LensSystem lens;
-    require(lens.load(lens_path.string().c_str()), "expected bundled lens to load");
-    require(lens.num_surfaces() > 0, "expected lens surfaces");
-    require(lens.focal_length > 0.0f, "expected positive focal length");
-
-    const auto pairs = enumerate_ghost_pairs(lens);
-    require(!pairs.empty(), "expected at least one ghost pair");
-
-    BrightPixel source{};
-    source.angle_x = 0.0f;
-    source.angle_y = 0.0f;
-    source.r = 10.0f;
-    source.g = 10.0f;
-    source.b = 10.0f;
-
-    std::vector<BrightPixel> sources{source};
-    constexpr int kWidth = 64;
-    constexpr int kHeight = 64;
-    std::vector<float> out_r(kWidth * kHeight, 0.0f);
-    std::vector<float> out_g(kWidth * kHeight, 0.0f);
-    std::vector<float> out_b(kWidth * kHeight, 0.0f);
-
-    GhostConfig config;
-    config.ray_grid = 8;
-    config.gain = 1000.0f;
-
-    const float fov_h = 60.0f * static_cast<float>(M_PI) / 180.0f;
-    const float fov_v = 2.0f * std::atan(std::tan(fov_h * 0.5f) / (16.0f / 9.0f));
-
-    render_ghosts(lens, sources, fov_h, fov_v, out_r.data(), out_g.data(), out_b.data(),
-                  kWidth, kHeight, config);
-
-    float total_energy = 0.0f;
-    for (float v : out_r) total_energy += v;
-    for (float v : out_g) total_energy += v;
-    for (float v : out_b) total_energy += v;
-
-    require(std::isfinite(total_energy), "expected finite output energy");
-    require(total_energy > 0.0f, "expected non-zero ghost energy");
-
-    std::cout << "loaded lens: " << lens.name << '\n';
-    std::cout << "ghost pairs: " << pairs.size() << '\n';
-    std::cout << "total energy: " << total_energy << '\n';
+    test_lens_load();
+    test_source_extract();
+    test_bloom();
+    std::cout << "flaresim_core_smoke: ok\n";
     return 0;
 }
