@@ -2,6 +2,7 @@
 
 #include "builtin_lenses.h"
 
+#include <array>
 #include <string_view>
 
 namespace {
@@ -12,6 +13,13 @@ struct OutputViewDescriptor
     std::string_view label;
 };
 
+struct SensorPresetDescriptor
+{
+    const char* label;
+    float width_mm;
+    float height_mm;
+};
+
 constexpr OutputViewDescriptor kOutputViews[] = {
     {AeOutputView::Composite, "Composite"},
     {AeOutputView::FlareOnly, "Flare Only"},
@@ -19,6 +27,17 @@ constexpr OutputViewDescriptor kOutputViews[] = {
     {AeOutputView::Sources, "Sources"},
     {AeOutputView::Diagnostics, "Diagnostics"},
 };
+
+constexpr SensorPresetDescriptor kSensorPresets[] = {
+    {"Custom", 0.0f, 0.0f},
+    {"Full Frame", 36.0f, 24.0f},
+    {"Super 35", 24.89f, 18.66f},
+    {"APS-C Canon", 22.3f, 14.9f},
+    {"APS-C Nikon/Sony", 23.5f, 15.6f},
+    {"Micro Four Thirds", 17.3f, 13.0f},
+};
+
+constexpr int kSpectralSamples[] = {3, 5, 7, 9, 11};
 
 std::string build_popup_string_from_labels(const char* const* labels, std::size_t count)
 {
@@ -71,50 +90,41 @@ int lens_section_end_param()
            static_cast<int>(builtin_lens_manufacturer_count()) * LENS_PARAMS_PER_MANUFACTURER;
 }
 
-int flare_section_start_param()
-{
-    return lens_section_end_param() + 1;
-}
+int camera_section_start_param() { return lens_section_end_param() + 1; }
+int use_sensor_size_param() { return camera_section_start_param() + 1; }
+int sensor_preset_param() { return use_sensor_size_param() + 1; }
+int fov_h_param() { return sensor_preset_param() + 1; }
+int auto_fov_v_param() { return fov_h_param() + 1; }
+int fov_v_param() { return auto_fov_v_param() + 1; }
+int sensor_width_param() { return fov_v_param() + 1; }
+int sensor_height_param() { return sensor_width_param() + 1; }
+int focal_length_param() { return sensor_height_param() + 1; }
+int camera_section_end_param() { return focal_length_param() + 1; }
 
-int flare_gain_param()
-{
-    return flare_section_start_param() + 1;
-}
+int aperture_section_start_param() { return camera_section_end_param() + 1; }
+int aperture_blades_param() { return aperture_section_start_param() + 1; }
+int aperture_rotation_param() { return aperture_blades_param() + 1; }
+int aperture_section_end_param() { return aperture_rotation_param() + 1; }
 
-int threshold_param()
-{
-    return flare_gain_param() + 1;
-}
-
-int ray_grid_param()
-{
-    return threshold_param() + 1;
-}
-
-int downsample_param()
-{
-    return ray_grid_param() + 1;
-}
-
-int flare_section_end_param()
-{
-    return downsample_param() + 1;
-}
-
-int view_mode_param()
-{
-    return flare_section_end_param() + 1;
-}
-
-int mask_layer_param()
-{
-    return view_mode_param() + 1;
-}
-
-int parameter_count()
-{
-    return mask_layer_param() + 1;
-}
+int flare_section_start_param() { return aperture_section_end_param() + 1; }
+int flare_gain_param() { return flare_section_start_param() + 1; }
+int threshold_param() { return flare_gain_param() + 1; }
+int ray_grid_param() { return threshold_param() + 1; }
+int downsample_param() { return ray_grid_param() + 1; }
+int flare_section_end_param() { return downsample_param() + 1; }
+int post_section_start_param() { return flare_section_end_param() + 1; }
+int ghost_blur_param() { return post_section_start_param() + 1; }
+int ghost_blur_passes_param() { return ghost_blur_param() + 1; }
+int haze_gain_param() { return ghost_blur_passes_param() + 1; }
+int haze_radius_param() { return haze_gain_param() + 1; }
+int haze_blur_passes_param() { return haze_radius_param() + 1; }
+int starburst_gain_param() { return haze_blur_passes_param() + 1; }
+int starburst_scale_param() { return starburst_gain_param() + 1; }
+int spectral_samples_param() { return starburst_scale_param() + 1; }
+int post_section_end_param() { return spectral_samples_param() + 1; }
+int view_mode_param() { return post_section_end_param() + 1; }
+int mask_layer_param() { return view_mode_param() + 1; }
+int parameter_count() { return mask_layer_param() + 1; }
 
 int lens_group_start_param_id(int manufacturer_index)
 {
@@ -197,6 +207,23 @@ std::string build_lens_popup_string_for_manufacturer(int manufacturer_index)
         popup += lenses[i].label;
     }
     return popup;
+}
+
+std::string build_sensor_preset_popup_string()
+{
+    const char* labels[std::size(kSensorPresets)] {};
+    for (std::size_t i = 0; i < std::size(kSensorPresets); ++i) {
+        labels[i] = kSensorPresets[i].label;
+    }
+    return build_popup_string_from_labels(labels, std::size(kSensorPresets));
+}
+
+std::string build_spectral_samples_popup_string()
+{
+    std::array<const char*, std::size(kSpectralSamples)> labels = {
+        "3", "5", "7", "9", "11",
+    };
+    return build_popup_string_from_labels(labels.data(), labels.size());
 }
 
 std::string build_output_view_popup_string()
@@ -291,6 +318,47 @@ bool lens_selection_from_popup(int manufacturer_popup_index, int lens_popup_inde
     return true;
 }
 
+int sensor_preset_popup_count()
+{
+    return static_cast<int>(std::size(kSensorPresets));
+}
+
+bool sensor_preset_dimensions_from_popup(int popup_index, float& out_width_mm, float& out_height_mm)
+{
+    if (popup_index < 1 || popup_index > static_cast<int>(std::size(kSensorPresets))) {
+        return false;
+    }
+
+    out_width_mm = kSensorPresets[popup_index - 1].width_mm;
+    out_height_mm = kSensorPresets[popup_index - 1].height_mm;
+    return true;
+}
+
+int spectral_samples_popup_count()
+{
+    return static_cast<int>(std::size(kSpectralSamples));
+}
+
+int spectral_samples_popup_index(int spectral_samples)
+{
+    for (std::size_t i = 0; i < std::size(kSpectralSamples); ++i) {
+        if (kSpectralSamples[i] == spectral_samples) {
+            return static_cast<int>(i) + 1;
+        }
+    }
+    return 1;
+}
+
+bool spectral_samples_from_popup(int popup_index, int& out_spectral_samples)
+{
+    if (popup_index < 1 || popup_index > static_cast<int>(std::size(kSpectralSamples))) {
+        return false;
+    }
+
+    out_spectral_samples = kSpectralSamples[popup_index - 1];
+    return true;
+}
+
 int output_view_popup_index(AeOutputView view)
 {
     for (std::size_t i = 0; i < std::size(kOutputViews); ++i) {
@@ -318,7 +386,14 @@ bool output_view_from_popup(int popup_index, AeOutputView& out_view)
 
 bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterState& out_state)
 {
-    if (ui_state.ray_grid < 1 || ui_state.downsample < 1) {
+    if (ui_state.ray_grid < 1 ||
+        ui_state.downsample < 1 ||
+        ui_state.ghost_blur_passes < 0 ||
+        ui_state.haze_blur_passes < 0 ||
+        ui_state.aperture_blades < 0 ||
+        ui_state.sensor_width_mm < 0.0f ||
+        ui_state.sensor_height_mm < 0.0f ||
+        ui_state.focal_length_mm <= 0.0f) {
         return false;
     }
 
@@ -348,10 +423,42 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         return false;
     }
 
+    int spectral_samples = 3;
+    if (!spectral_samples_from_popup(ui_state.spectral_samples_index, spectral_samples)) {
+        return false;
+    }
+
     out_state.view = view;
+    out_state.use_sensor_size = ui_state.use_sensor_size;
+    out_state.sensor_preset_index = ui_state.sensor_preset_index;
+    out_state.fov_h_deg = ui_state.fov_h_deg;
+    out_state.fov_v_deg = ui_state.fov_v_deg;
+    out_state.auto_fov_v = ui_state.auto_fov_v;
+    out_state.sensor_width_mm = ui_state.sensor_width_mm;
+    out_state.sensor_height_mm = ui_state.sensor_height_mm;
+    out_state.focal_length_mm = ui_state.focal_length_mm;
+    out_state.aperture_blades = ui_state.aperture_blades;
+    out_state.aperture_rotation_deg = ui_state.aperture_rotation_deg;
     out_state.flare_gain = ui_state.flare_gain;
     out_state.threshold = ui_state.threshold;
     out_state.ray_grid = ui_state.ray_grid;
     out_state.downsample = ui_state.downsample;
+    out_state.ghost_blur = ui_state.ghost_blur;
+    out_state.ghost_blur_passes = ui_state.ghost_blur_passes;
+    out_state.haze_gain = ui_state.haze_gain;
+    out_state.haze_radius = ui_state.haze_radius;
+    out_state.haze_blur_passes = ui_state.haze_blur_passes;
+    out_state.starburst_gain = ui_state.starburst_gain;
+    out_state.starburst_scale = ui_state.starburst_scale;
+    out_state.spectral_samples = spectral_samples;
+
+    float preset_width = 0.0f;
+    float preset_height = 0.0f;
+    if (sensor_preset_dimensions_from_popup(ui_state.sensor_preset_index, preset_width, preset_height) &&
+        ui_state.sensor_preset_index > 1) {
+        out_state.sensor_width_mm = preset_width;
+        out_state.sensor_height_mm = preset_height;
+    }
+
     return true;
 }

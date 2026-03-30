@@ -90,7 +90,9 @@ add_library(flaresim_core STATIC
     src/core/bloom.cpp
     src/core/ghost.cpp
     src/core/lens.cpp
+    src/core/post_process.cpp
     src/core/source_extract.cpp
+    src/core/starburst.cpp
     src/core/trace.cpp
 )
 

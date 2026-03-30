@@ -38,10 +38,28 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     }
 
     out_state.lens_model_index = params[lens_popup_param(manufacturer_index)]->u.pd.value;
+    out_state.use_sensor_size = params[use_sensor_size_param()]->u.bd.value != 0;
+    out_state.sensor_preset_index = params[sensor_preset_param()]->u.pd.value;
+    out_state.fov_h_deg = params[fov_h_param()]->u.fs_d.value;
+    out_state.auto_fov_v = params[auto_fov_v_param()]->u.bd.value != 0;
+    out_state.fov_v_deg = params[fov_v_param()]->u.fs_d.value;
+    out_state.sensor_width_mm = params[sensor_width_param()]->u.fs_d.value;
+    out_state.sensor_height_mm = params[sensor_height_param()]->u.fs_d.value;
+    out_state.focal_length_mm = params[focal_length_param()]->u.fs_d.value;
+    out_state.aperture_blades = params[aperture_blades_param()]->u.sd.value;
+    out_state.aperture_rotation_deg = params[aperture_rotation_param()]->u.fs_d.value;
     out_state.flare_gain = params[flare_gain_param()]->u.fs_d.value;
     out_state.threshold = params[threshold_param()]->u.fs_d.value;
     out_state.ray_grid = params[ray_grid_param()]->u.sd.value;
     out_state.downsample = params[downsample_param()]->u.sd.value;
+    out_state.ghost_blur = params[ghost_blur_param()]->u.fs_d.value;
+    out_state.ghost_blur_passes = params[ghost_blur_passes_param()]->u.sd.value;
+    out_state.haze_gain = params[haze_gain_param()]->u.fs_d.value;
+    out_state.haze_radius = params[haze_radius_param()]->u.fs_d.value;
+    out_state.haze_blur_passes = params[haze_blur_passes_param()]->u.sd.value;
+    out_state.starburst_gain = params[starburst_gain_param()]->u.fs_d.value;
+    out_state.starburst_scale = params[starburst_scale_param()]->u.fs_d.value;
+    out_state.spectral_samples_index = params[spectral_samples_param()]->u.pd.value;
     out_state.view_mode_index = params[view_mode_param()]->u.pd.value;
     return true;
 }
@@ -222,27 +240,81 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef legacy_lens_param;
     PF_ParamDef manufacturer_param;
     PF_ParamDef lens_model_param;
+    PF_ParamDef use_sensor_param_def;
+    PF_ParamDef sensor_preset_param_def;
+    PF_ParamDef fov_h_param_def;
+    PF_ParamDef auto_fov_v_param_def;
+    PF_ParamDef fov_v_param_def;
+    PF_ParamDef sensor_width_param_def;
+    PF_ParamDef sensor_height_param_def;
+    PF_ParamDef focal_length_param_def;
+    PF_ParamDef aperture_blades_param_def;
+    PF_ParamDef aperture_rotation_param_def;
     PF_ParamDef flare_gain_param_def;
     PF_ParamDef threshold_param_def;
     PF_ParamDef ray_grid_param_def;
     PF_ParamDef downsample_param_def;
+    PF_ParamDef ghost_blur_param_def;
+    PF_ParamDef ghost_blur_passes_param_def;
+    PF_ParamDef haze_gain_param_def;
+    PF_ParamDef haze_radius_param_def;
+    PF_ParamDef haze_blur_passes_param_def;
+    PF_ParamDef starburst_gain_param_def;
+    PF_ParamDef starburst_scale_param_def;
+    PF_ParamDef spectral_samples_param_def;
     PF_ParamDef view_param_def;
     AEFX_CLR_STRUCT(legacy_lens_param);
     AEFX_CLR_STRUCT(manufacturer_param);
     AEFX_CLR_STRUCT(lens_model_param);
+    AEFX_CLR_STRUCT(use_sensor_param_def);
+    AEFX_CLR_STRUCT(sensor_preset_param_def);
+    AEFX_CLR_STRUCT(fov_h_param_def);
+    AEFX_CLR_STRUCT(auto_fov_v_param_def);
+    AEFX_CLR_STRUCT(fov_v_param_def);
+    AEFX_CLR_STRUCT(sensor_width_param_def);
+    AEFX_CLR_STRUCT(sensor_height_param_def);
+    AEFX_CLR_STRUCT(focal_length_param_def);
+    AEFX_CLR_STRUCT(aperture_blades_param_def);
+    AEFX_CLR_STRUCT(aperture_rotation_param_def);
     AEFX_CLR_STRUCT(flare_gain_param_def);
     AEFX_CLR_STRUCT(threshold_param_def);
     AEFX_CLR_STRUCT(ray_grid_param_def);
     AEFX_CLR_STRUCT(downsample_param_def);
+    AEFX_CLR_STRUCT(ghost_blur_param_def);
+    AEFX_CLR_STRUCT(ghost_blur_passes_param_def);
+    AEFX_CLR_STRUCT(haze_gain_param_def);
+    AEFX_CLR_STRUCT(haze_radius_param_def);
+    AEFX_CLR_STRUCT(haze_blur_passes_param_def);
+    AEFX_CLR_STRUCT(starburst_gain_param_def);
+    AEFX_CLR_STRUCT(starburst_scale_param_def);
+    AEFX_CLR_STRUCT(spectral_samples_param_def);
     AEFX_CLR_STRUCT(view_param_def);
 
     bool legacy_lens_checked_out = false;
     bool manufacturer_checked_out = false;
     bool lens_model_checked_out = false;
+    bool use_sensor_checked_out = false;
+    bool sensor_preset_checked_out = false;
+    bool fov_h_checked_out = false;
+    bool auto_fov_v_checked_out = false;
+    bool fov_v_checked_out = false;
+    bool sensor_width_checked_out = false;
+    bool sensor_height_checked_out = false;
+    bool focal_length_checked_out = false;
+    bool aperture_blades_checked_out = false;
+    bool aperture_rotation_checked_out = false;
     bool flare_gain_checked_out = false;
     bool threshold_checked_out = false;
     bool ray_grid_checked_out = false;
     bool downsample_checked_out = false;
+    bool ghost_blur_checked_out = false;
+    bool ghost_blur_passes_checked_out = false;
+    bool haze_gain_checked_out = false;
+    bool haze_radius_checked_out = false;
+    bool haze_blur_passes_checked_out = false;
+    bool starburst_gain_checked_out = false;
+    bool starburst_scale_checked_out = false;
+    bool spectral_samples_checked_out = false;
     bool view_checked_out = false;
 
     ERR(PF_CHECKOUT_PARAM(in_data,
@@ -272,6 +344,88 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
                               &lens_model_param));
         lens_model_checked_out = (err == PF_Err_NONE);
     }
+
+    if (!err) {
+        ERR(PF_CHECKOUT_PARAM(in_data,
+                              use_sensor_size_param(),
+                              in_data->current_time,
+                              in_data->time_step,
+                              in_data->time_scale,
+                              &use_sensor_param_def));
+        use_sensor_checked_out = (err == PF_Err_NONE);
+    }
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          sensor_preset_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &sensor_preset_param_def));
+    sensor_preset_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          fov_h_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &fov_h_param_def));
+    fov_h_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          auto_fov_v_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &auto_fov_v_param_def));
+    auto_fov_v_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          fov_v_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &fov_v_param_def));
+    fov_v_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          sensor_width_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &sensor_width_param_def));
+    sensor_width_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          sensor_height_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &sensor_height_param_def));
+    sensor_height_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          focal_length_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &focal_length_param_def));
+    focal_length_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          aperture_blades_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &aperture_blades_param_def));
+    aperture_blades_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          aperture_rotation_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &aperture_rotation_param_def));
+    aperture_rotation_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
                           flare_gain_param(),
@@ -306,6 +460,70 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     downsample_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          ghost_blur_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &ghost_blur_param_def));
+    ghost_blur_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          ghost_blur_passes_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &ghost_blur_passes_param_def));
+    ghost_blur_passes_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          haze_gain_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &haze_gain_param_def));
+    haze_gain_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          haze_radius_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &haze_radius_param_def));
+    haze_radius_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          haze_blur_passes_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &haze_blur_passes_param_def));
+    haze_blur_passes_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          starburst_gain_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &starburst_gain_param_def));
+    starburst_gain_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          starburst_scale_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &starburst_scale_param_def));
+    starburst_scale_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          spectral_samples_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &spectral_samples_param_def));
+    spectral_samples_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           view_mode_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -318,10 +536,28 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.legacy_lens_preset_index = legacy_lens_param.u.pd.value;
         ui_state.lens_manufacturer_index = manufacturer_param.u.pd.value;
         ui_state.lens_model_index = lens_model_param.u.pd.value;
+        ui_state.use_sensor_size = use_sensor_param_def.u.bd.value != 0;
+        ui_state.sensor_preset_index = sensor_preset_param_def.u.pd.value;
+        ui_state.fov_h_deg = fov_h_param_def.u.fs_d.value;
+        ui_state.auto_fov_v = auto_fov_v_param_def.u.bd.value != 0;
+        ui_state.fov_v_deg = fov_v_param_def.u.fs_d.value;
+        ui_state.sensor_width_mm = sensor_width_param_def.u.fs_d.value;
+        ui_state.sensor_height_mm = sensor_height_param_def.u.fs_d.value;
+        ui_state.focal_length_mm = focal_length_param_def.u.fs_d.value;
+        ui_state.aperture_blades = aperture_blades_param_def.u.sd.value;
+        ui_state.aperture_rotation_deg = aperture_rotation_param_def.u.fs_d.value;
         ui_state.flare_gain = flare_gain_param_def.u.fs_d.value;
         ui_state.threshold = threshold_param_def.u.fs_d.value;
         ui_state.ray_grid = ray_grid_param_def.u.sd.value;
         ui_state.downsample = downsample_param_def.u.sd.value;
+        ui_state.ghost_blur = ghost_blur_param_def.u.fs_d.value;
+        ui_state.ghost_blur_passes = ghost_blur_passes_param_def.u.sd.value;
+        ui_state.haze_gain = haze_gain_param_def.u.fs_d.value;
+        ui_state.haze_radius = haze_radius_param_def.u.fs_d.value;
+        ui_state.haze_blur_passes = haze_blur_passes_param_def.u.sd.value;
+        ui_state.starburst_gain = starburst_gain_param_def.u.fs_d.value;
+        ui_state.starburst_scale = starburst_scale_param_def.u.fs_d.value;
+        ui_state.spectral_samples_index = spectral_samples_param_def.u.pd.value;
         ui_state.view_mode_index = view_param_def.u.pd.value;
 
         if (!apply_ui_parameter_state(ui_state, out_state)) {
@@ -331,6 +567,30 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
 
     if (view_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &view_param_def));
+    }
+    if (spectral_samples_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &spectral_samples_param_def));
+    }
+    if (starburst_scale_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &starburst_scale_param_def));
+    }
+    if (starburst_gain_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &starburst_gain_param_def));
+    }
+    if (haze_blur_passes_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &haze_blur_passes_param_def));
+    }
+    if (haze_radius_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &haze_radius_param_def));
+    }
+    if (haze_gain_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &haze_gain_param_def));
+    }
+    if (ghost_blur_passes_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &ghost_blur_passes_param_def));
+    }
+    if (ghost_blur_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &ghost_blur_param_def));
     }
     if (downsample_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &downsample_param_def));
@@ -343,6 +603,36 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (flare_gain_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &flare_gain_param_def));
+    }
+    if (aperture_rotation_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &aperture_rotation_param_def));
+    }
+    if (aperture_blades_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &aperture_blades_param_def));
+    }
+    if (focal_length_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &focal_length_param_def));
+    }
+    if (sensor_height_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &sensor_height_param_def));
+    }
+    if (sensor_width_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &sensor_width_param_def));
+    }
+    if (fov_v_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &fov_v_param_def));
+    }
+    if (auto_fov_v_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &auto_fov_v_param_def));
+    }
+    if (fov_h_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &fov_h_param_def));
+    }
+    if (sensor_preset_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &sensor_preset_param_def));
+    }
+    if (use_sensor_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &use_sensor_param_def));
     }
     if (lens_model_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &lens_model_param));

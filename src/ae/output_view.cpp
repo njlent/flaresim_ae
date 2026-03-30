@@ -43,9 +43,11 @@ void draw_sources(const FrameRenderSettings& settings,
                   MutableRgbImageView output,
                   bool diagnostics_mode)
 {
-    const float fov_h = settings.fov_h_deg * 3.14159265358979323846f / 180.0f;
-    const float aspect = (float)output.width / (float)output.height;
-    const float fov_v = 2.0f * std::atan(std::tan(fov_h * 0.5f) / aspect);
+    float fov_h = 0.0f;
+    float fov_v = 0.0f;
+    if (!compute_camera_fov(settings, output.width, output.height, fov_h, fov_v)) {
+        return;
+    }
     const float tan_half_h = std::tan(fov_h * 0.5f);
     const float tan_half_v = std::tan(fov_v * 0.5f);
     const int block = std::max(1, settings.downsample);
@@ -100,11 +102,15 @@ bool compose_output_view(
             copy_input(input, output);
             add_buffers(outputs.flare_r, outputs.flare_g, outputs.flare_b, output);
             add_buffers(outputs.bloom_r, outputs.bloom_g, outputs.bloom_b, output);
+            add_buffers(outputs.haze_r, outputs.haze_g, outputs.haze_b, output);
+            add_buffers(outputs.starburst_r, outputs.starburst_g, outputs.starburst_b, output);
             return true;
 
         case AeOutputView::FlareOnly:
             clear_output(output);
             add_buffers(outputs.flare_r, outputs.flare_g, outputs.flare_b, output);
+            add_buffers(outputs.haze_r, outputs.haze_g, outputs.haze_b, output);
+            add_buffers(outputs.starburst_r, outputs.starburst_g, outputs.starburst_b, output);
             return true;
 
         case AeOutputView::BloomOnly:

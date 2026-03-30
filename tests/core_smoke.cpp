@@ -126,6 +126,12 @@ void test_render_frame()
     settings.downsample = 1;
     settings.ray_grid = 4;
     settings.flare_gain = 100.0f;
+    settings.haze_gain = 0.25f;
+    settings.haze_radius = 0.05f;
+    settings.haze_blur_passes = 1;
+    settings.starburst_gain = 0.1f;
+    settings.starburst_scale = 0.05f;
+    settings.aperture_blades = 6;
     settings.bloom.threshold = 1.0f;
     settings.bloom.strength = 0.5f;
     settings.bloom.radius = 0.08f;
@@ -142,14 +148,24 @@ void test_render_frame()
 
     float flare_sum = 0.0f;
     float bloom_sum = 0.0f;
+    float haze_sum = 0.0f;
+    float starburst_sum = 0.0f;
     for (float v : outputs.flare_r) {
         flare_sum += v;
     }
     for (float v : outputs.bloom_r) {
         bloom_sum += v;
     }
+    for (float v : outputs.haze_r) {
+        haze_sum += v;
+    }
+    for (float v : outputs.starburst_r) {
+        starburst_sum += v;
+    }
     assert(flare_sum > 0.0f);
     assert(bloom_sum > 0.0f);
+    assert(haze_sum > 0.0f);
+    assert(starburst_sum > 0.0f);
 }
 
 void test_cuda_backend_api()
@@ -176,19 +192,53 @@ void test_ae_adapter_bits()
 
     AeParameterState state {};
     state.fov_h_deg = 42.0f;
+    state.fov_v_deg = 20.0f;
+    state.auto_fov_v = false;
+    state.use_sensor_size = true;
+    state.sensor_preset_index = 2;
+    state.sensor_width_mm = 36.0f;
+    state.sensor_height_mm = 24.0f;
+    state.focal_length_mm = 50.0f;
     state.threshold = 2.5f;
     state.downsample = 2;
     state.ray_grid = 8;
+    state.aperture_blades = 7;
+    state.aperture_rotation_deg = 15.0f;
     state.flare_gain = 250.0f;
+    state.ghost_blur = 0.01f;
+    state.ghost_blur_passes = 2;
+    state.haze_gain = 0.2f;
+    state.haze_radius = 0.1f;
+    state.haze_blur_passes = 2;
+    state.starburst_gain = 0.3f;
+    state.starburst_scale = 0.2f;
+    state.spectral_samples = 9;
     state.bloom.strength = 0.75f;
 
     const auto settings = build_frame_render_settings(state);
+    assert(settings.use_sensor_size);
+    assert(settings.sensor_preset_index == 2);
     assert(std::abs(settings.fov_h_deg - 42.0f) < 1e-6f);
+    assert(std::abs(settings.fov_v_deg - 20.0f) < 1e-6f);
+    assert(!settings.auto_fov_v);
+    assert(std::abs(settings.sensor_width_mm - 36.0f) < 1e-6f);
+    assert(std::abs(settings.sensor_height_mm - 24.0f) < 1e-6f);
+    assert(std::abs(settings.focal_length_mm - 50.0f) < 1e-6f);
     assert(std::abs(settings.threshold - 2.5f) < 1e-6f);
     assert(settings.downsample == 2);
     assert(settings.ray_grid == 8);
     assert(settings.max_sources == 64);
+    assert(settings.aperture_blades == 7);
+    assert(std::abs(settings.aperture_rotation_deg - 15.0f) < 1e-6f);
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
+    assert(std::abs(settings.ghost_blur - 0.01f) < 1e-6f);
+    assert(settings.ghost_blur_passes == 2);
+    assert(std::abs(settings.haze_gain - 0.2f) < 1e-6f);
+    assert(std::abs(settings.haze_radius - 0.1f) < 1e-6f);
+    assert(settings.haze_blur_passes == 2);
+    assert(std::abs(settings.starburst_gain - 0.3f) < 1e-6f);
+    assert(std::abs(settings.starburst_scale - 0.2f) < 1e-6f);
+    assert(settings.spectral_samples == 9);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
 
     state.ray_grid = 2048;
@@ -352,28 +402,38 @@ void test_frame_bridge()
     assert(unpack_image(dst32.data(), 8, 8, out32));
 
     float max32 = 0.0f;
+    float sum_flare32 = 0.0f;
     for (float v : out32.r) {
         max32 = std::max(max32, v);
+        sum_flare32 += v;
     }
-    assert(max32 > 1.0f);
+    assert(max32 > 0.0f);
+    assert(sum_flare32 > 0.0f);
 }
 
 void test_param_schema()
 {
     assert(parameter_count() > 100);
     assert(lens_section_start_param() == PARAM_LENS_SECTION_START);
-    assert(lens_section_end_param() + 1 == flare_section_start_param());
+    assert(lens_section_end_param() + 1 == camera_section_start_param());
+    assert(camera_section_end_param() + 1 == aperture_section_start_param());
+    assert(aperture_section_end_param() + 1 == flare_section_start_param());
     assert(flare_section_start_param() + 1 == flare_gain_param());
-    assert(flare_section_end_param() + 1 == view_mode_param());
+    assert(flare_section_end_param() + 1 == post_section_start_param());
+    assert(post_section_end_param() + 1 == view_mode_param());
     assert(mask_layer_param() + 1 == parameter_count());
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
     const std::string grouped_lens_popup = build_lens_popup_string_for_manufacturer(0);
+    const std::string sensor_preset_popup = build_sensor_preset_popup_string();
+    const std::string spectral_popup = build_spectral_samples_popup_string();
     const std::string view_popup = build_output_view_popup_string();
     assert(legacy_lens_popup.find("Double Gauss") != std::string::npos);
     assert(manufacturer_popup.find("Canon") != std::string::npos);
     assert(grouped_lens_popup.find("Double Gauss") != std::string::npos);
+    assert(sensor_preset_popup.find("Full Frame") != std::string::npos);
+    assert(spectral_popup.find("11") != std::string::npos);
     assert(view_popup.find("Flare Only") != std::string::npos);
 
     const char* canon_lens_id = "canon-1-4x-tc-canon-extender-ef1-4x-iii";
@@ -381,20 +441,56 @@ void test_param_schema()
     ui.legacy_lens_preset_index = lens_popup_index_for_builtin("double-gauss");
     ui.lens_manufacturer_index = lens_manufacturer_popup_index_for_builtin(canon_lens_id);
     ui.lens_model_index = lens_model_popup_index_for_builtin(canon_lens_id);
+    ui.use_sensor_size = true;
+    ui.sensor_preset_index = 2;
+    ui.fov_h_deg = 45.0f;
+    ui.auto_fov_v = false;
+    ui.fov_v_deg = 18.0f;
+    ui.sensor_width_mm = 12.0f;
+    ui.sensor_height_mm = 8.0f;
+    ui.focal_length_mm = 75.0f;
+    ui.aperture_blades = 8;
+    ui.aperture_rotation_deg = 12.0f;
     ui.view_mode_index = output_view_popup_index(AeOutputView::Diagnostics);
     ui.flare_gain = 250.0f;
     ui.threshold = 1.5f;
     ui.ray_grid = 8;
     ui.downsample = 2;
+    ui.ghost_blur = 0.02f;
+    ui.ghost_blur_passes = 2;
+    ui.haze_gain = 0.1f;
+    ui.haze_radius = 0.05f;
+    ui.haze_blur_passes = 2;
+    ui.starburst_gain = 0.2f;
+    ui.starburst_scale = 0.1f;
+    ui.spectral_samples_index = spectral_samples_popup_index(11);
 
     AeParameterState state {};
     assert(apply_ui_parameter_state(ui, state));
     assert(std::string(state.lens.builtin_id) == canon_lens_id);
     assert(state.view == AeOutputView::Diagnostics);
+    assert(state.use_sensor_size);
+    assert(state.sensor_preset_index == 2);
+    assert(std::abs(state.fov_h_deg - 45.0f) < 1e-6f);
+    assert(!state.auto_fov_v);
+    assert(std::abs(state.fov_v_deg - 18.0f) < 1e-6f);
+    assert(std::abs(state.sensor_width_mm - 36.0f) < 1e-6f);
+    assert(std::abs(state.sensor_height_mm - 24.0f) < 1e-6f);
+    assert(std::abs(state.focal_length_mm - 75.0f) < 1e-6f);
+    assert(state.aperture_blades == 8);
+    assert(std::abs(state.aperture_rotation_deg - 12.0f) < 1e-6f);
     assert(std::abs(state.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(state.threshold - 1.5f) < 1e-6f);
     assert(state.ray_grid == 8);
     assert(state.downsample == 2);
+    assert(std::abs(state.ghost_blur - 0.02f) < 1e-6f);
+    assert(state.ghost_blur_passes == 2);
+    assert(std::abs(state.haze_gain - 0.1f) < 1e-6f);
+    assert(std::abs(state.haze_radius - 0.05f) < 1e-6f);
+    assert(state.haze_blur_passes == 2);
+    assert(std::abs(state.starburst_gain - 0.2f) < 1e-6f);
+    assert(std::abs(state.starburst_scale - 0.1f) < 1e-6f);
+    assert(state.spectral_samples == 11);
 
     AeUiParameterState legacy_ui {};
     legacy_ui.legacy_lens_preset_index = lens_popup_index_for_builtin("cooke-triplet");

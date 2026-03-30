@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -418,6 +419,14 @@ struct GPUSample
     float v;
 };
 
+struct GPUSpectralSampleDev
+{
+    float lambda;
+    float rw;
+    float gw;
+    float bw;
+};
+
 constexpr int kBlockSize = 256;
 
 __global__ void ghost_kernel(const Surface* surfaces,
@@ -439,7 +448,8 @@ __global__ void ghost_kernel(const Surface* surfaces,
                              float* out_b,
                              float gain,
                              float ray_weight,
-                             const float* wavelengths)
+                             const GPUSpectralSampleDev* spectral_samples,
+                             int num_spectral_samples)
 {
     const int pair_source_index = static_cast<int>(blockIdx.x);
     const int pair_index = pair_source_index / num_sources;
@@ -464,7 +474,8 @@ __global__ void ghost_kernel(const Surface* surfaces,
     ray.origin = dv(grid_sample.u * front_radius, grid_sample.v * front_radius, start_z);
     ray.dir = beam_dir;
 
-    for (int channel = 0; channel < 3; ++channel) {
+    for (int sample_index = 0; sample_index < num_spectral_samples; ++sample_index) {
+        const GPUSpectralSampleDev& sample = spectral_samples[sample_index];
         const DTraceResult result = d_trace_ghost_ray(
             ray,
             surfaces,
@@ -472,14 +483,13 @@ __global__ void ghost_kernel(const Surface* surfaces,
             sensor_z,
             pair.surf_a,
             pair.surf_b,
-            wavelengths[channel]);
+            sample.lambda);
 
         if (!result.valid || !isfinite(result.position.x) || !isfinite(result.position.y)) {
             continue;
         }
 
-        const float source_intensity = (channel == 0) ? source.r : (channel == 1) ? source.g : source.b;
-        const float contribution = source_intensity * result.weight * ray_weight * gain * pair.area_boost;
+        const float contribution = result.weight * ray_weight * gain * pair.area_boost;
         if (contribution < 1e-12f) {
             continue;
         }
@@ -499,19 +509,29 @@ __global__ void ghost_kernel(const Surface* surfaces,
         const float w01 = (1.0f - fx) * fy;
         const float w11 = fx * fy;
 
-        float* channel_out = (channel == 0) ? out_r : (channel == 1) ? out_g : out_b;
+        const float cr = source.r * sample.rw * contribution;
+        const float cg = source.g * sample.gw * contribution;
+        const float cb = source.b * sample.bw * contribution;
 
         if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height) {
-            atomicAdd(&channel_out[y0 * width + x0], contribution * w00);
+            if (cr > 1e-14f) atomicAdd(&out_r[y0 * width + x0], cr * w00);
+            if (cg > 1e-14f) atomicAdd(&out_g[y0 * width + x0], cg * w00);
+            if (cb > 1e-14f) atomicAdd(&out_b[y0 * width + x0], cb * w00);
         }
         if (x0 + 1 >= 0 && x0 + 1 < width && y0 >= 0 && y0 < height) {
-            atomicAdd(&channel_out[y0 * width + (x0 + 1)], contribution * w10);
+            if (cr > 1e-14f) atomicAdd(&out_r[y0 * width + (x0 + 1)], cr * w10);
+            if (cg > 1e-14f) atomicAdd(&out_g[y0 * width + (x0 + 1)], cg * w10);
+            if (cb > 1e-14f) atomicAdd(&out_b[y0 * width + (x0 + 1)], cb * w10);
         }
         if (x0 >= 0 && x0 < width && y0 + 1 >= 0 && y0 + 1 < height) {
-            atomicAdd(&channel_out[(y0 + 1) * width + x0], contribution * w01);
+            if (cr > 1e-14f) atomicAdd(&out_r[(y0 + 1) * width + x0], cr * w01);
+            if (cg > 1e-14f) atomicAdd(&out_g[(y0 + 1) * width + x0], cg * w01);
+            if (cb > 1e-14f) atomicAdd(&out_b[(y0 + 1) * width + x0], cb * w01);
         }
         if (x0 + 1 >= 0 && x0 + 1 < width && y0 + 1 >= 0 && y0 + 1 < height) {
-            atomicAdd(&channel_out[(y0 + 1) * width + (x0 + 1)], contribution * w11);
+            if (cr > 1e-14f) atomicAdd(&out_r[(y0 + 1) * width + (x0 + 1)], cr * w11);
+            if (cg > 1e-14f) atomicAdd(&out_g[(y0 + 1) * width + (x0 + 1)], cg * w11);
+            if (cb > 1e-14f) atomicAdd(&out_b[(y0 + 1) * width + (x0 + 1)], cb * w11);
         }
     }
 }
@@ -618,13 +638,29 @@ bool launch_ghost_cuda(const LensSystem& lens,
 
     std::vector<GPUSample> grid_samples;
     grid_samples.reserve(static_cast<std::size_t>(config.ray_grid) * static_cast<std::size_t>(config.ray_grid));
+    const bool polygonal = config.aperture_blades >= 3;
+    const float rotation = config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f;
+    const float apothem = polygonal ? std::cos(3.14159265358979323846f / config.aperture_blades) : 1.0f;
+    const float sector_angle = polygonal ? (2.0f * 3.14159265358979323846f / config.aperture_blades) : 1.0f;
     for (int gy = 0; gy < config.ray_grid; ++gy) {
         for (int gx = 0; gx < config.ray_grid; ++gx) {
             const float u = ((gx + 0.5f) / config.ray_grid) * 2.0f - 1.0f;
             const float v = ((gy + 0.5f) / config.ray_grid) * 2.0f - 1.0f;
-            if (u * u + v * v <= 1.0f) {
-                grid_samples.push_back({u, v});
+            const float r2 = u * u + v * v;
+            if (r2 > 1.0f) {
+                continue;
             }
+            if (polygonal) {
+                float angle = std::atan2(v, u) - rotation;
+                float sector = std::fmod(angle, sector_angle);
+                if (sector < 0.0f) {
+                    sector += sector_angle;
+                }
+                if (std::sqrt(r2) * std::cos(sector - sector_angle * 0.5f) > apothem) {
+                    continue;
+                }
+            }
+            grid_samples.push_back({u, v});
         }
     }
 
@@ -633,11 +669,51 @@ bool launch_ghost_cuda(const LensSystem& lens,
         return true;
     }
 
-    const float wavelengths[3] = {
-        config.wavelengths[0],
-        config.wavelengths[1],
-        config.wavelengths[2],
-    };
+    std::vector<GPUSpectralSampleDev> spectral_samples;
+    {
+        const int num_spectral_samples = std::max(3, config.spectral_samples);
+        spectral_samples.resize(num_spectral_samples);
+
+        auto cie_r = [](float lambda) {
+            const float a = (lambda - 600.0f) / 70.0f;
+            const float b = (lambda - 450.0f) / 30.0f;
+            return std::max(0.0f, 0.63f * std::exp(-0.5f * a * a) +
+                                       0.22f * std::exp(-0.5f * b * b));
+        };
+        auto cie_g = [](float lambda) {
+            const float a = (lambda - 545.0f) / 55.0f;
+            return std::max(0.0f, std::exp(-0.5f * a * a));
+        };
+        auto cie_b = [](float lambda) {
+            const float a = (lambda - 445.0f) / 45.0f;
+            return std::max(0.0f, std::exp(-0.5f * a * a));
+        };
+
+        if (num_spectral_samples == 3) {
+            spectral_samples[0] = {config.wavelengths[0], 1.0f, 0.0f, 0.0f};
+            spectral_samples[1] = {config.wavelengths[1], 0.0f, 1.0f, 0.0f};
+            spectral_samples[2] = {config.wavelengths[2], 0.0f, 0.0f, 1.0f};
+        } else {
+            float sum_r = 0.0f;
+            float sum_g = 0.0f;
+            float sum_b = 0.0f;
+            for (int i = 0; i < num_spectral_samples; ++i) {
+                const float lambda = 400.0f + (300.0f * i) / (num_spectral_samples - 1);
+                spectral_samples[i].lambda = lambda;
+                spectral_samples[i].rw = cie_r(lambda);
+                spectral_samples[i].gw = cie_g(lambda);
+                spectral_samples[i].bw = cie_b(lambda);
+                sum_r += spectral_samples[i].rw;
+                sum_g += spectral_samples[i].gw;
+                sum_b += spectral_samples[i].bw;
+            }
+            for (auto& sample : spectral_samples) {
+                if (sum_r > 1.0e-9f) sample.rw /= sum_r;
+                if (sum_g > 1.0e-9f) sample.gw /= sum_g;
+                if (sum_b > 1.0e-9f) sample.bw /= sum_b;
+            }
+        }
+    }
 
     std::vector<GPUPair> gpu_pairs(active_pairs.size());
     for (std::size_t i = 0; i < active_pairs.size(); ++i) {
@@ -753,9 +829,12 @@ bool launch_ghost_cuda(const LensSystem& lens,
     GPU_CHECK(cudaMemset(cache.d_out_g, 0, num_pixels * sizeof(float)));
     GPU_CHECK(cudaMemset(cache.d_out_b, 0, num_pixels * sizeof(float)));
 
-    float* d_wavelengths = nullptr;
-    GPU_CHECK(cudaMalloc(&d_wavelengths, sizeof(wavelengths)));
-    GPU_CHECK(cudaMemcpy(d_wavelengths, wavelengths, sizeof(wavelengths), cudaMemcpyHostToDevice));
+    GPUSpectralSampleDev* d_spectral_samples = nullptr;
+    GPU_CHECK(cudaMalloc(&d_spectral_samples, spectral_samples.size() * sizeof(GPUSpectralSampleDev)));
+    GPU_CHECK(cudaMemcpy(d_spectral_samples,
+                         spectral_samples.data(),
+                         spectral_samples.size() * sizeof(GPUSpectralSampleDev),
+                         cudaMemcpyHostToDevice));
 
     const dim3 block(kBlockSize, 1, 1);
     const dim3 grid(static_cast<unsigned>(gpu_pairs.size() * gpu_sources.size()),
@@ -782,18 +861,19 @@ bool launch_ghost_cuda(const LensSystem& lens,
         cache.d_out_b,
         config.gain,
         1.0f / static_cast<float>(num_grid_samples),
-        d_wavelengths);
+        d_spectral_samples,
+        static_cast<int>(spectral_samples.size()));
 
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
-        cudaFree(d_wavelengths);
+        cudaFree(d_spectral_samples);
         report_cuda_error(error, "ghost_kernel", out_error);
         return false;
     }
 
     error = cudaDeviceSynchronize();
     if (error != cudaSuccess) {
-        cudaFree(d_wavelengths);
+        cudaFree(d_spectral_samples);
         report_cuda_error(error, "cudaDeviceSynchronize", out_error);
         return false;
     }
@@ -802,7 +882,7 @@ bool launch_ghost_cuda(const LensSystem& lens,
     GPU_CHECK(cudaMemcpy(out_g, cache.d_out_g, num_pixels * sizeof(float), cudaMemcpyDeviceToHost));
     GPU_CHECK(cudaMemcpy(out_b, cache.d_out_b, num_pixels * sizeof(float), cudaMemcpyDeviceToHost));
 
-    cudaFree(d_wavelengths);
+    cudaFree(d_spectral_samples);
 
 #undef GPU_CHECK
 

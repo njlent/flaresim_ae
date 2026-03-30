@@ -36,6 +36,9 @@ struct GhostConfig
     float min_intensity = 1e-7f;                     // skip ghost pairs dimmer than this
     float gain = 1000.0f;                            // ghost intensity multiplier
     float wavelengths[3] = {650.0f, 550.0f, 450.0f}; // R, G, B in nm
+    int spectral_samples = 3;                        // 3, 5, 7, 9, 11
+    int aperture_blades = 0;                         // 0 = circular
+    float aperture_rotation_deg = 0.0f;
 
     // Per-pair area normalization: boost defocused ghost pairs so they remain
     // visible.  Production renderers (ILM, Weta) use a similar technique.
