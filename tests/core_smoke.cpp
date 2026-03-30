@@ -1,3 +1,4 @@
+#include "asset_root.h"
 #include "bloom.h"
 #include "builtin_lenses.h"
 #include "frame_bridge.h"
@@ -150,12 +151,17 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
 
+    std::string asset_root;
+    assert(find_flaresim_asset_root(repo_path("src/ae"), asset_root));
+    assert(asset_root == std::string(FLARESIM_REPO_ROOT));
+    assert(is_flaresim_asset_root(asset_root));
+
     std::string resolved;
-    assert(resolve_lens_path(state.lens, FLARESIM_REPO_ROOT, resolved));
+    assert(resolve_lens_path(state.lens, asset_root, resolved));
     assert(resolved.find("doublegauss.lens") != std::string::npos);
 
     LensSystem loaded;
-    assert(load_selected_lens(state.lens, FLARESIM_REPO_ROOT, loaded));
+    assert(load_selected_lens(state.lens, asset_root, loaded));
     assert(loaded.num_surfaces() > 0);
 }
 
@@ -242,6 +248,9 @@ void test_pixel_convert()
 
 void test_frame_bridge()
 {
+    std::string asset_root;
+    assert(find_flaresim_asset_root(FLARESIM_REPO_ROOT, asset_root));
+
     std::vector<AePixel8Like> src8(64);
     std::vector<AePixel8Like> dst8(64);
     std::vector<AePixel16Like> src16(64);
@@ -265,9 +274,9 @@ void test_frame_bridge()
     state.bloom.octaves = 1;
     state.bloom.chromatic = false;
 
-    assert(render_frame_to_pixels(FLARESIM_REPO_ROOT, state, src8.data(), dst8.data(), 8, 8));
-    assert(render_frame_to_pixels(FLARESIM_REPO_ROOT, state, src16.data(), dst16.data(), 8, 8));
-    assert(render_frame_to_pixels(FLARESIM_REPO_ROOT, state, src32.data(), dst32.data(), 8, 8));
+    assert(render_frame_to_pixels(asset_root, state, src8.data(), dst8.data(), 8, 8));
+    assert(render_frame_to_pixels(asset_root, state, src16.data(), dst16.data(), 8, 8));
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));
 
     FloatImageBuffer out8;
     FloatImageBuffer out16;
@@ -289,7 +298,7 @@ void test_frame_bridge()
     assert(std::abs(out32.alpha[27] - 1.0f) < 1e-6f);
 
     state.view = AeOutputView::FlareOnly;
-    assert(render_frame_to_pixels(FLARESIM_REPO_ROOT, state, src32.data(), dst32.data(), 8, 8));
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));
     assert(unpack_image(dst32.data(), 8, 8, out32));
 
     float max32 = 0.0f;

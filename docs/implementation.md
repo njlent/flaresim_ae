@@ -60,6 +60,11 @@ Ship an AE implementation in staged slices, with frequent commits.
 - bridge resolves lens preset, runs shared renderer, composes selected output view, then packs back to host depth
 - bridge keeps source alpha intact while writing rendered RGB
 
+### Slice 8
+- added `src/ae/asset_root.*` to discover the bundled lens asset root from an anchor path
+- built-in lens loading now depends on an asset root, not a checkout-specific repo root assumption
+- smoke coverage now verifies asset-root discovery before built-in lens loads and frame-bridge renders
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

@@ -94,7 +94,7 @@ bool pack_image_impl(const FloatImageBuffer& image, PixelT* out_pixels, PackFn p
 }
 
 template <typename PixelT>
-bool render_frame_to_pixels_impl(const std::string& repo_root,
+bool render_frame_to_pixels_impl(const std::string& asset_root,
                                  const AeParameterState& state,
                                  const PixelT* input_pixels,
                                  PixelT* output_pixels,
@@ -107,7 +107,7 @@ bool render_frame_to_pixels_impl(const std::string& repo_root,
     }
 
     FloatImageBuffer output;
-    if (!render_frame_to_float_image(repo_root, state, input, output)) {
+    if (!render_frame_to_float_image(asset_root, state, input, output)) {
         return false;
     }
 
@@ -147,17 +147,17 @@ bool pack_image(const FloatImageBuffer& image, AePixel32Like* out_pixels)
 }
 
 bool render_frame_to_float_image(
-    const std::string& repo_root,
+    const std::string& asset_root,
     const AeParameterState& state,
     const FloatImageBuffer& input,
     FloatImageBuffer& output)
 {
-    if (!validate_image(input) || repo_root.empty()) {
+    if (!validate_image(input) || asset_root.empty()) {
         return false;
     }
 
     LensSystem lens;
-    if (!load_selected_lens(state.lens, repo_root, lens)) {
+    if (!load_selected_lens(state.lens, asset_root, lens)) {
         return false;
     }
 
@@ -184,34 +184,34 @@ bool render_frame_to_float_image(
 }
 
 bool render_frame_to_pixels(
-    const std::string& repo_root,
+    const std::string& asset_root,
     const AeParameterState& state,
     const AePixel8Like* input_pixels,
     AePixel8Like* output_pixels,
     int width,
     int height)
 {
-    return render_frame_to_pixels_impl(repo_root, state, input_pixels, output_pixels, width, height);
+    return render_frame_to_pixels_impl(asset_root, state, input_pixels, output_pixels, width, height);
 }
 
 bool render_frame_to_pixels(
-    const std::string& repo_root,
+    const std::string& asset_root,
     const AeParameterState& state,
     const AePixel16Like* input_pixels,
     AePixel16Like* output_pixels,
     int width,
     int height)
 {
-    return render_frame_to_pixels_impl(repo_root, state, input_pixels, output_pixels, width, height);
+    return render_frame_to_pixels_impl(asset_root, state, input_pixels, output_pixels, width, height);
 }
 
 bool render_frame_to_pixels(
-    const std::string& repo_root,
+    const std::string& asset_root,
     const AeParameterState& state,
     const AePixel32Like* input_pixels,
     AePixel32Like* output_pixels,
     int width,
     int height)
 {
-    return render_frame_to_pixels_impl(repo_root, state, input_pixels, output_pixels, width, height);
+    return render_frame_to_pixels_impl(asset_root, state, input_pixels, output_pixels, width, height);
 }

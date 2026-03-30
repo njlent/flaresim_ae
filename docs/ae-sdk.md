@@ -24,6 +24,7 @@ Bit-depth policy in code:
 - 32-bpc helpers preserve values above `1.0`
 - `src/ae/frame_bridge.*` now runs one float render/composite path for all three host depths
 - bridge preserves input alpha and only changes RGB payload
+- bundled lens resolution no longer has to start from the repo root; `src/ae/asset_root.*` can discover the asset root by walking upward from an anchor path
 
 ## Remaining SDK tasks
 - real AE parameter registration

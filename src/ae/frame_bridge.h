@@ -25,14 +25,14 @@ bool pack_image(const FloatImageBuffer& image, AePixel16Like* out_pixels);
 bool pack_image(const FloatImageBuffer& image, AePixel32Like* out_pixels);
 
 bool render_frame_to_float_image(
-    const std::string& repo_root,
+    const std::string& asset_root,
     const AeParameterState& state,
     const FloatImageBuffer& input,
     FloatImageBuffer& output
 );
 
 bool render_frame_to_pixels(
-    const std::string& repo_root,
+    const std::string& asset_root,
     const AeParameterState& state,
     const AePixel8Like* input_pixels,
     AePixel8Like* output_pixels,
@@ -41,7 +41,7 @@ bool render_frame_to_pixels(
 );
 
 bool render_frame_to_pixels(
-    const std::string& repo_root,
+    const std::string& asset_root,
     const AeParameterState& state,
     const AePixel16Like* input_pixels,
     AePixel16Like* output_pixels,
@@ -50,7 +50,7 @@ bool render_frame_to_pixels(
 );
 
 bool render_frame_to_pixels(
-    const std::string& repo_root,
+    const std::string& asset_root,
     const AeParameterState& state,
     const AePixel32Like* input_pixels,
     AePixel32Like* output_pixels,
