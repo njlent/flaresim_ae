@@ -26,13 +26,25 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(flaresim_core PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
+add_library(flaresim_runtime STATIC
+    src/runtime/render_frame.cpp
+)
+
+target_include_directories(flaresim_runtime
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+)
+
+target_link_libraries(flaresim_runtime PUBLIC flaresim_core)
+
 include(CTest)
 
 if(BUILD_TESTING)
     add_executable(flaresim_core_smoke
         tests/core_smoke.cpp
     )
-    target_link_libraries(flaresim_core_smoke PRIVATE flaresim_core)
+    target_link_libraries(flaresim_core_smoke PRIVATE flaresim_runtime)
     target_compile_definitions(flaresim_core_smoke PRIVATE
         FLARESIM_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
     )

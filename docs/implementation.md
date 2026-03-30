@@ -5,8 +5,9 @@ Ship an AE implementation in staged slices, with frequent commits.
 
 ## Current slices
 1. Extract host-agnostic core from original `blackhole-rt/flaresim`.
-2. Add AE plugin scaffolding around that core.
-3. Add verification harness + docs for build/SDK setup.
+2. Add a host-agnostic full-frame render runtime around that core.
+3. Add AE plugin scaffolding around the runtime.
+4. Add verification harness + docs for build/SDK setup.
 
 ## Working rules
 - original `blackhole-rt/flaresim` = source of truth for core optics/render behavior
@@ -21,5 +22,4 @@ Ship an AE implementation in staged slices, with frequent commits.
 
 ## Next slices
 - AE SDK/CMake integration
-- render-session wrapper for host use
 - Nuke-derived CUDA path

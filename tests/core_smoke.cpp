@@ -1,6 +1,7 @@
 #include "bloom.h"
 #include "ghost.h"
 #include "lens.h"
+#include "render_frame.h"
 #include "source_extract.h"
 
 #include <cassert>
@@ -76,6 +77,50 @@ void test_bloom()
     assert(sum > 0.0f);
 }
 
+void test_render_frame()
+{
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    std::vector<float> src_r(64, 0.0f);
+    std::vector<float> src_g(64, 0.0f);
+    std::vector<float> src_b(64, 0.0f);
+    src_r[27] = 12.0f;
+    src_g[27] = 8.0f;
+    src_b[27] = 4.0f;
+
+    const RgbImageView input {src_r.data(), src_g.data(), src_b.data(), 8, 8};
+
+    FrameRenderSettings settings {};
+    settings.fov_h_deg = 60.0f;
+    settings.threshold = 1.0f;
+    settings.downsample = 1;
+    settings.ray_grid = 4;
+    settings.flare_gain = 100.0f;
+    settings.bloom.threshold = 1.0f;
+    settings.bloom.strength = 0.5f;
+    settings.bloom.radius = 0.08f;
+    settings.bloom.passes = 1;
+    settings.bloom.octaves = 1;
+    settings.bloom.chromatic = false;
+
+    FrameRenderOutputs outputs;
+    assert(render_frame(lens, input, settings, outputs));
+    assert(outputs.sources.size() == 1);
+
+    float flare_sum = 0.0f;
+    float bloom_sum = 0.0f;
+    for (float v : outputs.flare_r) {
+        flare_sum += v;
+    }
+    for (float v : outputs.bloom_r) {
+        bloom_sum += v;
+    }
+    assert(flare_sum > 0.0f);
+    assert(bloom_sum > 0.0f);
+}
+
 } // namespace
 
 int main()
@@ -83,6 +128,7 @@ int main()
     test_lens_load();
     test_source_extract();
     test_bloom();
+    test_render_frame();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;
 }
