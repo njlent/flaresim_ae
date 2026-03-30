@@ -12,7 +12,8 @@ PF_Err PluginHandleSmartPreRender(PF_InData*, PF_OutData*, void*)
 PF_Err PluginHandleSmartRender(PF_InData*, PF_OutData*, void*)
 {
     // TODO:
-    // - translate AE params into AeParameterState
+    // - translate AE params into AeUiParameterState
+    // - call apply_ui_parameter_state()
     // - resolve plugin asset root / bundled lens directory
     // - checkout AE source/output worlds
     // - call render_frame_to_pixels() for PF_Pixel8 / PF_Pixel16 / PF_PixelFloat

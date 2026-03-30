@@ -25,6 +25,7 @@ Bit-depth policy in code:
 - `src/ae/frame_bridge.*` now runs one float render/composite path for all three host depths
 - bridge preserves input alpha and only changes RGB payload
 - bundled lens resolution no longer has to start from the repo root; `src/ae/asset_root.*` can discover the asset root by walking upward from an anchor path
+- param ids, popup ordering, and popup-index -> runtime-state mapping now live in `src/ae/param_schema.*`
 
 ## Remaining SDK tasks
 - real AE parameter registration

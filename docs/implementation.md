@@ -65,6 +65,11 @@ Ship an AE implementation in staged slices, with frequent commits.
 - built-in lens loading now depends on an asset root, not a checkout-specific repo root assumption
 - smoke coverage now verifies asset-root discovery before built-in lens loads and frame-bridge renders
 
+### Slice 9
+- added `src/ae/param_schema.*` for shared AE param ids and popup schemas
+- lens preset popup and output-view popup strings now come from one tested source
+- popup-index -> `AeParameterState` translation now lives outside the Adobe SDK layer
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

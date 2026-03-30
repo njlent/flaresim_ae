@@ -6,6 +6,7 @@
 #include "lens.h"
 #include "lens_resolution.h"
 #include "output_view.h"
+#include "param_schema.h"
 #include "parameter_state.h"
 #include "pixel_convert.h"
 #include "render_frame.h"
@@ -308,6 +309,33 @@ void test_frame_bridge()
     assert(max32 > 1.0f);
 }
 
+void test_param_schema()
+{
+    assert(PARAM_COUNT == 8);
+
+    const std::string lens_popup = build_lens_preset_popup_string();
+    const std::string view_popup = build_output_view_popup_string();
+    assert(lens_popup.find("Double Gauss") != std::string::npos);
+    assert(view_popup.find("Flare Only") != std::string::npos);
+
+    AeUiParameterState ui {};
+    ui.lens_preset_index = lens_popup_index_for_builtin("double-gauss");
+    ui.view_mode_index = output_view_popup_index(AeOutputView::Diagnostics);
+    ui.flare_gain = 250.0f;
+    ui.threshold = 1.5f;
+    ui.ray_grid = 8;
+    ui.downsample = 2;
+
+    AeParameterState state {};
+    assert(apply_ui_parameter_state(ui, state));
+    assert(std::string(state.lens.builtin_id) == "double-gauss");
+    assert(state.view == AeOutputView::Diagnostics);
+    assert(std::abs(state.flare_gain - 250.0f) < 1e-6f);
+    assert(std::abs(state.threshold - 1.5f) < 1e-6f);
+    assert(state.ray_grid == 8);
+    assert(state.downsample == 2);
+}
+
 } // namespace
 
 int main()
@@ -320,6 +348,7 @@ int main()
     test_output_views();
     test_pixel_convert();
     test_frame_bridge();
+    test_param_schema();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;
 }

@@ -4,6 +4,7 @@ add_library(flaresim_ae_adapter STATIC
     frame_bridge.cpp
     lens_resolution.cpp
     output_view.cpp
+    param_schema.cpp
     parameter_state.cpp
     pixel_convert.cpp
 )
