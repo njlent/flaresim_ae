@@ -2,7 +2,7 @@
 
 ## Current state
 - buildable AE-facing adapter code exists in `src/ae/`
-- SDK-backed `.aex` target not wired yet
+- SDK-gated `.aex` scaffold target now exists in `src/ae/CMakeLists.txt`
 - shared runtime/core are buildable and tested locally without the Adobe SDK
 
 ## Intended wrapper shape
@@ -23,4 +23,5 @@
 - Smart PreRender / Smart Render checkout flow
 - output-view compositing back into AE buffers
 - file/import UI for external lenses
+- PiPL/resource wiring
 - GPU render path wiring on Windows

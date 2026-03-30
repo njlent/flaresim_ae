@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(FLARESIM_AE_ENABLE_AE_PLUGIN "Build the After Effects plugin target if the SDK is available." OFF)
+set(AE_SDK_ROOT "" CACHE PATH "Path to the Adobe After Effects SDK root")
 
 find_package(OpenMP)
 
