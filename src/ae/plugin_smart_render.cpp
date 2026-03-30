@@ -52,6 +52,7 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.threshold = params[threshold_param()]->u.fs_d.value;
     out_state.ray_grid = params[ray_grid_param()]->u.sd.value;
     out_state.downsample = params[downsample_param()]->u.sd.value;
+    out_state.max_sources = params[max_sources_param()]->u.sd.value;
     out_state.ghost_blur = params[ghost_blur_param()]->u.fs_d.value;
     out_state.ghost_blur_passes = params[ghost_blur_passes_param()]->u.sd.value;
     out_state.haze_gain = params[haze_gain_param()]->u.fs_d.value;
@@ -254,6 +255,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef threshold_param_def;
     PF_ParamDef ray_grid_param_def;
     PF_ParamDef downsample_param_def;
+    PF_ParamDef max_sources_param_def;
     PF_ParamDef ghost_blur_param_def;
     PF_ParamDef ghost_blur_passes_param_def;
     PF_ParamDef haze_gain_param_def;
@@ -280,6 +282,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(threshold_param_def);
     AEFX_CLR_STRUCT(ray_grid_param_def);
     AEFX_CLR_STRUCT(downsample_param_def);
+    AEFX_CLR_STRUCT(max_sources_param_def);
     AEFX_CLR_STRUCT(ghost_blur_param_def);
     AEFX_CLR_STRUCT(ghost_blur_passes_param_def);
     AEFX_CLR_STRUCT(haze_gain_param_def);
@@ -307,6 +310,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool threshold_checked_out = false;
     bool ray_grid_checked_out = false;
     bool downsample_checked_out = false;
+    bool max_sources_checked_out = false;
     bool ghost_blur_checked_out = false;
     bool ghost_blur_passes_checked_out = false;
     bool haze_gain_checked_out = false;
@@ -460,6 +464,14 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     downsample_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          max_sources_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &max_sources_param_def));
+    max_sources_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           ghost_blur_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -550,6 +562,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.threshold = threshold_param_def.u.fs_d.value;
         ui_state.ray_grid = ray_grid_param_def.u.sd.value;
         ui_state.downsample = downsample_param_def.u.sd.value;
+        ui_state.max_sources = max_sources_param_def.u.sd.value;
         ui_state.ghost_blur = ghost_blur_param_def.u.fs_d.value;
         ui_state.ghost_blur_passes = ghost_blur_passes_param_def.u.sd.value;
         ui_state.haze_gain = haze_gain_param_def.u.fs_d.value;
@@ -594,6 +607,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (downsample_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &downsample_param_def));
+    }
+    if (max_sources_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &max_sources_param_def));
     }
     if (ray_grid_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &ray_grid_param_def));

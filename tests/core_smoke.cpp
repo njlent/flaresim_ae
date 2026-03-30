@@ -51,6 +51,18 @@ void test_source_extract()
     assert(sources.size() == 1);
     assert(sources[0].r > 0.0f);
     assert(std::abs(sources[0].angle_x) < 1.0f);
+
+    std::vector<float> near_r(16, 0.0f);
+    std::vector<float> near_g(16, 0.0f);
+    std::vector<float> near_b(16, 0.0f);
+    near_r[5] = 0.98f;
+    near_g[5] = 0.98f;
+    near_b[5] = 0.98f;
+
+    const RgbImageView near_img {near_r.data(), near_g.data(), near_b.data(), 4, 4};
+    const auto near_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f);
+    assert(near_sources.size() == 1);
+    assert(std::abs(near_sources[0].r - 0.98f) < 1.0e-6f);
 }
 
 void test_source_limit()
@@ -166,6 +178,44 @@ void test_render_frame()
     assert(bloom_sum > 0.0f);
     assert(haze_sum > 0.0f);
     assert(starburst_sum > 0.0f);
+
+    std::vector<float> multi_r(64, 0.0f);
+    std::vector<float> multi_g(64, 0.0f);
+    std::vector<float> multi_b(64, 0.0f);
+    multi_r[9] = 2.0f;
+    multi_g[9] = 2.0f;
+    multi_b[9] = 2.0f;
+    multi_r[27] = 1.5f;
+    multi_g[27] = 1.5f;
+    multi_b[27] = 1.5f;
+    multi_r[45] = 1.25f;
+    multi_g[45] = 1.25f;
+    multi_b[45] = 1.25f;
+
+    const RgbImageView multi_input {multi_r.data(), multi_g.data(), multi_b.data(), 8, 8};
+    settings.threshold = 1.0f;
+    settings.downsample = 1;
+    settings.max_sources = 1;
+
+    FrameRenderOutputs limited_outputs;
+    assert(render_frame(lens, multi_input, settings, limited_outputs));
+    assert(limited_outputs.detected_sources.size() == 3);
+    assert(limited_outputs.sources.size() == 1);
+
+    std::vector<float> preview_r(64, 0.0f);
+    std::vector<float> preview_g(64, 0.0f);
+    std::vector<float> preview_b(64, 0.0f);
+    MutableRgbImageView preview {preview_r.data(), preview_g.data(), preview_b.data(), 8, 8};
+    assert(compose_output_view(AeOutputView::Sources, multi_input, settings, limited_outputs, preview));
+
+    int preview_hits = 0;
+    for (float v : preview_r) {
+        if (v > 0.0f) {
+            ++preview_hits;
+        }
+    }
+    assert(preview_hits > 0);
+    assert(preview_hits <= 9);
 }
 
 void test_cuda_backend_api()
@@ -202,6 +252,7 @@ void test_ae_adapter_bits()
     state.threshold = 2.5f;
     state.downsample = 2;
     state.ray_grid = 8;
+    state.max_sources = 123;
     state.aperture_blades = 7;
     state.aperture_rotation_deg = 15.0f;
     state.flare_gain = 250.0f;
@@ -227,7 +278,7 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.threshold - 2.5f) < 1e-6f);
     assert(settings.downsample == 2);
     assert(settings.ray_grid == 8);
-    assert(settings.max_sources == 64);
+    assert(settings.max_sources == 123);
     assert(settings.aperture_blades == 7);
     assert(std::abs(settings.aperture_rotation_deg - 15.0f) < 1e-6f);
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
@@ -409,6 +460,30 @@ void test_frame_bridge()
     }
     assert(max32 > 0.0f);
     assert(sum_flare32 > 0.0f);
+
+    std::fill(src32.begin(), src32.end(), pack_pixel32(FloatPixel {1.0f, 0.0f, 0.0f, 0.0f}));
+    src32[27] = pack_pixel32(FloatPixel {1.0f, 0.98f, 0.98f, 0.98f});
+
+    state.threshold = 0.9f;
+    state.downsample = 8;
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+
+    float near_white_sum = 0.0f;
+    for (float v : out32.r) {
+        near_white_sum += v;
+    }
+    assert(near_white_sum > 0.0f);
+
+    state.downsample = 1;
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+
+    float near_white_sum_ds1 = 0.0f;
+    for (float v : out32.r) {
+        near_white_sum_ds1 += v;
+    }
+    assert(near_white_sum_ds1 > 0.0f);
 }
 
 void test_param_schema()
@@ -456,6 +531,7 @@ void test_param_schema()
     ui.threshold = 1.5f;
     ui.ray_grid = 8;
     ui.downsample = 2;
+    ui.max_sources = 222;
     ui.ghost_blur = 0.02f;
     ui.ghost_blur_passes = 2;
     ui.haze_gain = 0.1f;
@@ -483,6 +559,7 @@ void test_param_schema()
     assert(std::abs(state.threshold - 1.5f) < 1e-6f);
     assert(state.ray_grid == 8);
     assert(state.downsample == 2);
+    assert(state.max_sources == 222);
     assert(std::abs(state.ghost_blur - 0.02f) < 1e-6f);
     assert(state.ghost_blur_passes == 2);
     assert(std::abs(state.haze_gain - 0.1f) < 1e-6f);

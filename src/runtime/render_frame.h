@@ -56,6 +56,7 @@ struct FrameRenderOutputs
     std::vector<float> starburst_r;
     std::vector<float> starburst_g;
     std::vector<float> starburst_b;
+    std::vector<BrightPixel> detected_sources;
     std::vector<BrightPixel> sources;
 };
 

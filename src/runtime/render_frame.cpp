@@ -118,13 +118,14 @@ bool render_frame(
         return false;
     }
 
-    outputs.sources = extract_bright_pixels(
+    outputs.detected_sources = extract_bright_pixels(
         input,
         settings.threshold,
         settings.downsample,
         fov_h,
         fov_v);
 
+    outputs.sources = outputs.detected_sources;
     limit_bright_pixels(outputs.sources, static_cast<size_t>(settings.max_sources));
 
     float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);

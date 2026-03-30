@@ -228,7 +228,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                          0.0f,
                          64.0f,
                          defaults.threshold,
-                         2,
+                         4,
                          PF_ValueDisplayFlag_NONE,
                          PF_ParamFlag_NONE,
                          PARAM_ID_THRESHOLD);
@@ -250,6 +250,15 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   12,
                   defaults.downsample,
                   PARAM_ID_DOWNSAMPLE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Max Sources",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.max_sources,
+                  PARAM_ID_MAX_SOURCES);
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_FLARE_SECTION_END);

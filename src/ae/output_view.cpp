@@ -50,7 +50,7 @@ void draw_sources(const FrameRenderSettings& settings,
     }
     const float tan_half_h = std::tan(fov_h * 0.5f);
     const float tan_half_v = std::tan(fov_v * 0.5f);
-    const int block = std::max(1, settings.downsample);
+    const int block = std::max(3, settings.downsample);
 
     for (const BrightPixel& source : outputs.sources) {
         const float ndc_x = std::tan(source.angle_x) / (2.0f * tan_half_h);

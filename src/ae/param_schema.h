@@ -37,16 +37,17 @@ inline constexpr int PARAM_ID_FLARE_GAIN = 12;
 inline constexpr int PARAM_ID_THRESHOLD = 13;
 inline constexpr int PARAM_ID_RAY_GRID = 14;
 inline constexpr int PARAM_ID_DOWNSAMPLE = 15;
-inline constexpr int PARAM_ID_GHOST_BLUR = 16;
-inline constexpr int PARAM_ID_GHOST_BLUR_PASSES = 17;
-inline constexpr int PARAM_ID_HAZE_GAIN = 18;
-inline constexpr int PARAM_ID_HAZE_RADIUS = 19;
-inline constexpr int PARAM_ID_HAZE_BLUR_PASSES = 20;
-inline constexpr int PARAM_ID_STARBURST_GAIN = 21;
-inline constexpr int PARAM_ID_STARBURST_SCALE = 22;
-inline constexpr int PARAM_ID_SPECTRAL_SAMPLES = 23;
-inline constexpr int PARAM_ID_VIEW_MODE = 24;
-inline constexpr int PARAM_ID_MASK_LAYER = 25;
+inline constexpr int PARAM_ID_MAX_SOURCES = 16;
+inline constexpr int PARAM_ID_GHOST_BLUR = 17;
+inline constexpr int PARAM_ID_GHOST_BLUR_PASSES = 18;
+inline constexpr int PARAM_ID_HAZE_GAIN = 19;
+inline constexpr int PARAM_ID_HAZE_RADIUS = 20;
+inline constexpr int PARAM_ID_HAZE_BLUR_PASSES = 21;
+inline constexpr int PARAM_ID_STARBURST_GAIN = 22;
+inline constexpr int PARAM_ID_STARBURST_SCALE = 23;
+inline constexpr int PARAM_ID_SPECTRAL_SAMPLES = 24;
+inline constexpr int PARAM_ID_VIEW_MODE = 25;
+inline constexpr int PARAM_ID_MASK_LAYER = 26;
 
 struct AeUiParameterState
 {
@@ -67,6 +68,7 @@ struct AeUiParameterState
     float threshold = 8.0f;
     int ray_grid = 16;
     int downsample = 8;
+    int max_sources = 64;
     float ghost_blur = 0.003f;
     int ghost_blur_passes = 3;
     float haze_gain = 0.0f;
@@ -105,6 +107,7 @@ int flare_gain_param();
 int threshold_param();
 int ray_grid_param();
 int downsample_param();
+int max_sources_param();
 int post_section_start_param();
 int ghost_blur_param();
 int ghost_blur_passes_param();

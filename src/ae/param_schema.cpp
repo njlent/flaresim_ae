@@ -111,7 +111,8 @@ int flare_gain_param() { return flare_section_start_param() + 1; }
 int threshold_param() { return flare_gain_param() + 1; }
 int ray_grid_param() { return threshold_param() + 1; }
 int downsample_param() { return ray_grid_param() + 1; }
-int flare_section_end_param() { return downsample_param() + 1; }
+int max_sources_param() { return downsample_param() + 1; }
+int flare_section_end_param() { return max_sources_param() + 1; }
 int post_section_start_param() { return flare_section_end_param() + 1; }
 int ghost_blur_param() { return post_section_start_param() + 1; }
 int ghost_blur_passes_param() { return ghost_blur_param() + 1; }
@@ -388,6 +389,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
 {
     if (ui_state.ray_grid < 1 ||
         ui_state.downsample < 1 ||
+        ui_state.max_sources < 0 ||
         ui_state.ghost_blur_passes < 0 ||
         ui_state.haze_blur_passes < 0 ||
         ui_state.aperture_blades < 0 ||
@@ -443,6 +445,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.threshold = ui_state.threshold;
     out_state.ray_grid = ui_state.ray_grid;
     out_state.downsample = ui_state.downsample;
+    out_state.max_sources = ui_state.max_sources;
     out_state.ghost_blur = ui_state.ghost_blur;
     out_state.ghost_blur_passes = ui_state.ghost_blur_passes;
     out_state.haze_gain = ui_state.haze_gain;

@@ -25,10 +25,12 @@ std::vector<BrightPixel> extract_bright_pixels(
 
     for (int dy = 0; dy < dh; ++dy) {
         for (int dx = 0; dx < dw; ++dx) {
-            float sum_r = 0.0f;
-            float sum_g = 0.0f;
-            float sum_b = 0.0f;
-            int count = 0;
+            float peak_r = 0.0f;
+            float peak_g = 0.0f;
+            float peak_b = 0.0f;
+            float peak_lum = -1.0f;
+            int peak_x = -1;
+            int peak_y = -1;
 
             const int y0 = dy * stride;
             const int x0 = dx * stride;
@@ -38,36 +40,40 @@ std::vector<BrightPixel> extract_bright_pixels(
             for (int y = y0; y < y1; ++y) {
                 for (int x = x0; x < x1; ++x) {
                     const int i = y * img.width + x;
-                    sum_r += img.r[i];
-                    sum_g += img.g[i];
-                    sum_b += img.b[i];
-                    ++count;
+                    const float r = img.r[i];
+                    const float g = img.g[i];
+                    const float b = img.b[i];
+                    const float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                    if (lum > peak_lum) {
+                        peak_lum = lum;
+                        peak_r = r;
+                        peak_g = g;
+                        peak_b = b;
+                        peak_x = x;
+                        peak_y = y;
+                    }
                 }
             }
 
-            if (count == 0) {
+            if (peak_x < 0 || peak_y < 0) {
                 continue;
             }
 
-            const float avg_r = sum_r / count;
-            const float avg_g = sum_g / count;
-            const float avg_b = sum_b / count;
-            const float lum = 0.2126f * avg_r + 0.7152f * avg_g + 0.0722f * avg_b;
-            if (lum <= threshold) {
+            if (peak_lum <= threshold) {
                 continue;
             }
 
-            const float cx = (x0 + x1) * 0.5f;
-            const float cy = (y0 + y1) * 0.5f;
+            const float cx = static_cast<float>(peak_x) + 0.5f;
+            const float cy = static_cast<float>(peak_y) + 0.5f;
             const float ndc_x = cx / img.width - 0.5f;
             const float ndc_y = cy / img.height - 0.5f;
 
             BrightPixel bp {};
             bp.angle_x = std::atan(ndc_x * 2.0f * tan_half_h);
             bp.angle_y = std::atan(ndc_y * 2.0f * tan_half_v);
-            bp.r = avg_r;
-            bp.g = avg_g;
-            bp.b = avg_b;
+            bp.r = peak_r;
+            bp.g = peak_g;
+            bp.b = peak_b;
             result.push_back(bp);
         }
     }
