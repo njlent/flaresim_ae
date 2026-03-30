@@ -50,6 +50,11 @@ int lens_group_start_param(int manufacturer_index)
     return PARAM_LENS_MANUFACTURER + 1 + (manufacturer_index * LENS_PARAMS_PER_MANUFACTURER);
 }
 
+int lens_section_start_param()
+{
+    return PARAM_LENS_SECTION_START;
+}
+
 int lens_popup_param(int manufacturer_index)
 {
     return lens_group_start_param(manufacturer_index) + 1;
@@ -60,10 +65,15 @@ int lens_group_end_param(int manufacturer_index)
     return lens_group_start_param(manufacturer_index) + 2;
 }
 
-int flare_gain_param()
+int lens_section_end_param()
 {
     return PARAM_LENS_MANUFACTURER + 1 +
            static_cast<int>(builtin_lens_manufacturer_count()) * LENS_PARAMS_PER_MANUFACTURER;
+}
+
+int flare_gain_param()
+{
+    return lens_section_end_param() + 1;
 }
 
 int threshold_param()

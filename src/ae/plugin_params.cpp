@@ -26,6 +26,11 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                  PARAM_ID_LEGACY_LENS_PRESET);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_TOPICX("Lens",
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_LENS_SECTION_START);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX("Manufacturer",
                   static_cast<A_short>(builtin_lens_manufacturer_count()),
                   static_cast<A_short>(default_lens_manufacturer_popup_index()),
@@ -69,6 +74,9 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
         AEFX_CLR_STRUCT(def);
         PF_END_TOPIC(lens_group_end_param_id(static_cast<int>(manufacturer_index)));
     }
+
+    AEFX_CLR_STRUCT(def);
+    PF_END_TOPIC(PARAM_ID_LENS_SECTION_END);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Flare Gain",

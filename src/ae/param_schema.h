@@ -6,7 +6,8 @@
 
 inline constexpr int PARAM_INPUT = 0;
 inline constexpr int PARAM_LEGACY_LENS_PRESET = 1;
-inline constexpr int PARAM_LENS_MANUFACTURER = 2;
+inline constexpr int PARAM_LENS_SECTION_START = 2;
+inline constexpr int PARAM_LENS_MANUFACTURER = 3;
 inline constexpr int LENS_PARAMS_PER_MANUFACTURER = 3;
 
 inline constexpr int PARAM_ID_LEGACY_LENS_PRESET = 1;
@@ -18,6 +19,11 @@ inline constexpr int PARAM_ID_VIEW_MODE = 6;
 inline constexpr int PARAM_ID_MASK_LAYER = 7;
 inline constexpr int PARAM_ID_LENS_MANUFACTURER = 100;
 inline constexpr int PARAM_ID_LENS_GROUP_BASE = 1000;
+inline constexpr int PARAM_ID_LENS_SECTION_START = 9000;
+inline constexpr int PARAM_ID_LENS_SECTION_END = 9001;
+
+int lens_section_start_param();
+int lens_section_end_param();
 
 int lens_group_start_param(int manufacturer_index);
 int lens_popup_param(int manufacturer_index);
