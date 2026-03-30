@@ -5,6 +5,7 @@
 #include "lens_resolution.h"
 #include "output_view.h"
 #include "parameter_state.h"
+#include "pixel_convert.h"
 #include "render_frame.h"
 #include "source_extract.h"
 
@@ -215,6 +216,29 @@ void test_output_views()
     assert(source_sum > 0.0f);
 }
 
+void test_pixel_convert()
+{
+    const FloatPixel hdr {1.0f, 1.5f, 0.5f, 2.25f};
+
+    const auto p8 = pack_pixel8(hdr);
+    const auto p16 = pack_pixel16(hdr);
+    const auto p32 = pack_pixel32(hdr);
+
+    assert(p8.red == 255);
+    assert(p16.red == 32768);
+    assert(std::abs(p32.red - 1.5f) < 1e-6f);
+    assert(std::abs(p32.blue - 2.25f) < 1e-6f);
+
+    const auto f8 = unpack_pixel(p8);
+    const auto f16 = unpack_pixel(p16);
+    const auto f32 = unpack_pixel(p32);
+
+    assert(f8.red <= 1.0f);
+    assert(f16.red <= 1.0f);
+    assert(std::abs(f32.red - 1.5f) < 1e-6f);
+    assert(std::abs(f32.blue - 2.25f) < 1e-6f);
+}
+
 } // namespace
 
 int main()
@@ -225,6 +249,7 @@ int main()
     test_render_frame();
     test_ae_adapter_bits();
     test_output_views();
+    test_pixel_convert();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;
 }

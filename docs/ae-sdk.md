@@ -18,6 +18,11 @@
 - `PF_OutFlag2_FLOAT_COLOR_AWARE`
 - 8/16/32-bpc support through one float runtime
 
+Bit-depth policy in code:
+- 8-bpc pack/unpack helpers clamp only at final 8-bit conversion
+- 16-bpc pack/unpack helpers clamp only at final 16-bit conversion
+- 32-bpc helpers preserve values above `1.0`
+
 ## Remaining SDK tasks
 - real AE parameter registration
 - Smart PreRender / Smart Render checkout flow

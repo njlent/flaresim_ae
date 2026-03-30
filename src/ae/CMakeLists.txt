@@ -3,6 +3,7 @@ add_library(flaresim_ae_adapter STATIC
     lens_resolution.cpp
     output_view.cpp
     parameter_state.cpp
+    pixel_convert.cpp
 )
 
 target_include_directories(flaresim_ae_adapter

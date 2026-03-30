@@ -48,6 +48,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - AE-facing layer can now produce composite / flare-only / bloom-only / source / diagnostics buffers from runtime output
 - smoke coverage now exercises output-view composition
 
+### Slice 6
+- added `src/ae/pixel_convert.*` for AE-style 8/16/32 pixel pack/unpack helpers
+- 8/16-bit helpers clamp only at final integer pack
+- 32-bit float helpers preserve HDR values above `1.0`
+- smoke coverage now checks 8/16 clamp behavior and 32-bit HDR retention
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`
