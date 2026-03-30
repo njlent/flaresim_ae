@@ -34,6 +34,15 @@ Ship an AE implementation in staged slices, with frequent commits.
 - added `src/runtime/render_frame.*` as a host-agnostic frame wrapper
 - local build now covers `flaresim_core`, `flaresim_runtime`, and `flaresim_core_smoke`
 
+### Slice 3
+- added buildable `src/ae/` adapter code
+- added built-in lens descriptors and AE parameter translation
+- documented current SDK gap in `docs/ae-sdk.md`
+
+### Slice 4
+- added built-in/external lens resolution + loading in the AE-facing layer
+- preset chooser path can now resolve bundled lens IDs into actual `.lens` files
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

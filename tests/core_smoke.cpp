@@ -2,6 +2,7 @@
 #include "builtin_lenses.h"
 #include "ghost.h"
 #include "lens.h"
+#include "lens_resolution.h"
 #include "parameter_state.h"
 #include "render_frame.h"
 #include "source_extract.h"
@@ -145,6 +146,14 @@ void test_ae_adapter_bits()
     assert(settings.ray_grid == 8);
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
+
+    std::string resolved;
+    assert(resolve_lens_path(state.lens, FLARESIM_REPO_ROOT, resolved));
+    assert(resolved.find("doublegauss.lens") != std::string::npos);
+
+    LensSystem loaded;
+    assert(load_selected_lens(state.lens, FLARESIM_REPO_ROOT, loaded));
+    assert(loaded.num_surfaces() > 0);
 }
 
 } // namespace
