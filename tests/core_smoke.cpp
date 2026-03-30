@@ -1,5 +1,6 @@
 #include "bloom.h"
 #include "builtin_lenses.h"
+#include "frame_bridge.h"
 #include "ghost.h"
 #include "lens.h"
 #include "lens_resolution.h"
@@ -239,6 +240,65 @@ void test_pixel_convert()
     assert(std::abs(f32.blue - 2.25f) < 1e-6f);
 }
 
+void test_frame_bridge()
+{
+    std::vector<AePixel8Like> src8(64);
+    std::vector<AePixel8Like> dst8(64);
+    std::vector<AePixel16Like> src16(64);
+    std::vector<AePixel16Like> dst16(64);
+    std::vector<AePixel32Like> src32(64);
+    std::vector<AePixel32Like> dst32(64);
+
+    src8[27] = pack_pixel8(FloatPixel {1.0f, 0.9f, 0.7f, 0.4f});
+    src16[27] = pack_pixel16(FloatPixel {1.0f, 0.9f, 0.7f, 0.4f});
+    src32[27] = pack_pixel32(FloatPixel {1.0f, 12.0f, 8.0f, 4.0f});
+
+    AeParameterState state {};
+    state.threshold = 0.25f;
+    state.downsample = 1;
+    state.ray_grid = 4;
+    state.flare_gain = 100.0f;
+    state.bloom.threshold = 0.25f;
+    state.bloom.strength = 0.5f;
+    state.bloom.radius = 0.08f;
+    state.bloom.passes = 1;
+    state.bloom.octaves = 1;
+    state.bloom.chromatic = false;
+
+    assert(render_frame_to_pixels(FLARESIM_REPO_ROOT, state, src8.data(), dst8.data(), 8, 8));
+    assert(render_frame_to_pixels(FLARESIM_REPO_ROOT, state, src16.data(), dst16.data(), 8, 8));
+    assert(render_frame_to_pixels(FLARESIM_REPO_ROOT, state, src32.data(), dst32.data(), 8, 8));
+
+    FloatImageBuffer out8;
+    FloatImageBuffer out16;
+    FloatImageBuffer out32;
+    assert(unpack_image(dst8.data(), 8, 8, out8));
+    assert(unpack_image(dst16.data(), 8, 8, out16));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+
+    float sum8 = 0.0f;
+    float sum16 = 0.0f;
+    float sum32 = 0.0f;
+    for (float v : out8.r) sum8 += v;
+    for (float v : out16.r) sum16 += v;
+    for (float v : out32.r) sum32 += v;
+
+    assert(sum8 > 0.0f);
+    assert(sum16 > 0.0f);
+    assert(sum32 > 0.0f);
+    assert(std::abs(out32.alpha[27] - 1.0f) < 1e-6f);
+
+    state.view = AeOutputView::FlareOnly;
+    assert(render_frame_to_pixels(FLARESIM_REPO_ROOT, state, src32.data(), dst32.data(), 8, 8));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+
+    float max32 = 0.0f;
+    for (float v : out32.r) {
+        max32 = std::max(max32, v);
+    }
+    assert(max32 > 1.0f);
+}
+
 } // namespace
 
 int main()
@@ -250,6 +310,7 @@ int main()
     test_ae_adapter_bits();
     test_output_views();
     test_pixel_convert();
+    test_frame_bridge();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;
 }

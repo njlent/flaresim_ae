@@ -22,6 +22,8 @@ Bit-depth policy in code:
 - 8-bpc pack/unpack helpers clamp only at final 8-bit conversion
 - 16-bpc pack/unpack helpers clamp only at final 16-bit conversion
 - 32-bpc helpers preserve values above `1.0`
+- `src/ae/frame_bridge.*` now runs one float render/composite path for all three host depths
+- bridge preserves input alpha and only changes RGB payload
 
 ## Remaining SDK tasks
 - real AE parameter registration

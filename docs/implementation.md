@@ -54,6 +54,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - 32-bit float helpers preserve HDR values above `1.0`
 - smoke coverage now checks 8/16 clamp behavior and 32-bit HDR retention
 
+### Slice 7
+- added `src/ae/frame_bridge.*` as the host-agnostic AE render path
+- bridge unpacks 8/16/32 AE-style pixels into one float image buffer
+- bridge resolves lens preset, runs shared renderer, composes selected output view, then packs back to host depth
+- bridge keeps source alpha intact while writing rendered RGB
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

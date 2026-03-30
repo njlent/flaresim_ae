@@ -1,5 +1,6 @@
 add_library(flaresim_ae_adapter STATIC
     builtin_lenses.cpp
+    frame_bridge.cpp
     lens_resolution.cpp
     output_view.cpp
     parameter_state.cpp

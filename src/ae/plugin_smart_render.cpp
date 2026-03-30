@@ -12,10 +12,9 @@ PF_Err PluginHandleSmartPreRender(PF_InData*, PF_OutData*, void*)
 PF_Err PluginHandleSmartRender(PF_InData*, PF_OutData*, void*)
 {
     // TODO:
-    // - translate AE params into AeParameterState / FrameRenderSettings
-    // - unpack AE pixels to float planes
-    // - call render_frame()
-    // - composite selected output view back into AE buffers
+    // - translate AE params into AeParameterState
+    // - checkout AE source/output worlds
+    // - call render_frame_to_pixels() for PF_Pixel8 / PF_Pixel16 / PF_PixelFloat
     return PF_Err_NONE;
 }
 
