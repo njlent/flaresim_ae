@@ -33,6 +33,7 @@ std::string build_output_view_popup_string();
 int lens_popup_index_for_builtin(const char* builtin_id);
 bool lens_selection_from_popup(int popup_index, AeLensSelection& out_selection);
 
+int output_view_popup_count();
 int output_view_popup_index(AeOutputView view);
 bool output_view_from_popup(int popup_index, AeOutputView& out_view);
 

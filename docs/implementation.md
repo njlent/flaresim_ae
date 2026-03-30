@@ -70,6 +70,11 @@ Ship an AE implementation in staged slices, with frequent commits.
 - lens preset popup and output-view popup strings now come from one tested source
 - popup-index -> `AeParameterState` translation now lives outside the Adobe SDK layer
 
+### Slice 10
+- replaced the PARAM_SETUP placeholder with real AE popup/slider/layer registration code in `src/ae/plugin_params.cpp`
+- plugin param defaults now come from the same shared UI schema used by tests
+- local smoke build still stays SDK-free; Adobe-side compilation remains pending an installed SDK
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

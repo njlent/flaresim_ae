@@ -28,7 +28,6 @@ Bit-depth policy in code:
 - param ids, popup ordering, and popup-index -> runtime-state mapping now live in `src/ae/param_schema.*`
 
 ## Remaining SDK tasks
-- real AE parameter registration
 - Smart PreRender / Smart Render checkout flow
 - output-view compositing back into AE buffers
 - file/import UI for external lenses

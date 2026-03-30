@@ -92,6 +92,11 @@ int output_view_popup_index(AeOutputView view)
     return 0;
 }
 
+int output_view_popup_count()
+{
+    return static_cast<int>(std::size(kOutputViews));
+}
+
 bool output_view_from_popup(int popup_index, AeOutputView& out_view)
 {
     if (popup_index < 1 || popup_index > static_cast<int>(std::size(kOutputViews))) {
