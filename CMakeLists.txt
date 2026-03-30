@@ -38,19 +38,17 @@ target_include_directories(flaresim_runtime
 
 target_link_libraries(flaresim_runtime PUBLIC flaresim_core)
 
+add_subdirectory(src/ae)
+
 include(CTest)
 
 if(BUILD_TESTING)
     add_executable(flaresim_core_smoke
         tests/core_smoke.cpp
     )
-    target_link_libraries(flaresim_core_smoke PRIVATE flaresim_runtime)
+    target_link_libraries(flaresim_core_smoke PRIVATE flaresim_ae_adapter)
     target_compile_definitions(flaresim_core_smoke PRIVATE
         FLARESIM_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
     )
     add_test(NAME flaresim_core_smoke COMMAND flaresim_core_smoke)
-endif()
-
-if(FLARESIM_AE_ENABLE_AE_PLUGIN)
-    add_subdirectory(src/ae)
 endif()

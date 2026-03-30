@@ -1,6 +1,8 @@
 #include "bloom.h"
+#include "builtin_lenses.h"
 #include "ghost.h"
 #include "lens.h"
+#include "parameter_state.h"
 #include "render_frame.h"
 #include "source_extract.h"
 
@@ -121,6 +123,30 @@ void test_render_frame()
     assert(bloom_sum > 0.0f);
 }
 
+void test_ae_adapter_bits()
+{
+    assert(builtin_lens_count() >= 5);
+    const auto* lens = find_builtin_lens("double-gauss");
+    assert(lens);
+    assert(std::string(lens->relative_path).find("doublegauss.lens") != std::string::npos);
+
+    AeParameterState state {};
+    state.fov_h_deg = 42.0f;
+    state.threshold = 2.5f;
+    state.downsample = 2;
+    state.ray_grid = 8;
+    state.flare_gain = 250.0f;
+    state.bloom.strength = 0.75f;
+
+    const auto settings = build_frame_render_settings(state);
+    assert(std::abs(settings.fov_h_deg - 42.0f) < 1e-6f);
+    assert(std::abs(settings.threshold - 2.5f) < 1e-6f);
+    assert(settings.downsample == 2);
+    assert(settings.ray_grid == 8);
+    assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
+    assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
+}
+
 } // namespace
 
 int main()
@@ -129,6 +155,7 @@ int main()
     test_source_extract();
     test_bloom();
     test_render_frame();
+    test_ae_adapter_bits();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;
 }

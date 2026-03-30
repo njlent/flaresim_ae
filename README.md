@@ -13,6 +13,8 @@ Current status:
 Start here:
 - [docs/spec.md](docs/spec.md)
 - [docs/implementation.md](docs/implementation.md)
+- [docs/original-audit.md](docs/original-audit.md)
+- [docs/build.md](docs/build.md)
 
 Bundled lens presets:
 - [assets/lenses/space55/manifest.json](assets/lenses/space55/manifest.json)
