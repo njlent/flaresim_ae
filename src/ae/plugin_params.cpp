@@ -36,7 +36,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                          0.0f,
                          1000.0f,
                          0.0f,
-                         32.0f,
+                         64.0f,
                          defaults.threshold,
                          2,
                          PF_ValueDisplayFlag_NONE,
@@ -46,18 +46,27 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Ray Grid",
                   1,
-                  512,
+                  64,
                   1,
-                  128,
+                  64,
                   defaults.ray_grid,
                   PARAM_RAY_GRID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Max Sources",
+                  0,
+                  512,
+                  0,
+                  512,
+                  defaults.max_sources,
+                  PARAM_MAX_SOURCES);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Downsample",
                   1,
                   16,
                   1,
-                  8,
+                  12,
                   defaults.downsample,
                   PARAM_DOWNSAMPLE);
 

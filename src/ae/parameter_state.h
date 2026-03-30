@@ -29,9 +29,10 @@ struct AeParameterState
     AeLensSelection lens {};
     AeOutputView view = AeOutputView::Composite;
     float fov_h_deg = 60.0f;
-    float threshold = 3.0f;
-    int downsample = 4;
-    int ray_grid = 64;
+    float threshold = 8.0f;
+    int downsample = 8;
+    int ray_grid = 16;
+    int max_sources = 64;
     float flare_gain = 1000.0f;
     float min_ghost = 1e-7f;
     bool ghost_normalize = true;

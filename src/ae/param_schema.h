@@ -11,6 +11,7 @@ enum AeParamIndex
     PARAM_FLARE_GAIN,
     PARAM_THRESHOLD,
     PARAM_RAY_GRID,
+    PARAM_MAX_SOURCES,
     PARAM_DOWNSAMPLE,
     PARAM_VIEW_MODE,
     PARAM_MASK_LAYER,
@@ -21,9 +22,10 @@ struct AeUiParameterState
 {
     int lens_preset_index = 1;
     float flare_gain = 1000.0f;
-    float threshold = 3.0f;
-    int ray_grid = 64;
-    int downsample = 4;
+    float threshold = 8.0f;
+    int ray_grid = 16;
+    int max_sources = 64;
+    int downsample = 8;
     int view_mode_index = 1;
 };
 

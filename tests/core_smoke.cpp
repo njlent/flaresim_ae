@@ -52,6 +52,25 @@ void test_source_extract()
     assert(std::abs(sources[0].angle_x) < 1.0f);
 }
 
+void test_source_limit()
+{
+    std::vector<BrightPixel> sources = {
+        {.angle_x = 0.0f, .angle_y = 0.0f, .r = 1.0f, .g = 1.0f, .b = 1.0f},
+        {.angle_x = 0.0f, .angle_y = 0.0f, .r = 2.0f, .g = 2.0f, .b = 2.0f},
+        {.angle_x = 0.0f, .angle_y = 0.0f, .r = 10.0f, .g = 10.0f, .b = 10.0f},
+    };
+
+    limit_bright_pixels(sources, 2);
+
+    assert(sources.size() == 2);
+    assert(sources[0].r >= sources[1].r);
+    assert(sources[0].r == 10.0f);
+    assert(sources[1].r == 2.0f);
+
+    limit_bright_pixels(sources, 0);
+    assert(sources.size() == 2);
+}
+
 void test_bloom()
 {
     std::vector<float> src_r(64, 0.0f);
@@ -149,8 +168,17 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.threshold - 2.5f) < 1e-6f);
     assert(settings.downsample == 2);
     assert(settings.ray_grid == 8);
+    assert(settings.max_sources == 64);
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
+
+    state.ray_grid = 256;
+    const auto clamped = build_frame_render_settings(state);
+    assert(clamped.ray_grid == 64);
+
+    state.max_sources = 0;
+    const auto unlimited = build_frame_render_settings(state);
+    assert(unlimited.max_sources == 0);
 
     std::string asset_root;
     assert(find_flaresim_asset_root(repo_path("src/ae"), asset_root));
@@ -311,7 +339,7 @@ void test_frame_bridge()
 
 void test_param_schema()
 {
-    assert(PARAM_COUNT == 8);
+    assert(PARAM_COUNT == 9);
 
     const std::string lens_popup = build_lens_preset_popup_string();
     const std::string view_popup = build_output_view_popup_string();
@@ -324,6 +352,7 @@ void test_param_schema()
     ui.flare_gain = 250.0f;
     ui.threshold = 1.5f;
     ui.ray_grid = 8;
+    ui.max_sources = 128;
     ui.downsample = 2;
 
     AeParameterState state {};
@@ -333,6 +362,7 @@ void test_param_schema()
     assert(std::abs(state.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(state.threshold - 1.5f) < 1e-6f);
     assert(state.ray_grid == 8);
+    assert(state.max_sources == 128);
     assert(state.downsample == 2);
 }
 
@@ -342,6 +372,7 @@ int main()
 {
     test_lens_load();
     test_source_extract();
+    test_source_limit();
     test_bloom();
     test_render_frame();
     test_ae_adapter_bits();

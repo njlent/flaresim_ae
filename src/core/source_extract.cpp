@@ -74,3 +74,30 @@ std::vector<BrightPixel> extract_bright_pixels(
 
     return result;
 }
+
+void limit_bright_pixels(
+    std::vector<BrightPixel>& pixels,
+    std::size_t max_sources)
+{
+    if (max_sources == 0) {
+        return;
+    }
+
+    if (pixels.size() <= max_sources) {
+        return;
+    }
+
+    auto intensity = [](const BrightPixel& pixel) {
+        return 0.2126f * pixel.r + 0.7152f * pixel.g + 0.0722f * pixel.b;
+    };
+
+    std::partial_sort(
+        pixels.begin(),
+        pixels.begin() + static_cast<std::ptrdiff_t>(max_sources),
+        pixels.end(),
+        [&](const BrightPixel& a, const BrightPixel& b) {
+            return intensity(a) > intensity(b);
+        });
+
+    pixels.resize(max_sources);
+}

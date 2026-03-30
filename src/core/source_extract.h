@@ -3,6 +3,7 @@
 #include "ghost.h"
 #include "image.h"
 
+#include <cstddef>
 #include <vector>
 
 std::vector<BrightPixel> extract_bright_pixels(
@@ -11,4 +12,9 @@ std::vector<BrightPixel> extract_bright_pixels(
     int downsample,
     float fov_h,
     float fov_v
+);
+
+void limit_bright_pixels(
+    std::vector<BrightPixel>& pixels,
+    std::size_t max_sources
 );

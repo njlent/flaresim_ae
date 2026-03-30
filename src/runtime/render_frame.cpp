@@ -39,6 +39,8 @@ bool render_frame(
         fov_h,
         fov_v);
 
+    limit_bright_pixels(outputs.sources, static_cast<size_t>(settings.max_sources));
+
     if (!outputs.sources.empty()) {
         GhostConfig ghost {};
         ghost.ray_grid = settings.ray_grid;

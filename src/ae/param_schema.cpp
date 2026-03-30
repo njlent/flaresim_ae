@@ -109,7 +109,7 @@ bool output_view_from_popup(int popup_index, AeOutputView& out_view)
 
 bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterState& out_state)
 {
-    if (ui_state.ray_grid < 1 || ui_state.downsample < 1) {
+    if (ui_state.ray_grid < 1 || ui_state.downsample < 1 || ui_state.max_sources < 0) {
         return false;
     }
 
@@ -128,6 +128,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.flare_gain = ui_state.flare_gain;
     out_state.threshold = ui_state.threshold;
     out_state.ray_grid = ui_state.ray_grid;
+    out_state.max_sources = ui_state.max_sources;
     out_state.downsample = ui_state.downsample;
     return true;
 }
