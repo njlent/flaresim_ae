@@ -7,7 +7,8 @@ PF_Err PluginHandleAbout(PF_InData*, PF_OutData* out_data, PF_ParamDef*[], PF_La
 {
     std::snprintf(out_data->return_msg,
                   sizeof(out_data->return_msg),
-                  "FlareSimAE %d.%d.%d\rSDK-backed wrapper scaffold. Runtime lives in shared core.",
+                  "%s %d.%d.%d\rAfter Effects lens flare renderer backed by the shared FlareSim core.",
+                  FLARESIM_AE_EFFECT_NAME,
                   FLARESIM_AE_VERSION_MAJOR,
                   FLARESIM_AE_VERSION_MINOR,
                   FLARESIM_AE_VERSION_PATCH);

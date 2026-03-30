@@ -1,6 +1,27 @@
 #include "plugin_entry.h"
+#include "plugin_version.h"
 
 extern "C" {
+
+FLARESIM_AE_EXPORT PF_Err PluginDataEntryFunction2(
+    PF_PluginDataPtr inPtr,
+    PF_PluginDataCB2 inPluginDataCallBackPtr,
+    SPBasicSuite*,
+    const char*,
+    const char*)
+{
+    PF_Err result = PF_Err_INVALID_CALLBACK;
+    result = PF_REGISTER_EFFECT_EXT2(
+        inPtr,
+        inPluginDataCallBackPtr,
+        FLARESIM_AE_EFFECT_NAME,
+        FLARESIM_AE_EFFECT_MATCH_NAME,
+        FLARESIM_AE_EFFECT_CATEGORY,
+        AE_RESERVED_INFO,
+        "EffectMain",
+        FLARESIM_AE_SUPPORT_URL);
+    return result;
+}
 
 FLARESIM_AE_EXPORT PF_Err EffectMain(
     PF_Cmd cmd,

@@ -1,26 +1,400 @@
 #include "plugin_entry.h"
 
-PF_Err PluginHandleSmartPreRender(PF_InData*, PF_OutData*, void*)
+#include "AEFX_SuiteHelper.h"
+#include "AE_EffectCBSuites.h"
+
+#include "asset_root.h"
+#include "frame_bridge.h"
+#include "param_schema.h"
+
+#ifdef AE_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
+
+#include <algorithm>
+#include <cstring>
+#include <string>
+#include <vector>
+
+namespace {
+
+bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_state)
 {
-    // TODO:
-    // - checkout source + optional mask layer
-    // - compute result/max rects
-    // - stash minimal pre-render state
+    if (!params) {
+        return false;
+    }
+
+    out_state.lens_preset_index = params[PARAM_LENS_PRESET]->u.pd.value;
+    out_state.flare_gain = params[PARAM_FLARE_GAIN]->u.fs_d.value;
+    out_state.threshold = params[PARAM_THRESHOLD]->u.fs_d.value;
+    out_state.ray_grid = params[PARAM_RAY_GRID]->u.sd.value;
+    out_state.downsample = params[PARAM_DOWNSAMPLE]->u.sd.value;
+    out_state.view_mode_index = params[PARAM_VIEW_MODE]->u.pd.value;
+    return true;
+}
+
+template <typename RectT>
+void union_rects(const RectT& src, RectT& dst)
+{
+    if (dst.left == 0 && dst.top == 0 && dst.right == 0 && dst.bottom == 0) {
+        dst = src;
+        return;
+    }
+
+    dst.left = std::min(dst.left, src.left);
+    dst.top = std::min(dst.top, src.top);
+    dst.right = std::max(dst.right, src.right);
+    dst.bottom = std::max(dst.bottom, src.bottom);
+}
+
+bool resolve_asset_root(std::string& out_asset_root)
+{
+    out_asset_root.clear();
+
+#ifdef FLARESIM_REPO_ROOT
+    if (is_flaresim_asset_root(FLARESIM_REPO_ROOT)) {
+        out_asset_root = FLARESIM_REPO_ROOT;
+        return true;
+    }
+#endif
+
+#ifdef AE_OS_WIN
+    HMODULE module = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(&PluginHandleSmartRender),
+                           &module)) {
+        char module_path[MAX_PATH] {};
+        const DWORD module_path_len = GetModuleFileNameA(module, module_path, MAX_PATH);
+        if (module_path_len > 0 &&
+            find_flaresim_asset_root(std::string(module_path, module_path_len), out_asset_root)) {
+            return true;
+        }
+    }
+#endif
+
+    return false;
+}
+
+template <typename PixelT>
+void copy_world_to_linear(const PF_EffectWorld& world, std::vector<PixelT>& out_pixels)
+{
+    const int width = world.width;
+    const int height = world.height;
+
+    out_pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+
+    const char* row = reinterpret_cast<const char*>(world.data);
+    for (int y = 0; y < height; ++y) {
+        const auto* src = reinterpret_cast<const PixelT*>(row);
+        auto* dst = out_pixels.data() + (static_cast<size_t>(y) * static_cast<size_t>(width));
+        std::copy_n(src, width, dst);
+        row += world.rowbytes;
+    }
+}
+
+template <typename PixelT>
+void copy_linear_to_world(const std::vector<PixelT>& pixels, PF_EffectWorld& world)
+{
+    const int width = world.width;
+    const int height = world.height;
+
+    char* row = reinterpret_cast<char*>(world.data);
+    for (int y = 0; y < height; ++y) {
+        const auto* src = pixels.data() + (static_cast<size_t>(y) * static_cast<size_t>(width));
+        auto* dst = reinterpret_cast<PixelT*>(row);
+        std::copy_n(src, width, dst);
+        row += world.rowbytes;
+    }
+}
+
+template <typename HostPixelT, typename BridgePixelT>
+bool render_world_pixels(const std::string& asset_root,
+                         const AeParameterState& state,
+                         const PF_EffectWorld& input_world,
+                         PF_EffectWorld& output_world)
+{
+    if (!input_world.data || !output_world.data ||
+        input_world.width != output_world.width ||
+        input_world.height != output_world.height) {
+        return false;
+    }
+
+    std::vector<HostPixelT> host_input;
+    copy_world_to_linear(input_world, host_input);
+
+    std::vector<BridgePixelT> bridge_input(host_input.size());
+    std::memcpy(bridge_input.data(),
+                host_input.data(),
+                bridge_input.size() * sizeof(BridgePixelT));
+
+    std::vector<BridgePixelT> bridge_output(
+        static_cast<size_t>(input_world.width) * static_cast<size_t>(input_world.height));
+
+    if (!render_frame_to_pixels(asset_root,
+                                state,
+                                bridge_input.data(),
+                                bridge_output.data(),
+                                input_world.width,
+                                input_world.height)) {
+        return false;
+    }
+
+    std::vector<HostPixelT> host_output(bridge_output.size());
+    std::memcpy(host_output.data(),
+                bridge_output.data(),
+                host_output.size() * sizeof(HostPixelT));
+
+    copy_linear_to_world(host_output, output_world);
+    return true;
+}
+
+PF_Err render_checked_out_worlds(PF_InData* in_data,
+                                 PF_OutData* out_data,
+                                 const AeParameterState& state,
+                                 PF_EffectWorld* input_world,
+                                 PF_EffectWorld* output_world)
+{
+    if (!input_world || !output_world) {
+        return PF_Err_BAD_CALLBACK_PARAM;
+    }
+
+    std::string asset_root;
+    if (!resolve_asset_root(asset_root)) {
+        return PF_COPY(input_world, output_world, nullptr, nullptr);
+    }
+
+    AEFX_SuiteScoper<PF_WorldSuite2> world_suite(
+        in_data,
+        kPFWorldSuite,
+        kPFWorldSuiteVersion2,
+        out_data);
+
+    PF_PixelFormat format = PF_PixelFormat_INVALID;
+    PF_Err err = world_suite->PF_GetPixelFormat(input_world, &format);
+    if (err != PF_Err_NONE) {
+        return err;
+    }
+
+    bool rendered = false;
+    switch (format) {
+        case PF_PixelFormat_ARGB128:
+            rendered = render_world_pixels<PF_PixelFloat, AePixel32Like>(
+                asset_root, state, *input_world, *output_world);
+            break;
+        case PF_PixelFormat_ARGB64:
+            rendered = render_world_pixels<PF_Pixel16, AePixel16Like>(
+                asset_root, state, *input_world, *output_world);
+            break;
+        case PF_PixelFormat_ARGB32:
+            rendered = render_world_pixels<PF_Pixel8, AePixel8Like>(
+                asset_root, state, *input_world, *output_world);
+            break;
+        default:
+            return PF_COPY(input_world, output_world, nullptr, nullptr);
+    }
+
+    if (!rendered) {
+        return PF_COPY(input_world, output_world, nullptr, nullptr);
+    }
+
     return PF_Err_NONE;
 }
 
-PF_Err PluginHandleSmartRender(PF_InData*, PF_OutData*, void*)
+PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
+                                                  AeParameterState& out_state)
 {
-    // TODO:
-    // - translate AE params into AeUiParameterState
-    // - call apply_ui_parameter_state()
-    // - resolve plugin asset root / bundled lens directory
-    // - checkout AE source/output worlds
-    // - call render_frame_to_pixels() for PF_Pixel8 / PF_Pixel16 / PF_PixelFloat
+    PF_Err err = PF_Err_NONE;
+    PF_Err err2 = PF_Err_NONE;
+    PF_ParamDef lens_param;
+    PF_ParamDef flare_gain_param;
+    PF_ParamDef threshold_param;
+    PF_ParamDef ray_grid_param;
+    PF_ParamDef downsample_param;
+    PF_ParamDef view_param;
+    AEFX_CLR_STRUCT(lens_param);
+    AEFX_CLR_STRUCT(flare_gain_param);
+    AEFX_CLR_STRUCT(threshold_param);
+    AEFX_CLR_STRUCT(ray_grid_param);
+    AEFX_CLR_STRUCT(downsample_param);
+    AEFX_CLR_STRUCT(view_param);
+
+    bool lens_checked_out = false;
+    bool flare_gain_checked_out = false;
+    bool threshold_checked_out = false;
+    bool ray_grid_checked_out = false;
+    bool downsample_checked_out = false;
+    bool view_checked_out = false;
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          PARAM_LENS_PRESET,
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &lens_param));
+    lens_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          PARAM_FLARE_GAIN,
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &flare_gain_param));
+    flare_gain_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          PARAM_THRESHOLD,
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &threshold_param));
+    threshold_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          PARAM_RAY_GRID,
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &ray_grid_param));
+    ray_grid_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          PARAM_DOWNSAMPLE,
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &downsample_param));
+    downsample_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          PARAM_VIEW_MODE,
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &view_param));
+    view_checked_out = (err == PF_Err_NONE);
+
+    if (!err) {
+        AeUiParameterState ui_state {};
+        ui_state.lens_preset_index = lens_param.u.pd.value;
+        ui_state.flare_gain = flare_gain_param.u.fs_d.value;
+        ui_state.threshold = threshold_param.u.fs_d.value;
+        ui_state.ray_grid = ray_grid_param.u.sd.value;
+        ui_state.downsample = downsample_param.u.sd.value;
+        ui_state.view_mode_index = view_param.u.pd.value;
+
+        if (!apply_ui_parameter_state(ui_state, out_state)) {
+            err = PF_Err_BAD_CALLBACK_PARAM;
+        }
+    }
+
+    if (view_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &view_param));
+    }
+    if (downsample_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &downsample_param));
+    }
+    if (ray_grid_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &ray_grid_param));
+    }
+    if (threshold_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &threshold_param));
+    }
+    if (flare_gain_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &flare_gain_param));
+    }
+    if (lens_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &lens_param));
+    }
+
+    return err;
+}
+
+} // namespace
+
+PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
+{
+    auto* render_extra = reinterpret_cast<PF_PreRenderExtra*>(extra);
+    if (!in_data || !render_extra) {
+        return PF_Err_BAD_CALLBACK_PARAM;
+    }
+
+    PF_RenderRequest request = render_extra->input->output_request;
+    PF_CheckoutResult input_result;
+    AEFX_CLR_STRUCT(input_result);
+
+    PF_Err err = render_extra->cb->checkout_layer(
+        in_data->effect_ref,
+        PARAM_INPUT,
+        PARAM_INPUT,
+        &request,
+        in_data->current_time,
+        in_data->time_step,
+        in_data->time_scale,
+        &input_result);
+    if (err != PF_Err_NONE) {
+        return err;
+    }
+
+    union_rects(input_result.result_rect, render_extra->output->result_rect);
+    union_rects(input_result.max_result_rect, render_extra->output->max_result_rect);
     return PF_Err_NONE;
 }
 
-PF_Err PluginHandleLegacyRender(PF_InData*, PF_OutData*, PF_ParamDef*[], PF_LayerDef*)
+PF_Err PluginHandleSmartRender(PF_InData* in_data, PF_OutData* out_data, void* extra)
 {
-    return PF_Err_NONE;
+    auto* render_extra = reinterpret_cast<PF_SmartRenderExtra*>(extra);
+    if (!in_data || !out_data || !render_extra) {
+        return PF_Err_BAD_CALLBACK_PARAM;
+    }
+
+    PF_Err err = PF_Err_NONE;
+    PF_Err err2 = PF_Err_NONE;
+
+    AeParameterState state {};
+    ERR(build_render_state_from_checked_out_params(in_data, state));
+
+    PF_EffectWorld* input_world = nullptr;
+    PF_EffectWorld* output_world = nullptr;
+
+    if (!err) {
+        ERR(render_extra->cb->checkout_layer_pixels(in_data->effect_ref, PARAM_INPUT, &input_world));
+    }
+    if (!err) {
+        ERR(render_extra->cb->checkout_output(in_data->effect_ref, &output_world));
+    }
+    if (!err) {
+        ERR(render_checked_out_worlds(in_data, out_data, state, input_world, output_world));
+    }
+
+    if (input_world) {
+        ERR2(render_extra->cb->checkin_layer_pixels(in_data->effect_ref, PARAM_INPUT));
+    }
+
+    return err ? err : err2;
+}
+
+PF_Err PluginHandleLegacyRender(PF_InData* in_data,
+                                PF_OutData* out_data,
+                                PF_ParamDef* params[],
+                                PF_LayerDef* output)
+{
+    if (!in_data || !out_data || !params || !output) {
+        return PF_Err_BAD_CALLBACK_PARAM;
+    }
+
+    AeUiParameterState ui_state {};
+    if (!read_ui_state_from_params(params, ui_state)) {
+        return PF_Err_BAD_CALLBACK_PARAM;
+    }
+
+    AeParameterState state {};
+    if (!apply_ui_parameter_state(ui_state, state)) {
+        return PF_COPY(&params[PARAM_INPUT]->u.ld, output, nullptr, nullptr);
+    }
+
+    return render_checked_out_worlds(in_data, out_data, state, &params[PARAM_INPUT]->u.ld, output);
 }
