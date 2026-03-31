@@ -122,7 +122,8 @@ Next major steps:
 ## License
 
 Unless noted otherwise, original project material in this repository is licensed under the
+custom `Flaresim AE Licence`, a modified
 [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-license (`CC BY-NC-SA 4.0`). See [LICENSE](LICENSE).
+licence with additional terms. See [LICENSE](LICENSE).
 
 Bundled third-party material and imported upstream lens data keep their respective upstream notices/licenses and are not relicensed by this top-level notice.
