@@ -1,8 +1,26 @@
-# flaresim_ae
+<div align="center">
+ <br/>
+ <h1> <img src="docs/icon.png" width="100px">
+ <br/>
+ Flaresim AE</h1>
+
+ <img src="https://img.shields.io/badge/AfterEffects Addon-050059"/> 
+ <br>
+ <img src="https://custom-icon-badges.demolab.com/badge/AE 2025.5-0078D6?logo=windows11&logoColor=white"/> 
+ <img src="https://img.shields.io/badge/CUDA-76B900?logo=nvidia&logoColor=fff"/> 
+
+
+</div>
+<br/>
+
+
 
 After Effects port of FlareSim.
 
-Windows + CUDA first.
+## Supported versions: 
+
+AfterEffects 25.5 Windows + CUDA first.
+
 Implementation basis: original `space55/blackhole-rt/flaresim`, with later `flaresim_nuke` features layered on selectively.
 
 Current status:
