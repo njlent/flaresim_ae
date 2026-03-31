@@ -17,11 +17,7 @@ PF_Err PluginHandleAbout(PF_InData*, PF_OutData* out_data, PF_ParamDef*[], PF_La
 
 PF_Err PluginHandleGlobalSetup(PF_InData*, PF_OutData* out_data, PF_ParamDef*[], PF_LayerDef*)
 {
-    out_data->my_version = PF_VERSION(FLARESIM_AE_VERSION_MAJOR,
-                                      FLARESIM_AE_VERSION_MINOR,
-                                      FLARESIM_AE_VERSION_PATCH,
-                                      0,
-                                      0);
+    out_data->my_version = FLARESIM_AE_PIPL_VERSION;
 
     out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE;
     out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER |
