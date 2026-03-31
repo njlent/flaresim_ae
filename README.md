@@ -117,3 +117,12 @@ Bundled lens presets:
 Next major steps:
 - tighten Smart PreRender state / optional mask-layer flow
 - add persistent per-instance CUDA/cache ownership instead of the current thread-local scratch cache
+
+
+## License
+
+Unless noted otherwise, original project material in this repository is licensed under the
+[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+license (`CC BY-NC-SA 4.0`). See [LICENSE](LICENSE).
+
+Bundled third-party material and imported upstream lens data keep their respective upstream notices/licenses and are not relicensed by this top-level notice.
