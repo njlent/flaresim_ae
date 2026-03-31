@@ -19,19 +19,19 @@ target_include_directories(flaresim_ae_adapter
 target_link_libraries(flaresim_ae_adapter PUBLIC flaresim_runtime)
 
 if(FLARESIM_AE_ENABLE_AE_PLUGIN)
-    if(NOT AE_SDK_ROOT)
-        message(FATAL_ERROR "FLARESIM_AE_ENABLE_AE_PLUGIN=ON requires AE_SDK_ROOT to be set.")
+    if(NOT AE_SDK_RESOLVED_ROOT)
+        message(FATAL_ERROR "FLARESIM_AE_ENABLE_AE_PLUGIN=ON requires AE_SDK_ROOT to point at the SDK folder or its containing extracted package directory.")
     endif()
 
-    set(AE_PIPL_TOOL "${AE_SDK_ROOT}/Examples/Resources/PiPLtool.exe")
+    set(AE_PIPL_TOOL "${AE_SDK_RESOLVED_ROOT}/Examples/Resources/PiPLtool.exe")
 
     set(AE_SDK_INCLUDE_DIRS
-        ${AE_SDK_ROOT}
-        ${AE_SDK_ROOT}/Examples
-        ${AE_SDK_ROOT}/Examples/Headers
-        ${AE_SDK_ROOT}/Examples/Headers/SP
-        ${AE_SDK_ROOT}/Examples/Util
-        ${AE_SDK_ROOT}/Headers
+        ${AE_SDK_RESOLVED_ROOT}
+        ${AE_SDK_RESOLVED_ROOT}/Examples
+        ${AE_SDK_RESOLVED_ROOT}/Examples/Headers
+        ${AE_SDK_RESOLVED_ROOT}/Examples/Headers/SP
+        ${AE_SDK_RESOLVED_ROOT}/Examples/Util
+        ${AE_SDK_RESOLVED_ROOT}/Headers
     )
 
     set(FLARESIM_AE_PIPL_R "${CMAKE_CURRENT_SOURCE_DIR}/FlareSimAEPiPL.r")
@@ -43,7 +43,7 @@ if(FLARESIM_AE_ENABLE_AE_PLUGIN)
         OUTPUT
             "${FLARESIM_AE_PIPL_RC}"
         COMMAND
-            cmd /c cl /nologo /TC /EP /I ${CMAKE_CURRENT_SOURCE_DIR} /I ${AE_SDK_ROOT}/Examples/Headers ${FLARESIM_AE_PIPL_R} > ${FLARESIM_AE_PIPL_RR}
+            cmd /c cl /nologo /TC /EP /I ${CMAKE_CURRENT_SOURCE_DIR} /I ${AE_SDK_RESOLVED_ROOT}/Examples/Headers ${FLARESIM_AE_PIPL_R} > ${FLARESIM_AE_PIPL_RR}
         COMMAND
             "${AE_PIPL_TOOL}" "${FLARESIM_AE_PIPL_RR}" "${FLARESIM_AE_PIPL_RRC}"
         COMMAND

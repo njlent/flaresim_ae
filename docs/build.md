@@ -32,7 +32,7 @@ cmake -S . -B build-ae -DFLARESIM_AE_ENABLE_AE_PLUGIN=ON
 cmake --build build-ae --config Debug
 ```
 
-`AE_SDK_ROOT` auto-detects `E:/projects/ae/AfterEffectsSDK_25.6_61_win/ae25.6_61.64bit.AfterEffectsSDK`.
+`AE_SDK_ROOT` auto-detects `E:/projects/ae/SDK/AfterEffectsSDK_25.6_61_win` and resolves the inner Adobe SDK folder automatically when needed.
 Set `-DAE_SDK_ROOT=...` if you want a different SDK root.
 
 Current output:

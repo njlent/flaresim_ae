@@ -8,27 +8,50 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(FLARESIM_AE_ENABLE_AE_PLUGIN "Build the After Effects plugin target if the SDK is available." OFF)
 option(FLARESIM_ENABLE_CUDA "Build the CUDA ghost renderer when a CUDA toolkit is available." ON)
 set(FLARESIM_CUDA_ARCHITECTURES "75;86;89" CACHE STRING "CUDA architectures for the ghost renderer target")
-set(AE_SDK_ROOT "" CACHE PATH "Path to the Adobe After Effects SDK root")
+set(AE_SDK_ROOT "" CACHE PATH "Path to the Adobe After Effects SDK folder or its containing extracted package directory")
+set(FLARESIM_AE_SDK_SENTINEL "Examples/Headers/AEConfig.h")
+set(FLARESIM_AE_SDK_INNER_DIRNAME "ae25.6_61.64bit.AfterEffectsSDK")
+set(FLARESIM_AE_SDK_CANONICAL_ROOT "E:/projects/ae/SDK/AfterEffectsSDK_25.6_61_win")
 
 set(FLARESIM_CUDA_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/ghost_cuda.cu")
 set(FLARESIM_CUDA_STUB_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/ghost_cuda_stub.cpp")
 
-if(NOT AE_SDK_ROOT)
-    set(_flaresim_ae_sdk_candidates
-        "E:/projects/ae/AfterEffectsSDK_25.6_61_win/ae25.6_61.64bit.AfterEffectsSDK"
-        "E:/projects/ae/AfterEffectsSDK_25.6_61_win"
+set(AE_SDK_RESOLVED_ROOT "")
+set(_flaresim_ae_sdk_candidates)
+set(_flaresim_ae_sdk_requested_root "${AE_SDK_ROOT}")
+
+if(_flaresim_ae_sdk_requested_root)
+    list(APPEND _flaresim_ae_sdk_candidates
+        "${_flaresim_ae_sdk_requested_root}"
+        "${_flaresim_ae_sdk_requested_root}/${FLARESIM_AE_SDK_INNER_DIRNAME}"
     )
 
-    foreach(_flaresim_ae_sdk_candidate IN LISTS _flaresim_ae_sdk_candidates)
-        if(EXISTS "${_flaresim_ae_sdk_candidate}/Examples/Headers/AEConfig.h")
-            set(AE_SDK_ROOT "${_flaresim_ae_sdk_candidate}" CACHE PATH "Path to the Adobe After Effects SDK root" FORCE)
-            break()
-        endif()
-    endforeach()
-
-    unset(_flaresim_ae_sdk_candidate)
-    unset(_flaresim_ae_sdk_candidates)
+    file(GLOB _flaresim_ae_sdk_nested_candidates LIST_DIRECTORIES true
+        "${_flaresim_ae_sdk_requested_root}/*.AfterEffectsSDK"
+    )
+    list(APPEND _flaresim_ae_sdk_candidates ${_flaresim_ae_sdk_nested_candidates})
 endif()
+
+list(APPEND _flaresim_ae_sdk_candidates
+    "${FLARESIM_AE_SDK_CANONICAL_ROOT}"
+    "${FLARESIM_AE_SDK_CANONICAL_ROOT}/${FLARESIM_AE_SDK_INNER_DIRNAME}"
+)
+
+foreach(_flaresim_ae_sdk_candidate IN LISTS _flaresim_ae_sdk_candidates)
+    if(EXISTS "${_flaresim_ae_sdk_candidate}/${FLARESIM_AE_SDK_SENTINEL}")
+        set(AE_SDK_RESOLVED_ROOT "${_flaresim_ae_sdk_candidate}")
+        break()
+    endif()
+endforeach()
+
+if(NOT _flaresim_ae_sdk_requested_root)
+    set(AE_SDK_ROOT "${FLARESIM_AE_SDK_CANONICAL_ROOT}" CACHE PATH "Path to the Adobe After Effects SDK folder or its containing extracted package directory" FORCE)
+endif()
+
+unset(_flaresim_ae_sdk_candidate)
+unset(_flaresim_ae_sdk_candidates)
+unset(_flaresim_ae_sdk_nested_candidates)
+unset(_flaresim_ae_sdk_requested_root)
 
 find_package(OpenMP)
 
