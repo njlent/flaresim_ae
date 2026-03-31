@@ -145,6 +145,7 @@ bool render_frame(
         ghost.aperture_rotation_deg = settings.aperture_rotation_deg;
         ghost.ghost_normalize = settings.ghost_normalize;
         ghost.max_area_boost = settings.max_area_boost;
+        ghost.cleanup_mode = settings.ghost_cleanup_mode;
 
         render_ghosts(
             lens,
@@ -159,7 +160,13 @@ bool render_frame(
             ghost,
             &outputs.ghost_backend);
 
-        if (settings.ghost_blur > 0.0f && settings.ghost_blur_passes > 0) {
+        const bool apply_ghost_blur =
+            settings.ghost_blur > 0.0f &&
+            settings.ghost_blur_passes > 0 &&
+            (settings.ghost_cleanup_mode == GhostCleanupMode::LegacyBlur ||
+             settings.ghost_cleanup_mode == GhostCleanupMode::SharpAdaptivePlusBlur);
+
+        if (apply_ghost_blur) {
             const float diag = std::sqrt(static_cast<float>(input.width * input.width + input.height * input.height));
             const int radius = std::max(1, static_cast<int>(std::round(settings.ghost_blur * diag)));
             box_blur_rgb(outputs.flare_r.data(),

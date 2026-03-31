@@ -286,6 +286,7 @@ void render_ghosts(const LensSystem &lens,
     // Pre-filter ghost pairs (shared by GPU and CPU paths)
     std::vector<GhostPair> active_pairs;
     std::vector<float> pair_area_boost;
+    std::vector<float> pair_splat_radii_px;
     for (auto &p : pairs)
     {
         auto ior_before_a = lens.ior_before(p.surf_a);
@@ -300,14 +301,34 @@ void render_ghosts(const LensSystem &lens,
         if (est >= config.min_intensity)
         {
             float boost = 1.0f;
-            if (config.ghost_normalize)
+            float ghost_w_mm = 0.0f;
+            float ghost_h_mm = 0.0f;
+            if (config.ghost_normalize || config.cleanup_mode != GhostCleanupMode::LegacyBlur)
             {
                 boost = estimate_ghost_spread(lens, p.surf_a, p.surf_b,
                                               sensor_half_w, sensor_half_h,
-                                              config);
+                                              config,
+                                              &ghost_w_mm,
+                                              &ghost_h_mm);
             }
+
+            float splat_radius_px = 1.0f;
+            if (config.cleanup_mode != GhostCleanupMode::LegacyBlur)
+            {
+                const float ghost_w_px = ghost_w_mm > 0.0f
+                    ? (ghost_w_mm / (2.0f * sensor_half_w)) * width
+                    : 1.0f;
+                const float ghost_h_px = ghost_h_mm > 0.0f
+                    ? (ghost_h_mm / (2.0f * sensor_half_h)) * height
+                    : 1.0f;
+                const float extent_px = std::max(std::max(ghost_w_px, ghost_h_px), 1.0f);
+                const float spacing_px = extent_px / std::sqrt((float)valid_grid_count);
+                splat_radius_px = std::clamp(spacing_px * 1.2f, 1.25f, 12.0f);
+            }
+
             active_pairs.push_back(p);
             pair_area_boost.push_back(boost);
+            pair_splat_radii_px.push_back(splat_radius_px);
         }
     }
     printf("Active ghost pairs (above %.1e threshold): %zu / %zu\n",
@@ -331,6 +352,7 @@ void render_ghosts(const LensSystem &lens,
         if (launch_ghost_cuda(lens,
                               active_pairs,
                               pair_area_boost,
+                              pair_splat_radii_px,
                               sources,
                               sensor_half_w,
                               sensor_half_h,
@@ -356,7 +378,10 @@ void render_ghosts(const LensSystem &lens,
 
     // ---- CPU path ----
     printf("Ghost renderer backend: CPU\n");
-    printf("Splat mode: per-source adaptive (collect-then-splat)\n");
+    printf("Splat mode: %s\n",
+           config.cleanup_mode == GhostCleanupMode::LegacyBlur
+               ? "legacy bilinear"
+               : "sharp adaptive");
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -531,7 +556,11 @@ void render_ghosts(const LensSystem &lens,
                 auto &buf = (h.ch == 0)   ? tbuf_r[tid]
                             : (h.ch == 1) ? tbuf_g[tid]
                                           : tbuf_b[tid];
-                splat_tent(buf.data(), width, height, h.px, h.py, h.value, adaptive_r);
+                if (config.cleanup_mode == GhostCleanupMode::LegacyBlur) {
+                    splat_bilinear(buf.data(), width, height, h.px, h.py, h.value);
+                } else {
+                    splat_tent(buf.data(), width, height, h.px, h.py, h.value, adaptive_r);
+                }
             }
         }
 

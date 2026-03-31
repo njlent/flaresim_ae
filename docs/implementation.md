@@ -108,6 +108,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - `Sources` view now follows the actually applied source list after `Max Sources` filtering
 - host-side AE verification on March 30, 2026 confirmed that installed output views switch correctly in After Effects 2025 (`25.5x4`)
 
+### Slice 16
+- added shared `Ghost Cleanup` mode selection with `Legacy Blur`, `Sharp Adaptive`, and `Sharp + Blur`
+- CUDA ghost rendering now supports per-pair adaptive tent splats so sparse ghost samples can fill in without a full-image blur pass
+- shared runtime now only applies post ghost blur when the selected cleanup mode includes it
+- smoke coverage now verifies popup/schema mapping and runtime state propagation for the new cleanup mode
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

@@ -48,6 +48,7 @@ inline constexpr int PARAM_ID_STARBURST_SCALE = 23;
 inline constexpr int PARAM_ID_SPECTRAL_SAMPLES = 24;
 inline constexpr int PARAM_ID_VIEW_MODE = 25;
 inline constexpr int PARAM_ID_MASK_LAYER = 26;
+inline constexpr int PARAM_ID_GHOST_CLEANUP_MODE = 27;
 
 struct AeUiParameterState
 {
@@ -71,6 +72,7 @@ struct AeUiParameterState
     int max_sources = 64;
     float ghost_blur = 0.003f;
     int ghost_blur_passes = 3;
+    int ghost_cleanup_mode_index = 1;
     float haze_gain = 0.0f;
     float haze_radius = 0.15f;
     int haze_blur_passes = 3;
@@ -117,6 +119,7 @@ int haze_blur_passes_param();
 int starburst_gain_param();
 int starburst_scale_param();
 int spectral_samples_param();
+int ghost_cleanup_mode_param();
 int post_section_end_param();
 int flare_section_end_param();
 int view_mode_param();
@@ -137,6 +140,7 @@ std::string build_lens_manufacturer_popup_string();
 std::string build_lens_popup_string_for_manufacturer(int manufacturer_index);
 std::string build_sensor_preset_popup_string();
 std::string build_spectral_samples_popup_string();
+std::string build_ghost_cleanup_mode_popup_string();
 std::string build_output_view_popup_string();
 
 int lens_popup_index_for_builtin(const char* builtin_id);
@@ -151,6 +155,10 @@ bool sensor_preset_dimensions_from_popup(int popup_index, float& out_width_mm, f
 int spectral_samples_popup_count();
 int spectral_samples_popup_index(int spectral_samples);
 bool spectral_samples_from_popup(int popup_index, int& out_spectral_samples);
+
+int ghost_cleanup_mode_popup_count();
+int ghost_cleanup_mode_popup_index(GhostCleanupMode mode);
+bool ghost_cleanup_mode_from_popup(int popup_index, GhostCleanupMode& out_mode);
 
 int output_view_popup_count();
 int output_view_popup_index(AeOutputView view);

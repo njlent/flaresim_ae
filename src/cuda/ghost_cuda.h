@@ -42,6 +42,7 @@ bool launch_ghost_cuda(
     const LensSystem& lens,
     const std::vector<GhostPair>& active_pairs,
     const std::vector<float>& pair_area_boosts,
+    const std::vector<float>& pair_splat_radii_px,
     const std::vector<BrightPixel>& sources,
     float sensor_half_w,
     float sensor_half_h,

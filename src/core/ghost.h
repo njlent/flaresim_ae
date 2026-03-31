@@ -14,6 +14,13 @@ enum class GhostRenderBackend
     CUDA,
 };
 
+enum class GhostCleanupMode
+{
+    LegacyBlur,
+    SharpAdaptive,
+    SharpAdaptivePlusBlur,
+};
+
 // A ghost bounce pair: surfaces where light reflects instead of transmitting.
 struct GhostPair
 {
@@ -44,6 +51,7 @@ struct GhostConfig
     // visible.  Production renderers (ILM, Weta) use a similar technique.
     bool ghost_normalize = true;   // enable per-pair area correction
     float max_area_boost = 100.0f; // clamp the correction factor
+    GhostCleanupMode cleanup_mode = GhostCleanupMode::LegacyBlur;
 };
 
 // Enumerate all valid ghost bounce pairs for the lens system.

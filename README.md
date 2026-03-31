@@ -30,7 +30,9 @@ Current status:
   - top-level Camera, Aperture, Flare Settings, and Post-processing sections
   - output `View` modes for Composite / Flare Only / Bloom Only / Sources / Diagnostics
   - visible `Max Sources` control in Flare Settings
+  - `Ghost Cleanup` popup for Legacy Blur / Sharp Adaptive / Sharp + Blur
 - low-threshold 32-bpc source detection now works for near-white values below `1.0`
+- sharp adaptive ghost cleanup now reduces CUDA splat artifacts without forcing a full post blur
 - local smoke tests green
 
 Host validation:

@@ -179,6 +179,32 @@ void test_render_frame()
     assert(haze_sum > 0.0f);
     assert(starburst_sum > 0.0f);
 
+    FrameRenderSettings legacy_cleanup = settings;
+    legacy_cleanup.haze_gain = 0.0f;
+    legacy_cleanup.starburst_gain = 0.0f;
+    legacy_cleanup.bloom.strength = 0.0f;
+    legacy_cleanup.ghost_blur = 0.01f;
+    legacy_cleanup.ghost_blur_passes = 1;
+    legacy_cleanup.ghost_cleanup_mode = GhostCleanupMode::LegacyBlur;
+
+    FrameRenderSettings sharp_cleanup = legacy_cleanup;
+    sharp_cleanup.ghost_cleanup_mode = GhostCleanupMode::SharpAdaptive;
+
+    FrameRenderOutputs legacy_outputs;
+    FrameRenderOutputs sharp_outputs;
+    assert(render_frame(lens, input, legacy_cleanup, legacy_outputs));
+    assert(render_frame(lens, input, sharp_cleanup, sharp_outputs));
+
+    float legacy_peak = 0.0f;
+    float sharp_peak = 0.0f;
+    for (float v : legacy_outputs.flare_r) {
+        legacy_peak = std::max(legacy_peak, v);
+    }
+    for (float v : sharp_outputs.flare_r) {
+        sharp_peak = std::max(sharp_peak, v);
+    }
+    assert(sharp_peak >= legacy_peak);
+
     std::vector<float> multi_r(64, 0.0f);
     std::vector<float> multi_g(64, 0.0f);
     std::vector<float> multi_b(64, 0.0f);
@@ -258,6 +284,7 @@ void test_ae_adapter_bits()
     state.flare_gain = 250.0f;
     state.ghost_blur = 0.01f;
     state.ghost_blur_passes = 2;
+    state.ghost_cleanup_mode = GhostCleanupMode::SharpAdaptivePlusBlur;
     state.haze_gain = 0.2f;
     state.haze_radius = 0.1f;
     state.haze_blur_passes = 2;
@@ -284,6 +311,7 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(settings.ghost_blur - 0.01f) < 1e-6f);
     assert(settings.ghost_blur_passes == 2);
+    assert(settings.ghost_cleanup_mode == GhostCleanupMode::SharpAdaptivePlusBlur);
     assert(std::abs(settings.haze_gain - 0.2f) < 1e-6f);
     assert(std::abs(settings.haze_radius - 0.1f) < 1e-6f);
     assert(settings.haze_blur_passes == 2);
@@ -495,20 +523,29 @@ void test_param_schema()
     assert(aperture_section_end_param() + 1 == flare_section_start_param());
     assert(flare_section_start_param() + 1 == flare_gain_param());
     assert(flare_section_end_param() + 1 == post_section_start_param());
+    assert(spectral_samples_param() + 1 == ghost_cleanup_mode_param());
+    assert(ghost_cleanup_mode_param() + 1 == post_section_end_param());
     assert(post_section_end_param() + 1 == view_mode_param());
     assert(mask_layer_param() + 1 == parameter_count());
+    assert(PARAM_ID_HAZE_GAIN == 19);
+    assert(PARAM_ID_SPECTRAL_SAMPLES == 24);
+    assert(PARAM_ID_VIEW_MODE == 25);
+    assert(PARAM_ID_MASK_LAYER == 26);
+    assert(PARAM_ID_GHOST_CLEANUP_MODE == 27);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
     const std::string grouped_lens_popup = build_lens_popup_string_for_manufacturer(0);
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_popup = build_spectral_samples_popup_string();
+    const std::string cleanup_popup = build_ghost_cleanup_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
     assert(legacy_lens_popup.find("Double Gauss") != std::string::npos);
     assert(manufacturer_popup.find("Canon") != std::string::npos);
     assert(grouped_lens_popup.find("Double Gauss") != std::string::npos);
     assert(sensor_preset_popup.find("Full Frame") != std::string::npos);
     assert(spectral_popup.find("11") != std::string::npos);
+    assert(cleanup_popup.find("Sharp Adaptive") != std::string::npos);
     assert(view_popup.find("Flare Only") != std::string::npos);
 
     const char* canon_lens_id = "canon-1-4x-tc-canon-extender-ef1-4x-iii";
@@ -534,6 +571,7 @@ void test_param_schema()
     ui.max_sources = 222;
     ui.ghost_blur = 0.02f;
     ui.ghost_blur_passes = 2;
+    ui.ghost_cleanup_mode_index = ghost_cleanup_mode_popup_index(GhostCleanupMode::SharpAdaptive);
     ui.haze_gain = 0.1f;
     ui.haze_radius = 0.05f;
     ui.haze_blur_passes = 2;
@@ -562,6 +600,7 @@ void test_param_schema()
     assert(state.max_sources == 222);
     assert(std::abs(state.ghost_blur - 0.02f) < 1e-6f);
     assert(state.ghost_blur_passes == 2);
+    assert(state.ghost_cleanup_mode == GhostCleanupMode::SharpAdaptive);
     assert(std::abs(state.haze_gain - 0.1f) < 1e-6f);
     assert(std::abs(state.haze_radius - 0.05f) < 1e-6f);
     assert(state.haze_blur_passes == 2);

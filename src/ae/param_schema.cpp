@@ -39,6 +39,18 @@ constexpr SensorPresetDescriptor kSensorPresets[] = {
 
 constexpr int kSpectralSamples[] = {3, 5, 7, 9, 11};
 
+struct GhostCleanupModeDescriptor
+{
+    GhostCleanupMode mode;
+    std::string_view label;
+};
+
+constexpr GhostCleanupModeDescriptor kGhostCleanupModes[] = {
+    {GhostCleanupMode::LegacyBlur, "Legacy Blur"},
+    {GhostCleanupMode::SharpAdaptive, "Sharp Adaptive"},
+    {GhostCleanupMode::SharpAdaptivePlusBlur, "Sharp + Blur"},
+};
+
 std::string build_popup_string_from_labels(const char* const* labels, std::size_t count)
 {
     std::string popup;
@@ -122,7 +134,8 @@ int haze_blur_passes_param() { return haze_radius_param() + 1; }
 int starburst_gain_param() { return haze_blur_passes_param() + 1; }
 int starburst_scale_param() { return starburst_gain_param() + 1; }
 int spectral_samples_param() { return starburst_scale_param() + 1; }
-int post_section_end_param() { return spectral_samples_param() + 1; }
+int ghost_cleanup_mode_param() { return spectral_samples_param() + 1; }
+int post_section_end_param() { return ghost_cleanup_mode_param() + 1; }
 int view_mode_param() { return post_section_end_param() + 1; }
 int mask_layer_param() { return view_mode_param() + 1; }
 int parameter_count() { return mask_layer_param() + 1; }
@@ -225,6 +238,15 @@ std::string build_spectral_samples_popup_string()
         "3", "5", "7", "9", "11",
     };
     return build_popup_string_from_labels(labels.data(), labels.size());
+}
+
+std::string build_ghost_cleanup_mode_popup_string()
+{
+    const char* labels[std::size(kGhostCleanupModes)] {};
+    for (std::size_t i = 0; i < std::size(kGhostCleanupModes); ++i) {
+        labels[i] = kGhostCleanupModes[i].label.data();
+    }
+    return build_popup_string_from_labels(labels, std::size(kGhostCleanupModes));
 }
 
 std::string build_output_view_popup_string()
@@ -360,6 +382,31 @@ bool spectral_samples_from_popup(int popup_index, int& out_spectral_samples)
     return true;
 }
 
+int ghost_cleanup_mode_popup_count()
+{
+    return static_cast<int>(std::size(kGhostCleanupModes));
+}
+
+int ghost_cleanup_mode_popup_index(GhostCleanupMode mode)
+{
+    for (std::size_t i = 0; i < std::size(kGhostCleanupModes); ++i) {
+        if (kGhostCleanupModes[i].mode == mode) {
+            return static_cast<int>(i) + 1;
+        }
+    }
+    return 1;
+}
+
+bool ghost_cleanup_mode_from_popup(int popup_index, GhostCleanupMode& out_mode)
+{
+    if (popup_index < 1 || popup_index > static_cast<int>(std::size(kGhostCleanupModes))) {
+        return false;
+    }
+
+    out_mode = kGhostCleanupModes[popup_index - 1].mode;
+    return true;
+}
+
 int output_view_popup_index(AeOutputView view)
 {
     for (std::size_t i = 0; i < std::size(kOutputViews); ++i) {
@@ -430,6 +477,11 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         return false;
     }
 
+    GhostCleanupMode ghost_cleanup_mode = GhostCleanupMode::LegacyBlur;
+    if (!ghost_cleanup_mode_from_popup(ui_state.ghost_cleanup_mode_index, ghost_cleanup_mode)) {
+        return false;
+    }
+
     out_state.view = view;
     out_state.use_sensor_size = ui_state.use_sensor_size;
     out_state.sensor_preset_index = ui_state.sensor_preset_index;
@@ -448,6 +500,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.max_sources = ui_state.max_sources;
     out_state.ghost_blur = ui_state.ghost_blur;
     out_state.ghost_blur_passes = ui_state.ghost_blur_passes;
+    out_state.ghost_cleanup_mode = ghost_cleanup_mode;
     out_state.haze_gain = ui_state.haze_gain;
     out_state.haze_radius = ui_state.haze_radius;
     out_state.haze_blur_passes = ui_state.haze_blur_passes;

@@ -21,6 +21,7 @@ bool launch_ghost_cuda(
     const LensSystem&,
     const std::vector<GhostPair>&,
     const std::vector<float>&,
+    const std::vector<float>&,
     const std::vector<BrightPixel>&,
     float,
     float,

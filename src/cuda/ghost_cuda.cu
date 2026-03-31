@@ -402,6 +402,7 @@ struct GPUPair
     int surf_a;
     int surf_b;
     float area_boost;
+    float splat_radius_px;
 };
 
 struct GPUSource
@@ -428,6 +429,66 @@ struct GPUSpectralSampleDev
 };
 
 constexpr int kBlockSize = 256;
+
+__device__ __forceinline__ void d_atomic_splat(float* out,
+                                               int width,
+                                               int height,
+                                               float px,
+                                               float py,
+                                               float value,
+                                               float radius)
+{
+    if (value <= 1.0e-14f) {
+        return;
+    }
+
+    if (radius <= 1.5f) {
+        const int x0 = static_cast<int>(floorf(px - 0.5f));
+        const int y0 = static_cast<int>(floorf(py - 0.5f));
+        const float fx = (px - 0.5f) - static_cast<float>(x0);
+        const float fy = (py - 0.5f) - static_cast<float>(y0);
+        const float w00 = (1.0f - fx) * (1.0f - fy);
+        const float w10 = fx * (1.0f - fy);
+        const float w01 = (1.0f - fx) * fy;
+        const float w11 = fx * fy;
+
+        if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height) {
+            atomicAdd(&out[y0 * width + x0], value * w00);
+        }
+        if (x0 + 1 >= 0 && x0 + 1 < width && y0 >= 0 && y0 < height) {
+            atomicAdd(&out[y0 * width + (x0 + 1)], value * w10);
+        }
+        if (x0 >= 0 && x0 < width && y0 + 1 >= 0 && y0 + 1 < height) {
+            atomicAdd(&out[(y0 + 1) * width + x0], value * w01);
+        }
+        if (x0 + 1 >= 0 && x0 + 1 < width && y0 + 1 >= 0 && y0 + 1 < height) {
+            atomicAdd(&out[(y0 + 1) * width + (x0 + 1)], value * w11);
+        }
+        return;
+    }
+
+    const int ix0 = max(static_cast<int>(floorf(px - radius)), 0);
+    const int ix1 = min(static_cast<int>(ceilf(px + radius)), width - 1);
+    const int iy0 = max(static_cast<int>(floorf(py - radius)), 0);
+    const int iy1 = min(static_cast<int>(ceilf(py + radius)), height - 1);
+    const float inv_r = 1.0f / radius;
+    const float norm = value / (radius * radius);
+
+    for (int y = iy0; y <= iy1; ++y) {
+        const float wy = fmaxf(1.0f - fabsf((y + 0.5f) - py) * inv_r, 0.0f);
+        if (wy <= 0.0f) {
+            continue;
+        }
+        const float row_scale = wy * norm;
+        const int row = y * width;
+        for (int x = ix0; x <= ix1; ++x) {
+            const float wx = fmaxf(1.0f - fabsf((x + 0.5f) - px) * inv_r, 0.0f);
+            if (wx > 0.0f) {
+                atomicAdd(&out[row + x], row_scale * wx);
+            }
+        }
+    }
+}
 
 __global__ void ghost_kernel(const Surface* surfaces,
                              int num_surfaces,
@@ -500,39 +561,12 @@ __global__ void ghost_kernel(const Surface* surfaces,
             continue;
         }
 
-        const int x0 = static_cast<int>(floorf(px - 0.5f));
-        const int y0 = static_cast<int>(floorf(py - 0.5f));
-        const float fx = (px - 0.5f) - static_cast<float>(x0);
-        const float fy = (py - 0.5f) - static_cast<float>(y0);
-        const float w00 = (1.0f - fx) * (1.0f - fy);
-        const float w10 = fx * (1.0f - fy);
-        const float w01 = (1.0f - fx) * fy;
-        const float w11 = fx * fy;
-
         const float cr = source.r * sample.rw * contribution;
         const float cg = source.g * sample.gw * contribution;
         const float cb = source.b * sample.bw * contribution;
-
-        if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height) {
-            if (cr > 1e-14f) atomicAdd(&out_r[y0 * width + x0], cr * w00);
-            if (cg > 1e-14f) atomicAdd(&out_g[y0 * width + x0], cg * w00);
-            if (cb > 1e-14f) atomicAdd(&out_b[y0 * width + x0], cb * w00);
-        }
-        if (x0 + 1 >= 0 && x0 + 1 < width && y0 >= 0 && y0 < height) {
-            if (cr > 1e-14f) atomicAdd(&out_r[y0 * width + (x0 + 1)], cr * w10);
-            if (cg > 1e-14f) atomicAdd(&out_g[y0 * width + (x0 + 1)], cg * w10);
-            if (cb > 1e-14f) atomicAdd(&out_b[y0 * width + (x0 + 1)], cb * w10);
-        }
-        if (x0 >= 0 && x0 < width && y0 + 1 >= 0 && y0 + 1 < height) {
-            if (cr > 1e-14f) atomicAdd(&out_r[(y0 + 1) * width + x0], cr * w01);
-            if (cg > 1e-14f) atomicAdd(&out_g[(y0 + 1) * width + x0], cg * w01);
-            if (cb > 1e-14f) atomicAdd(&out_b[(y0 + 1) * width + x0], cb * w01);
-        }
-        if (x0 + 1 >= 0 && x0 + 1 < width && y0 + 1 >= 0 && y0 + 1 < height) {
-            if (cr > 1e-14f) atomicAdd(&out_r[(y0 + 1) * width + (x0 + 1)], cr * w11);
-            if (cg > 1e-14f) atomicAdd(&out_g[(y0 + 1) * width + (x0 + 1)], cg * w11);
-            if (cb > 1e-14f) atomicAdd(&out_b[(y0 + 1) * width + (x0 + 1)], cb * w11);
-        }
+        d_atomic_splat(out_r, width, height, px, py, cr, pair.splat_radius_px);
+        d_atomic_splat(out_g, width, height, px, py, cg, pair.splat_radius_px);
+        d_atomic_splat(out_b, width, height, px, py, cb, pair.splat_radius_px);
     }
 }
 
@@ -604,6 +638,7 @@ bool cuda_ghost_renderer_available(std::string* reason)
 bool launch_ghost_cuda(const LensSystem& lens,
                        const std::vector<GhostPair>& active_pairs,
                        const std::vector<float>& pair_area_boosts,
+                       const std::vector<float>& pair_splat_radii_px,
                        const std::vector<BrightPixel>& sources,
                        float sensor_half_w,
                        float sensor_half_h,
@@ -721,6 +756,7 @@ bool launch_ghost_cuda(const LensSystem& lens,
             active_pairs[i].surf_a,
             active_pairs[i].surf_b,
             pair_area_boosts[i],
+            pair_splat_radii_px[i],
         };
     }
 

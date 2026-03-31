@@ -45,6 +45,7 @@ struct AeParameterState
     float flare_gain = 1000.0f;
     float ghost_blur = 0.003f;
     int ghost_blur_passes = 3;
+    GhostCleanupMode ghost_cleanup_mode = GhostCleanupMode::LegacyBlur;
     float haze_gain = 0.0f;
     float haze_radius = 0.15f;
     int haze_blur_passes = 3;

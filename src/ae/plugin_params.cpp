@@ -23,6 +23,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_samples_popup = build_spectral_samples_popup_string();
+    const std::string ghost_cleanup_popup = build_ghost_cleanup_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
 
     AEFX_CLR_STRUCT(def);
@@ -353,6 +354,15 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   spectral_samples_popup.data(),
                   PF_ParamFlag_NONE,
                   PARAM_ID_SPECTRAL_SAMPLES);
+
+    // Keep disk IDs stable for saved comps; only the UI order changes here.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Ghost Cleanup",
+                  static_cast<A_short>(ghost_cleanup_mode_popup_count()),
+                  static_cast<A_short>(defaults.ghost_cleanup_mode_index),
+                  ghost_cleanup_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_GHOST_CLEANUP_MODE);
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_POST_SECTION_END);

@@ -21,6 +21,7 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.flare_gain = state.flare_gain;
     settings.ghost_blur = state.ghost_blur;
     settings.ghost_blur_passes = state.ghost_blur_passes;
+    settings.ghost_cleanup_mode = state.ghost_cleanup_mode;
     settings.haze_gain = state.haze_gain;
     settings.haze_radius = state.haze_radius;
     settings.haze_blur_passes = state.haze_blur_passes;

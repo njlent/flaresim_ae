@@ -55,6 +55,7 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.max_sources = params[max_sources_param()]->u.sd.value;
     out_state.ghost_blur = params[ghost_blur_param()]->u.fs_d.value;
     out_state.ghost_blur_passes = params[ghost_blur_passes_param()]->u.sd.value;
+    out_state.ghost_cleanup_mode_index = params[ghost_cleanup_mode_param()]->u.pd.value;
     out_state.haze_gain = params[haze_gain_param()]->u.fs_d.value;
     out_state.haze_radius = params[haze_radius_param()]->u.fs_d.value;
     out_state.haze_blur_passes = params[haze_blur_passes_param()]->u.sd.value;
@@ -258,6 +259,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef max_sources_param_def;
     PF_ParamDef ghost_blur_param_def;
     PF_ParamDef ghost_blur_passes_param_def;
+    PF_ParamDef ghost_cleanup_mode_param_def;
     PF_ParamDef haze_gain_param_def;
     PF_ParamDef haze_radius_param_def;
     PF_ParamDef haze_blur_passes_param_def;
@@ -285,6 +287,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(max_sources_param_def);
     AEFX_CLR_STRUCT(ghost_blur_param_def);
     AEFX_CLR_STRUCT(ghost_blur_passes_param_def);
+    AEFX_CLR_STRUCT(ghost_cleanup_mode_param_def);
     AEFX_CLR_STRUCT(haze_gain_param_def);
     AEFX_CLR_STRUCT(haze_radius_param_def);
     AEFX_CLR_STRUCT(haze_blur_passes_param_def);
@@ -313,6 +316,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool max_sources_checked_out = false;
     bool ghost_blur_checked_out = false;
     bool ghost_blur_passes_checked_out = false;
+    bool ghost_cleanup_mode_checked_out = false;
     bool haze_gain_checked_out = false;
     bool haze_radius_checked_out = false;
     bool haze_blur_passes_checked_out = false;
@@ -488,6 +492,14 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     ghost_blur_passes_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          ghost_cleanup_mode_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &ghost_cleanup_mode_param_def));
+    ghost_cleanup_mode_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           haze_gain_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -565,6 +577,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.max_sources = max_sources_param_def.u.sd.value;
         ui_state.ghost_blur = ghost_blur_param_def.u.fs_d.value;
         ui_state.ghost_blur_passes = ghost_blur_passes_param_def.u.sd.value;
+        ui_state.ghost_cleanup_mode_index = ghost_cleanup_mode_param_def.u.pd.value;
         ui_state.haze_gain = haze_gain_param_def.u.fs_d.value;
         ui_state.haze_radius = haze_radius_param_def.u.fs_d.value;
         ui_state.haze_blur_passes = haze_blur_passes_param_def.u.sd.value;
@@ -601,6 +614,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (ghost_blur_passes_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &ghost_blur_passes_param_def));
+    }
+    if (ghost_cleanup_mode_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &ghost_cleanup_mode_param_def));
     }
     if (ghost_blur_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &ghost_blur_param_def));
