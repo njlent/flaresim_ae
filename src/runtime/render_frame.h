@@ -26,6 +26,7 @@ struct FrameRenderSettings
     float aperture_rotation_deg = 0.0f;
     float min_ghost = 1e-7f;
     float flare_gain = 1000.0f;
+    float sky_brightness = 1.0f;
     float ghost_blur = 0.003f;
     int ghost_blur_passes = 3;
     GhostCleanupMode ghost_cleanup_mode = GhostCleanupMode::LegacyBlur;
@@ -45,6 +46,9 @@ struct FrameRenderOutputs
     int width = 0;
     int height = 0;
     GhostRenderBackend ghost_backend = GhostRenderBackend::CPU;
+    std::vector<float> scene_r;
+    std::vector<float> scene_g;
+    std::vector<float> scene_b;
     std::vector<float> flare_r;
     std::vector<float> flare_g;
     std::vector<float> flare_b;

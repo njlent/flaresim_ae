@@ -120,7 +120,8 @@ int aperture_section_end_param() { return aperture_rotation_param() + 1; }
 
 int flare_section_start_param() { return aperture_section_end_param() + 1; }
 int flare_gain_param() { return flare_section_start_param() + 1; }
-int threshold_param() { return flare_gain_param() + 1; }
+int sky_brightness_param() { return flare_gain_param() + 1; }
+int threshold_param() { return sky_brightness_param() + 1; }
 int ray_grid_param() { return threshold_param() + 1; }
 int downsample_param() { return ray_grid_param() + 1; }
 int max_sources_param() { return downsample_param() + 1; }
@@ -494,6 +495,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.aperture_blades = ui_state.aperture_blades;
     out_state.aperture_rotation_deg = ui_state.aperture_rotation_deg;
     out_state.flare_gain = ui_state.flare_gain;
+    out_state.sky_brightness = ui_state.sky_brightness;
     out_state.threshold = ui_state.threshold;
     out_state.ray_grid = ui_state.ray_grid;
     out_state.downsample = ui_state.downsample;

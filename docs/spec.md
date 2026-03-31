@@ -191,6 +191,7 @@ Mask behavior:
 ### MVP controls
 - Lens
 - Flare Gain
+- Sky Brightness (approximate threshold-based background scale; exact upstream sky-layer mode needs separate `sky.*` inputs)
 - Ray Grid
 - Threshold
 - Source Cap

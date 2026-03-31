@@ -19,6 +19,7 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.aperture_rotation_deg = state.aperture_rotation_deg;
     settings.min_ghost = state.min_ghost;
     settings.flare_gain = state.flare_gain;
+    settings.sky_brightness = state.sky_brightness;
     settings.ghost_blur = state.ghost_blur;
     settings.ghost_blur_passes = state.ghost_blur_passes;
     settings.ghost_cleanup_mode = state.ghost_cleanup_mode;

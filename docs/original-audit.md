@@ -30,8 +30,11 @@ Keep out initially:
 - TGA output
 - config-file parsing
 - CLI-only diagnostics
-- sky brightness logic
+- exact `sky.R/G/B` sky brightness logic
 - ghost blur helpers
+
+Adapted later:
+- threshold-based `sky_brightness` fallback for AE/plugin inputs without separate sky layers
 
 Minimal verification:
 - load bundled `.lens` preset

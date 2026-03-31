@@ -223,6 +223,18 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                          PARAM_ID_FLARE_GAIN);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Sky Brightness",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.sky_brightness,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_SKY_BRIGHTNESS);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Threshold",
                          0.0f,
                          kManualFloatMax,

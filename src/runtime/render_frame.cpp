@@ -8,6 +8,43 @@
 
 namespace {
 
+RgbImageView prepare_scene_input(const RgbImageView& input,
+                                 const FrameRenderSettings& settings,
+                                 FrameRenderOutputs& outputs)
+{
+    if (std::abs(settings.sky_brightness - 1.0f) <= 1.0e-6f) {
+        outputs.scene_r.clear();
+        outputs.scene_g.clear();
+        outputs.scene_b.clear();
+        return input;
+    }
+
+    const size_t np = static_cast<size_t>(input.width) * static_cast<size_t>(input.height);
+    outputs.scene_r.assign(input.r, input.r + np);
+    outputs.scene_g.assign(input.g, input.g + np);
+    outputs.scene_b.assign(input.b, input.b + np);
+
+    for (size_t i = 0; i < np; ++i) {
+        const float lum =
+            0.2126f * outputs.scene_r[i] +
+            0.7152f * outputs.scene_g[i] +
+            0.0722f * outputs.scene_b[i];
+        if (lum <= settings.threshold) {
+            outputs.scene_r[i] *= settings.sky_brightness;
+            outputs.scene_g[i] *= settings.sky_brightness;
+            outputs.scene_b[i] *= settings.sky_brightness;
+        }
+    }
+
+    return {
+        outputs.scene_r.data(),
+        outputs.scene_g.data(),
+        outputs.scene_b.data(),
+        input.width,
+        input.height,
+    };
+}
+
 void rasterize_sources(const std::vector<BrightPixel>& sources,
                        const FrameRenderSettings& settings,
                        int width,
@@ -118,8 +155,10 @@ bool render_frame(
         return false;
     }
 
+    const RgbImageView scene_input = prepare_scene_input(input, settings, outputs);
+
     outputs.detected_sources = extract_bright_pixels(
-        input,
+        scene_input,
         settings.threshold,
         settings.downsample,
         fov_h,
@@ -255,7 +294,7 @@ bool render_frame(
             input.width,
             input.height,
         };
-        generate_bloom(input, bloom_out, settings.bloom);
+        generate_bloom(scene_input, bloom_out, settings.bloom);
     }
 
     return true;

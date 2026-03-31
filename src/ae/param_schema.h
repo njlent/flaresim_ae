@@ -49,6 +49,7 @@ inline constexpr int PARAM_ID_SPECTRAL_SAMPLES = 24;
 inline constexpr int PARAM_ID_VIEW_MODE = 25;
 inline constexpr int PARAM_ID_MASK_LAYER = 26;
 inline constexpr int PARAM_ID_GHOST_CLEANUP_MODE = 27;
+inline constexpr int PARAM_ID_SKY_BRIGHTNESS = 28;
 
 struct AeUiParameterState
 {
@@ -66,6 +67,7 @@ struct AeUiParameterState
     int aperture_blades = 0;
     float aperture_rotation_deg = 0.0f;
     float flare_gain = 1000.0f;
+    float sky_brightness = 1.0f;
     float threshold = 8.0f;
     int ray_grid = 16;
     int downsample = 8;
@@ -106,6 +108,7 @@ int aperture_section_end_param();
 
 int flare_section_start_param();
 int flare_gain_param();
+int sky_brightness_param();
 int threshold_param();
 int ray_grid_param();
 int downsample_param();

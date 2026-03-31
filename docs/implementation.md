@@ -114,6 +114,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - shared runtime now only applies post ghost blur when the selected cleanup mode includes it
 - smoke coverage now verifies popup/schema mapping and runtime state propagation for the new cleanup mode
 
+### Slice 17
+- added an AE `Sky Brightness` control derived from the original `flaresim` fallback path
+- shared runtime now scales sub-threshold scene pixels before source extraction, bloom, and composite/diagnostic output when `Sky Brightness != 1`
+- exact upstream `sky.R/G/B` layer handling remains out of scope for AE because the current host path only receives one beauty image
+- smoke coverage now verifies runtime scaling, parameter plumbing, and frame-bridge output for the new control
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

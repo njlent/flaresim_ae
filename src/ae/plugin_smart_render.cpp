@@ -49,6 +49,7 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.aperture_blades = params[aperture_blades_param()]->u.sd.value;
     out_state.aperture_rotation_deg = params[aperture_rotation_param()]->u.fs_d.value;
     out_state.flare_gain = params[flare_gain_param()]->u.fs_d.value;
+    out_state.sky_brightness = params[sky_brightness_param()]->u.fs_d.value;
     out_state.threshold = params[threshold_param()]->u.fs_d.value;
     out_state.ray_grid = params[ray_grid_param()]->u.sd.value;
     out_state.downsample = params[downsample_param()]->u.sd.value;
@@ -253,6 +254,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef aperture_blades_param_def;
     PF_ParamDef aperture_rotation_param_def;
     PF_ParamDef flare_gain_param_def;
+    PF_ParamDef sky_brightness_param_def;
     PF_ParamDef threshold_param_def;
     PF_ParamDef ray_grid_param_def;
     PF_ParamDef downsample_param_def;
@@ -281,6 +283,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(aperture_blades_param_def);
     AEFX_CLR_STRUCT(aperture_rotation_param_def);
     AEFX_CLR_STRUCT(flare_gain_param_def);
+    AEFX_CLR_STRUCT(sky_brightness_param_def);
     AEFX_CLR_STRUCT(threshold_param_def);
     AEFX_CLR_STRUCT(ray_grid_param_def);
     AEFX_CLR_STRUCT(downsample_param_def);
@@ -310,6 +313,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool aperture_blades_checked_out = false;
     bool aperture_rotation_checked_out = false;
     bool flare_gain_checked_out = false;
+    bool sky_brightness_checked_out = false;
     bool threshold_checked_out = false;
     bool ray_grid_checked_out = false;
     bool downsample_checked_out = false;
@@ -444,6 +448,14 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     flare_gain_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          sky_brightness_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &sky_brightness_param_def));
+    sky_brightness_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           threshold_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -571,6 +583,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.aperture_blades = aperture_blades_param_def.u.sd.value;
         ui_state.aperture_rotation_deg = aperture_rotation_param_def.u.fs_d.value;
         ui_state.flare_gain = flare_gain_param_def.u.fs_d.value;
+        ui_state.sky_brightness = sky_brightness_param_def.u.fs_d.value;
         ui_state.threshold = threshold_param_def.u.fs_d.value;
         ui_state.ray_grid = ray_grid_param_def.u.sd.value;
         ui_state.downsample = downsample_param_def.u.sd.value;
@@ -632,6 +645,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (threshold_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &threshold_param_def));
+    }
+    if (sky_brightness_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &sky_brightness_param_def));
     }
     if (flare_gain_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &flare_gain_param_def));

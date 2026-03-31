@@ -5,6 +5,21 @@
 
 namespace {
 
+RgbImageView composite_input_view(const RgbImageView& input, const FrameRenderOutputs& outputs)
+{
+    if (outputs.scene_r.empty() || outputs.scene_g.empty() || outputs.scene_b.empty()) {
+        return input;
+    }
+
+    return {
+        outputs.scene_r.data(),
+        outputs.scene_g.data(),
+        outputs.scene_b.data(),
+        outputs.width,
+        outputs.height,
+    };
+}
+
 void clear_output(MutableRgbImageView output)
 {
     const int np = output.width * output.height;
@@ -97,9 +112,11 @@ bool compose_output_view(
         return false;
     }
 
+    const RgbImageView composite_input = composite_input_view(input, outputs);
+
     switch (view) {
         case AeOutputView::Composite:
-            copy_input(input, output);
+            copy_input(composite_input, output);
             add_buffers(outputs.flare_r, outputs.flare_g, outputs.flare_b, output);
             add_buffers(outputs.bloom_r, outputs.bloom_g, outputs.bloom_b, output);
             add_buffers(outputs.haze_r, outputs.haze_g, outputs.haze_b, output);
@@ -124,7 +141,7 @@ bool compose_output_view(
             return true;
 
         case AeOutputView::Diagnostics:
-            copy_input(input, output);
+            copy_input(composite_input, output);
             draw_sources(settings, outputs, output, true);
             return true;
     }

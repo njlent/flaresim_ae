@@ -244,6 +244,72 @@ void test_render_frame()
     assert(preview_hits <= 9);
 }
 
+void test_sky_brightness()
+{
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    std::vector<float> src_r(64, 0.5f);
+    std::vector<float> src_g(64, 0.5f);
+    std::vector<float> src_b(64, 0.5f);
+    src_r[27] = 12.0f;
+    src_g[27] = 8.0f;
+    src_b[27] = 4.0f;
+
+    const RgbImageView input {src_r.data(), src_g.data(), src_b.data(), 8, 8};
+
+    FrameRenderSettings settings {};
+    settings.fov_h_deg = 60.0f;
+    settings.threshold = 1.0f;
+    settings.downsample = 1;
+    settings.ray_grid = 4;
+    settings.flare_gain = 0.0f;
+    settings.sky_brightness = 0.5f;
+
+    FrameRenderOutputs outputs;
+    assert(render_frame(lens, input, settings, outputs));
+    assert(outputs.detected_sources.size() == 1);
+    assert(outputs.scene_r.size() == 64);
+    assert(std::abs(outputs.scene_r[0] - 0.25f) < 1.0e-6f);
+    assert(std::abs(outputs.scene_g[0] - 0.25f) < 1.0e-6f);
+    assert(std::abs(outputs.scene_b[0] - 0.25f) < 1.0e-6f);
+    assert(std::abs(outputs.scene_r[27] - 12.0f) < 1.0e-6f);
+    assert(std::abs(outputs.scene_g[27] - 8.0f) < 1.0e-6f);
+    assert(std::abs(outputs.scene_b[27] - 4.0f) < 1.0e-6f);
+
+    std::vector<float> composite_r(64, 0.0f);
+    std::vector<float> composite_g(64, 0.0f);
+    std::vector<float> composite_b(64, 0.0f);
+    MutableRgbImageView composite {
+        composite_r.data(),
+        composite_g.data(),
+        composite_b.data(),
+        8,
+        8,
+    };
+    assert(compose_output_view(AeOutputView::Composite, input, settings, outputs, composite));
+    assert(std::abs(composite_r[0] - 0.25f) < 1.0e-6f);
+    assert(std::abs(composite_g[0] - 0.25f) < 1.0e-6f);
+    assert(std::abs(composite_b[0] - 0.25f) < 1.0e-6f);
+
+    std::vector<float> promoted_r(64, 0.75f);
+    std::vector<float> promoted_g(64, 0.75f);
+    std::vector<float> promoted_b(64, 0.75f);
+    const RgbImageView promoted_input {
+        promoted_r.data(),
+        promoted_g.data(),
+        promoted_b.data(),
+        8,
+        8,
+    };
+
+    settings.sky_brightness = 2.0f;
+    FrameRenderOutputs promoted_outputs;
+    assert(render_frame(lens, promoted_input, settings, promoted_outputs));
+    assert(!promoted_outputs.detected_sources.empty());
+}
+
 void test_cuda_backend_api()
 {
     assert(std::string(ghost_render_backend_name(GhostRenderBackend::CPU)) == "CPU");
@@ -282,6 +348,7 @@ void test_ae_adapter_bits()
     state.aperture_blades = 7;
     state.aperture_rotation_deg = 15.0f;
     state.flare_gain = 250.0f;
+    state.sky_brightness = 0.25f;
     state.ghost_blur = 0.01f;
     state.ghost_blur_passes = 2;
     state.ghost_cleanup_mode = GhostCleanupMode::SharpAdaptivePlusBlur;
@@ -309,6 +376,7 @@ void test_ae_adapter_bits()
     assert(settings.aperture_blades == 7);
     assert(std::abs(settings.aperture_rotation_deg - 15.0f) < 1e-6f);
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
+    assert(std::abs(settings.sky_brightness - 0.25f) < 1e-6f);
     assert(std::abs(settings.ghost_blur - 0.01f) < 1e-6f);
     assert(settings.ghost_blur_passes == 2);
     assert(settings.ghost_cleanup_mode == GhostCleanupMode::SharpAdaptivePlusBlur);
@@ -446,6 +514,7 @@ void test_frame_bridge()
     state.downsample = 1;
     state.ray_grid = 4;
     state.flare_gain = 100.0f;
+    state.sky_brightness = 0.5f;
     state.bloom.threshold = 0.25f;
     state.bloom.strength = 0.5f;
     state.bloom.radius = 0.08f;
@@ -512,6 +581,21 @@ void test_frame_bridge()
         near_white_sum_ds1 += v;
     }
     assert(near_white_sum_ds1 > 0.0f);
+
+    std::fill(src32.begin(), src32.end(), pack_pixel32(FloatPixel {1.0f, 0.5f, 0.5f, 0.5f}));
+    state.view = AeOutputView::Composite;
+    state.threshold = 1.0f;
+    state.flare_gain = 0.0f;
+    state.bloom.strength = 0.0f;
+    state.haze_gain = 0.0f;
+    state.starburst_gain = 0.0f;
+    state.sky_brightness = 0.5f;
+
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+    assert(std::abs(out32.r[0] - 0.25f) < 1.0e-6f);
+    assert(std::abs(out32.g[0] - 0.25f) < 1.0e-6f);
+    assert(std::abs(out32.b[0] - 0.25f) < 1.0e-6f);
 }
 
 void test_param_schema()
@@ -522,6 +606,8 @@ void test_param_schema()
     assert(camera_section_end_param() + 1 == aperture_section_start_param());
     assert(aperture_section_end_param() + 1 == flare_section_start_param());
     assert(flare_section_start_param() + 1 == flare_gain_param());
+    assert(flare_gain_param() + 1 == sky_brightness_param());
+    assert(sky_brightness_param() + 1 == threshold_param());
     assert(flare_section_end_param() + 1 == post_section_start_param());
     assert(spectral_samples_param() + 1 == ghost_cleanup_mode_param());
     assert(ghost_cleanup_mode_param() + 1 == post_section_end_param());
@@ -532,6 +618,7 @@ void test_param_schema()
     assert(PARAM_ID_VIEW_MODE == 25);
     assert(PARAM_ID_MASK_LAYER == 26);
     assert(PARAM_ID_GHOST_CLEANUP_MODE == 27);
+    assert(PARAM_ID_SKY_BRIGHTNESS == 28);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -565,6 +652,7 @@ void test_param_schema()
     ui.aperture_rotation_deg = 12.0f;
     ui.view_mode_index = output_view_popup_index(AeOutputView::Diagnostics);
     ui.flare_gain = 250.0f;
+    ui.sky_brightness = 0.25f;
     ui.threshold = 1.5f;
     ui.ray_grid = 8;
     ui.downsample = 2;
@@ -594,6 +682,7 @@ void test_param_schema()
     assert(state.aperture_blades == 8);
     assert(std::abs(state.aperture_rotation_deg - 12.0f) < 1e-6f);
     assert(std::abs(state.flare_gain - 250.0f) < 1e-6f);
+    assert(std::abs(state.sky_brightness - 0.25f) < 1e-6f);
     assert(std::abs(state.threshold - 1.5f) < 1e-6f);
     assert(state.ray_grid == 8);
     assert(state.downsample == 2);
@@ -628,6 +717,7 @@ int main()
     test_source_limit();
     test_bloom();
     test_render_frame();
+    test_sky_brightness();
     test_cuda_backend_api();
     test_ae_adapter_bits();
     test_output_views();
