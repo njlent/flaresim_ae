@@ -17,6 +17,8 @@
 
 After Effects port of FlareSim.
 
+A CUDA-accelerated Aftereffects plugin for physically-based lens flare simulation. FlareSim traces rays through a real lens prescription to produce ghost reflections that respond correctly to source position, wavelength, and aperture shape — without look-up textures or artist-painted elements.
+
 > [!IMPORTANT]
 > This is mostly for personal exploration and NOT production tested or stable.
 
