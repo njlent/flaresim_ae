@@ -1,5 +1,5 @@
 <div align="center">
- <br/>
+
  <h1> <img src="docs/icon.png" width="100px">
  <br/>
  Flaresim AE</h1>
