@@ -17,6 +17,9 @@
 
 After Effects port of FlareSim.
 
+> [!IMPORTANT]
+> This is mostly for personal exploration and NOT production tested or stable.
+
 ## Supported versions: 
 
 AfterEffects 25.5 Windows + CUDA first.
