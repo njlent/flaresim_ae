@@ -26,6 +26,8 @@ A CUDA-accelerated Aftereffects plugin for physically-based lens flare simulatio
 
 AfterEffects 25.5 Windows + CUDA first.
 
+## Status
+
 Implementation basis: original `space55/blackhole-rt/flaresim`, with later `flaresim_nuke` features layered on selectively.
 
 Current status:
