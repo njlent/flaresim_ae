@@ -5,8 +5,199 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <type_traits>
 
 namespace {
+
+constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
+constexpr std::uint64_t kFnvPrime = 1099511628211ull;
+
+void hash_append_bytes(std::uint64_t& hash, const void* data, std::size_t size)
+{
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (std::size_t i = 0; i < size; ++i) {
+        hash ^= static_cast<std::uint64_t>(bytes[i]);
+        hash *= kFnvPrime;
+    }
+}
+
+template <typename T>
+void hash_append_value(std::uint64_t& hash, const T& value)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    hash_append_bytes(hash, &value, sizeof(T));
+}
+
+void hash_append_string(std::uint64_t& hash, const std::string& value)
+{
+    const std::size_t size = value.size();
+    hash_append_value(hash, size);
+    if (!value.empty()) {
+        hash_append_bytes(hash, value.data(), value.size());
+    }
+}
+
+bool needs_source_stage(const FrameRenderPlan& plan)
+{
+    return plan.need_source_output || plan.need_flare || plan.need_haze || plan.need_starburst;
+}
+
+bool needs_scene_stage(const FrameRenderPlan& plan)
+{
+    return plan.need_scene_output || plan.need_bloom || needs_source_stage(plan);
+}
+
+void clear_outputs(FrameRenderOutputs& outputs)
+{
+    outputs.stats = {};
+    outputs.scene_r.clear();
+    outputs.scene_g.clear();
+    outputs.scene_b.clear();
+    outputs.flare_r.clear();
+    outputs.flare_g.clear();
+    outputs.flare_b.clear();
+    outputs.bloom_r.clear();
+    outputs.bloom_g.clear();
+    outputs.bloom_b.clear();
+    outputs.haze_r.clear();
+    outputs.haze_g.clear();
+    outputs.haze_b.clear();
+    outputs.starburst_r.clear();
+    outputs.starburst_g.clear();
+    outputs.starburst_b.clear();
+    outputs.detected_sources.clear();
+    outputs.sources.clear();
+}
+
+RgbImageView make_scene_view(const FrameRenderOutputs& outputs, const RgbImageView& input)
+{
+    if (outputs.scene_r.empty() || outputs.scene_g.empty() || outputs.scene_b.empty()) {
+        return input;
+    }
+
+    return {
+        outputs.scene_r.data(),
+        outputs.scene_g.data(),
+        outputs.scene_b.data(),
+        outputs.width,
+        outputs.height,
+    };
+}
+
+std::uint64_t hash_input_image(const RgbImageView& input)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, input.width);
+    hash_append_value(hash, input.height);
+
+    const std::size_t np = static_cast<std::size_t>(input.width) * static_cast<std::size_t>(input.height);
+    hash_append_bytes(hash, input.r, np * sizeof(float));
+    hash_append_bytes(hash, input.g, np * sizeof(float));
+    hash_append_bytes(hash, input.b, np * sizeof(float));
+    return hash;
+}
+
+std::uint64_t hash_lens(const LensSystem& lens)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_string(hash, lens.name);
+    hash_append_value(hash, lens.focal_length);
+    hash_append_value(hash, lens.sensor_z);
+
+    const std::size_t count = lens.surfaces.size();
+    hash_append_value(hash, count);
+    for (const Surface& surface : lens.surfaces) {
+        hash_append_value(hash, surface.radius);
+        hash_append_value(hash, surface.thickness);
+        hash_append_value(hash, surface.ior);
+        hash_append_value(hash, surface.abbe_v);
+        hash_append_value(hash, surface.semi_aperture);
+        hash_append_value(hash, surface.coating);
+        hash_append_value(hash, surface.is_stop);
+        hash_append_value(hash, surface.z);
+    }
+
+    return hash;
+}
+
+std::uint64_t make_scene_key(const RgbImageView& input, const FrameRenderSettings& settings)
+{
+    std::uint64_t hash = hash_input_image(input);
+    hash_append_value(hash, settings.threshold);
+    hash_append_value(hash, settings.sky_brightness);
+    return hash;
+}
+
+std::uint64_t make_source_key(std::uint64_t scene_key, const FrameRenderSettings& settings)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, scene_key);
+    hash_append_value(hash, settings.use_sensor_size);
+    hash_append_value(hash, settings.fov_h_deg);
+    hash_append_value(hash, settings.fov_v_deg);
+    hash_append_value(hash, settings.auto_fov_v);
+    hash_append_value(hash, settings.sensor_width_mm);
+    hash_append_value(hash, settings.sensor_height_mm);
+    hash_append_value(hash, settings.focal_length_mm);
+    hash_append_value(hash, settings.downsample);
+    hash_append_value(hash, settings.max_sources);
+    return hash;
+}
+
+std::uint64_t make_ghost_key(std::uint64_t source_key,
+                             std::uint64_t lens_key,
+                             const FrameRenderSettings& settings)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, source_key);
+    hash_append_value(hash, lens_key);
+    hash_append_value(hash, settings.ray_grid);
+    hash_append_value(hash, settings.min_ghost);
+    hash_append_value(hash, settings.flare_gain);
+    hash_append_value(hash, settings.spectral_samples);
+    hash_append_value(hash, settings.aperture_blades);
+    hash_append_value(hash, settings.aperture_rotation_deg);
+    hash_append_value(hash, settings.ghost_normalize);
+    hash_append_value(hash, settings.max_area_boost);
+    hash_append_value(hash, settings.ghost_cleanup_mode);
+    return hash;
+}
+
+std::uint64_t make_bloom_key(std::uint64_t scene_key, const FrameRenderSettings& settings)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, scene_key);
+    hash_append_value(hash, settings.bloom.threshold);
+    hash_append_value(hash, settings.bloom.strength);
+    hash_append_value(hash, settings.bloom.radius);
+    hash_append_value(hash, settings.bloom.passes);
+    hash_append_value(hash, settings.bloom.octaves);
+    hash_append_value(hash, settings.bloom.chromatic);
+    return hash;
+}
+
+std::uint64_t make_haze_key(std::uint64_t source_key, const FrameRenderSettings& settings)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, source_key);
+    hash_append_value(hash, settings.haze_gain);
+    hash_append_value(hash, settings.haze_radius);
+    hash_append_value(hash, settings.haze_blur_passes);
+    return hash;
+}
+
+std::uint64_t make_starburst_key(std::uint64_t source_key, const FrameRenderSettings& settings)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, source_key);
+    hash_append_value(hash, settings.starburst_gain);
+    hash_append_value(hash, settings.starburst_scale);
+    hash_append_value(hash, settings.aperture_blades);
+    hash_append_value(hash, settings.aperture_rotation_deg);
+    return hash;
+}
 
 RgbImageView prepare_scene_input(const RgbImageView& input,
                                  const FrameRenderSettings& settings,
@@ -87,6 +278,45 @@ void rasterize_sources(const std::vector<BrightPixel>& sources,
 
 } // namespace
 
+void FrameRenderCache::clear()
+{
+    scene_key = 0;
+    has_scene = false;
+    scene_r.clear();
+    scene_g.clear();
+    scene_b.clear();
+
+    source_key = 0;
+    has_sources = false;
+    detected_sources.clear();
+    sources.clear();
+
+    ghost_key = 0;
+    has_ghosts = false;
+    ghost_backend = GhostRenderBackend::CPU;
+    flare_r.clear();
+    flare_g.clear();
+    flare_b.clear();
+
+    bloom_key = 0;
+    has_bloom = false;
+    bloom_r.clear();
+    bloom_g.clear();
+    bloom_b.clear();
+
+    haze_key = 0;
+    has_haze = false;
+    haze_r.clear();
+    haze_g.clear();
+    haze_b.clear();
+
+    starburst_key = 0;
+    has_starburst = false;
+    starburst_r.clear();
+    starburst_g.clear();
+    starburst_b.clear();
+}
+
 bool compute_camera_fov(const FrameRenderSettings& settings,
                         int width,
                         int height,
@@ -124,6 +354,18 @@ bool render_frame(
     const FrameRenderSettings& settings,
     FrameRenderOutputs& outputs)
 {
+    const FrameRenderPlan full_plan {};
+    return render_frame(lens, input, settings, outputs, full_plan, nullptr);
+}
+
+bool render_frame(
+    const LensSystem& lens,
+    const RgbImageView& input,
+    const FrameRenderSettings& settings,
+    FrameRenderOutputs& outputs,
+    const FrameRenderPlan& plan,
+    FrameRenderCache* cache)
+{
     if (!input.r || !input.g || !input.b || input.width <= 0 || input.height <= 0) {
         return false;
     }
@@ -133,71 +375,124 @@ bool render_frame(
 
     outputs.width = input.width;
     outputs.height = input.height;
-
-    const size_t np = (size_t)input.width * input.height;
-    outputs.flare_r.assign(np, 0.0f);
-    outputs.flare_g.assign(np, 0.0f);
-    outputs.flare_b.assign(np, 0.0f);
-    outputs.bloom_r.assign(np, 0.0f);
-    outputs.bloom_g.assign(np, 0.0f);
-    outputs.bloom_b.assign(np, 0.0f);
-    outputs.haze_r.assign(np, 0.0f);
-    outputs.haze_g.assign(np, 0.0f);
-    outputs.haze_b.assign(np, 0.0f);
-    outputs.starburst_r.assign(np, 0.0f);
-    outputs.starburst_g.assign(np, 0.0f);
-    outputs.starburst_b.assign(np, 0.0f);
     outputs.ghost_backend = GhostRenderBackend::CPU;
+    clear_outputs(outputs);
+
+    const std::size_t np = static_cast<std::size_t>(input.width) * static_cast<std::size_t>(input.height);
+    const bool run_scene_stage = needs_scene_stage(plan);
+    const bool run_source_stage = needs_source_stage(plan);
 
     float fov_h = 0.0f;
     float fov_v = 0.0f;
-    if (!compute_camera_fov(settings, input.width, input.height, fov_h, fov_v)) {
+    if (run_source_stage && !compute_camera_fov(settings, input.width, input.height, fov_h, fov_v)) {
         return false;
     }
 
-    const RgbImageView scene_input = prepare_scene_input(input, settings, outputs);
+    std::uint64_t scene_key = 0;
+    if (run_scene_stage) {
+        scene_key = make_scene_key(input, settings);
+        const bool scene_cache_hit = cache && cache->has_scene && cache->scene_key == scene_key;
+        if (scene_cache_hit) {
+            outputs.scene_r = cache->scene_r;
+            outputs.scene_g = cache->scene_g;
+            outputs.scene_b = cache->scene_b;
+        } else {
+            prepare_scene_input(input, settings, outputs);
+            outputs.stats.recomputed_scene = true;
 
-    outputs.detected_sources = extract_bright_pixels(
-        scene_input,
-        settings.threshold,
-        settings.downsample,
-        fov_h,
-        fov_v);
-
-    outputs.sources = outputs.detected_sources;
-    limit_bright_pixels(outputs.sources, static_cast<size_t>(settings.max_sources));
-
-    float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
-    float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
-    if (settings.use_sensor_size) {
-        sensor_half_w = settings.sensor_width_mm * 0.5f;
-        sensor_half_h = settings.sensor_height_mm * 0.5f;
+            if (cache) {
+                cache->scene_key = scene_key;
+                cache->has_scene = true;
+                cache->scene_r = outputs.scene_r;
+                cache->scene_g = outputs.scene_g;
+                cache->scene_b = outputs.scene_b;
+            }
+        }
     }
 
-    if (!outputs.sources.empty()) {
-        GhostConfig ghost {};
-        ghost.ray_grid = settings.ray_grid;
-        ghost.min_intensity = settings.min_ghost;
-        ghost.gain = settings.flare_gain;
-        ghost.spectral_samples = settings.spectral_samples;
-        ghost.aperture_blades = settings.aperture_blades;
-        ghost.aperture_rotation_deg = settings.aperture_rotation_deg;
-        ghost.ghost_normalize = settings.ghost_normalize;
-        ghost.max_area_boost = settings.max_area_boost;
-        ghost.cleanup_mode = settings.ghost_cleanup_mode;
+    const RgbImageView scene_input = make_scene_view(outputs, input);
 
-        render_ghosts(
-            lens,
-            outputs.sources,
-            fov_h,
-            fov_v,
-            outputs.flare_r.data(),
-            outputs.flare_g.data(),
-            outputs.flare_b.data(),
-            input.width,
-            input.height,
-            ghost,
-            &outputs.ghost_backend);
+    std::uint64_t source_key = 0;
+    if (run_source_stage) {
+        source_key = make_source_key(scene_key, settings);
+        const bool source_cache_hit = cache && cache->has_sources && cache->source_key == source_key;
+        if (source_cache_hit) {
+            outputs.detected_sources = cache->detected_sources;
+            outputs.sources = cache->sources;
+        } else {
+            outputs.detected_sources = extract_bright_pixels(
+                scene_input,
+                settings.threshold,
+                settings.downsample,
+                fov_h,
+                fov_v);
+
+            outputs.sources = outputs.detected_sources;
+            limit_bright_pixels(outputs.sources, static_cast<std::size_t>(settings.max_sources));
+            outputs.stats.recomputed_sources = true;
+
+            if (cache) {
+                cache->source_key = source_key;
+                cache->has_sources = true;
+                cache->detected_sources = outputs.detected_sources;
+                cache->sources = outputs.sources;
+            }
+        }
+    }
+
+    const std::uint64_t lens_key = hash_lens(lens);
+
+    if (plan.need_flare) {
+        const std::uint64_t ghost_key = make_ghost_key(source_key, lens_key, settings);
+        const bool ghost_cache_hit = cache && cache->has_ghosts && cache->ghost_key == ghost_key;
+
+        if (ghost_cache_hit) {
+            outputs.flare_r = cache->flare_r;
+            outputs.flare_g = cache->flare_g;
+            outputs.flare_b = cache->flare_b;
+            outputs.ghost_backend = cache->ghost_backend;
+        } else {
+            outputs.flare_r.assign(np, 0.0f);
+            outputs.flare_g.assign(np, 0.0f);
+            outputs.flare_b.assign(np, 0.0f);
+
+            if (!outputs.sources.empty()) {
+                GhostConfig ghost {};
+                ghost.ray_grid = settings.ray_grid;
+                ghost.min_intensity = settings.min_ghost;
+                ghost.gain = settings.flare_gain;
+                ghost.spectral_samples = settings.spectral_samples;
+                ghost.aperture_blades = settings.aperture_blades;
+                ghost.aperture_rotation_deg = settings.aperture_rotation_deg;
+                ghost.ghost_normalize = settings.ghost_normalize;
+                ghost.max_area_boost = settings.max_area_boost;
+                ghost.cleanup_mode = settings.ghost_cleanup_mode;
+
+                render_ghosts(
+                    lens,
+                    outputs.sources,
+                    fov_h,
+                    fov_v,
+                    outputs.flare_r.data(),
+                    outputs.flare_g.data(),
+                    outputs.flare_b.data(),
+                    input.width,
+                    input.height,
+                    ghost,
+                    &outputs.ghost_backend);
+            }
+
+            outputs.stats.recomputed_ghosts = true;
+
+            if (cache) {
+                cache->ghost_key = ghost_key;
+                cache->has_ghosts = true;
+                cache->ghost_backend = outputs.ghost_backend;
+                cache->flare_r = outputs.flare_r;
+                cache->flare_g = outputs.flare_g;
+                cache->flare_b = outputs.flare_b;
+            }
+        }
 
         const bool apply_ghost_blur =
             settings.ghost_blur > 0.0f &&
@@ -216,85 +511,160 @@ bool render_frame(
                          radius,
                          settings.ghost_blur_passes);
         }
+    }
 
-        if (settings.haze_gain > 0.0f) {
-            rasterize_sources(outputs.sources,
-                              settings,
-                              input.width,
-                              input.height,
-                              fov_h,
-                              fov_v,
-                              outputs.haze_r.data(),
-                              outputs.haze_g.data(),
-                              outputs.haze_b.data());
+    if (plan.need_haze) {
+        const std::uint64_t haze_key = make_haze_key(source_key, settings);
+        const bool haze_cache_hit = cache && cache->has_haze && cache->haze_key == haze_key;
 
-            if (settings.haze_radius > 0.0f && settings.haze_blur_passes > 0) {
-                const float diag = std::sqrt(static_cast<float>(input.width * input.width + input.height * input.height));
-                const int radius = std::max(1, static_cast<int>(std::round(settings.haze_radius * diag)));
-                box_blur_rgb(outputs.haze_r.data(),
-                             outputs.haze_g.data(),
-                             outputs.haze_b.data(),
-                             input.width,
-                             input.height,
-                             radius,
-                             settings.haze_blur_passes);
+        if (haze_cache_hit) {
+            outputs.haze_r = cache->haze_r;
+            outputs.haze_g = cache->haze_g;
+            outputs.haze_b = cache->haze_b;
+        } else {
+            outputs.haze_r.assign(np, 0.0f);
+            outputs.haze_g.assign(np, 0.0f);
+            outputs.haze_b.assign(np, 0.0f);
+
+            if (!outputs.sources.empty() && settings.haze_gain > 0.0f) {
+                rasterize_sources(outputs.sources,
+                                  settings,
+                                  input.width,
+                                  input.height,
+                                  fov_h,
+                                  fov_v,
+                                  outputs.haze_r.data(),
+                                  outputs.haze_g.data(),
+                                  outputs.haze_b.data());
+
+                if (settings.haze_radius > 0.0f && settings.haze_blur_passes > 0) {
+                    const float diag = std::sqrt(static_cast<float>(input.width * input.width + input.height * input.height));
+                    const int radius = std::max(1, static_cast<int>(std::round(settings.haze_radius * diag)));
+                    box_blur_rgb(outputs.haze_r.data(),
+                                 outputs.haze_g.data(),
+                                 outputs.haze_b.data(),
+                                 input.width,
+                                 input.height,
+                                 radius,
+                                 settings.haze_blur_passes);
+                }
+
+                for (std::size_t i = 0; i < np; ++i) {
+                    outputs.haze_r[i] *= settings.haze_gain;
+                    outputs.haze_g[i] *= settings.haze_gain;
+                    outputs.haze_b[i] *= settings.haze_gain;
+                }
             }
 
-            for (size_t i = 0; i < np; ++i) {
-                outputs.haze_r[i] *= settings.haze_gain;
-                outputs.haze_g[i] *= settings.haze_gain;
-                outputs.haze_b[i] *= settings.haze_gain;
+            outputs.stats.recomputed_haze = true;
+
+            if (cache) {
+                cache->haze_key = haze_key;
+                cache->has_haze = true;
+                cache->haze_r = outputs.haze_r;
+                cache->haze_g = outputs.haze_g;
+                cache->haze_b = outputs.haze_b;
             }
-        }
-
-        if (settings.starburst_gain > 0.0f) {
-            thread_local StarburstPSF psf;
-            thread_local int last_blades = -9999;
-            thread_local float last_rotation = 1.0e9f;
-
-            if (psf.empty() ||
-                last_blades != settings.aperture_blades ||
-                std::abs(last_rotation - settings.aperture_rotation_deg) > 1.0e-6f) {
-                StarburstConfig sb_probe {};
-                sb_probe.aperture_blades = settings.aperture_blades;
-                sb_probe.aperture_rotation_deg = settings.aperture_rotation_deg;
-                compute_starburst_psf(sb_probe, psf);
-                last_blades = settings.aperture_blades;
-                last_rotation = settings.aperture_rotation_deg;
-            }
-
-            StarburstConfig sb {};
-            sb.gain = settings.starburst_gain;
-            sb.scale = settings.starburst_scale;
-            sb.aperture_blades = settings.aperture_blades;
-            sb.aperture_rotation_deg = settings.aperture_rotation_deg;
-
-            render_starburst(psf,
-                             sb,
-                             outputs.sources,
-                             std::tan(fov_h * 0.5f),
-                             std::tan(fov_v * 0.5f),
-                             outputs.starburst_r.data(),
-                             outputs.starburst_g.data(),
-                             outputs.starburst_b.data(),
-                             input.width,
-                             input.height,
-                             input.width,
-                             input.height,
-                             0,
-                             0);
         }
     }
 
-    if (settings.bloom.strength > 0.0f) {
-        const MutableRgbImageView bloom_out {
-            outputs.bloom_r.data(),
-            outputs.bloom_g.data(),
-            outputs.bloom_b.data(),
-            input.width,
-            input.height,
-        };
-        generate_bloom(scene_input, bloom_out, settings.bloom);
+    if (plan.need_starburst) {
+        const std::uint64_t starburst_key = make_starburst_key(source_key, settings);
+        const bool starburst_cache_hit = cache && cache->has_starburst && cache->starburst_key == starburst_key;
+
+        if (starburst_cache_hit) {
+            outputs.starburst_r = cache->starburst_r;
+            outputs.starburst_g = cache->starburst_g;
+            outputs.starburst_b = cache->starburst_b;
+        } else {
+            outputs.starburst_r.assign(np, 0.0f);
+            outputs.starburst_g.assign(np, 0.0f);
+            outputs.starburst_b.assign(np, 0.0f);
+
+            if (!outputs.sources.empty() && settings.starburst_gain > 0.0f) {
+                thread_local StarburstPSF psf;
+                thread_local int last_blades = -9999;
+                thread_local float last_rotation = 1.0e9f;
+
+                if (psf.empty() ||
+                    last_blades != settings.aperture_blades ||
+                    std::abs(last_rotation - settings.aperture_rotation_deg) > 1.0e-6f) {
+                    StarburstConfig sb_probe {};
+                    sb_probe.aperture_blades = settings.aperture_blades;
+                    sb_probe.aperture_rotation_deg = settings.aperture_rotation_deg;
+                    compute_starburst_psf(sb_probe, psf);
+                    last_blades = settings.aperture_blades;
+                    last_rotation = settings.aperture_rotation_deg;
+                }
+
+                StarburstConfig sb {};
+                sb.gain = settings.starburst_gain;
+                sb.scale = settings.starburst_scale;
+                sb.aperture_blades = settings.aperture_blades;
+                sb.aperture_rotation_deg = settings.aperture_rotation_deg;
+
+                render_starburst(psf,
+                                 sb,
+                                 outputs.sources,
+                                 std::tan(fov_h * 0.5f),
+                                 std::tan(fov_v * 0.5f),
+                                 outputs.starburst_r.data(),
+                                 outputs.starburst_g.data(),
+                                 outputs.starburst_b.data(),
+                                 input.width,
+                                 input.height,
+                                 input.width,
+                                 input.height,
+                                 0,
+                                 0);
+            }
+
+            outputs.stats.recomputed_starburst = true;
+
+            if (cache) {
+                cache->starburst_key = starburst_key;
+                cache->has_starburst = true;
+                cache->starburst_r = outputs.starburst_r;
+                cache->starburst_g = outputs.starburst_g;
+                cache->starburst_b = outputs.starburst_b;
+            }
+        }
+    }
+
+    if (plan.need_bloom) {
+        const std::uint64_t bloom_key = make_bloom_key(scene_key, settings);
+        const bool bloom_cache_hit = cache && cache->has_bloom && cache->bloom_key == bloom_key;
+
+        if (bloom_cache_hit) {
+            outputs.bloom_r = cache->bloom_r;
+            outputs.bloom_g = cache->bloom_g;
+            outputs.bloom_b = cache->bloom_b;
+        } else {
+            outputs.bloom_r.assign(np, 0.0f);
+            outputs.bloom_g.assign(np, 0.0f);
+            outputs.bloom_b.assign(np, 0.0f);
+
+            if (settings.bloom.strength > 0.0f) {
+                const MutableRgbImageView bloom_out {
+                    outputs.bloom_r.data(),
+                    outputs.bloom_g.data(),
+                    outputs.bloom_b.data(),
+                    input.width,
+                    input.height,
+                };
+                generate_bloom(scene_input, bloom_out, settings.bloom);
+            }
+
+            outputs.stats.recomputed_bloom = true;
+
+            if (cache) {
+                cache->bloom_key = bloom_key;
+                cache->has_bloom = true;
+                cache->bloom_r = outputs.bloom_r;
+                cache->bloom_g = outputs.bloom_g;
+                cache->bloom_b = outputs.bloom_b;
+            }
+        }
     }
 
     return true;

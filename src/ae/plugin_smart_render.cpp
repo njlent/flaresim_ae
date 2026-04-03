@@ -22,6 +22,8 @@
 
 namespace {
 
+constexpr A_long kSmartInputCheckoutId = 1;
+
 bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_state)
 {
     if (!params) {
@@ -719,7 +721,7 @@ PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
     err = render_extra->cb->checkout_layer(
         in_data->effect_ref,
         PARAM_INPUT,
-        PARAM_INPUT,
+        kSmartInputCheckoutId,
         &request,
         in_data->current_time,
         in_data->time_step,
@@ -751,7 +753,7 @@ PF_Err PluginHandleSmartRender(PF_InData* in_data, PF_OutData* out_data, void* e
     PF_EffectWorld* output_world = nullptr;
 
     if (!err) {
-        ERR(render_extra->cb->checkout_layer_pixels(in_data->effect_ref, PARAM_INPUT, &input_world));
+        ERR(render_extra->cb->checkout_layer_pixels(in_data->effect_ref, kSmartInputCheckoutId, &input_world));
     }
     if (!err) {
         ERR(render_extra->cb->checkout_output(in_data->effect_ref, &output_world));
@@ -761,7 +763,7 @@ PF_Err PluginHandleSmartRender(PF_InData* in_data, PF_OutData* out_data, void* e
     }
 
     if (input_world) {
-        ERR2(render_extra->cb->checkin_layer_pixels(in_data->effect_ref, PARAM_INPUT));
+        ERR2(render_extra->cb->checkin_layer_pixels(in_data->effect_ref, kSmartInputCheckoutId));
     }
 
     return err ? err : err2;

@@ -120,6 +120,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - exact upstream `sky.R/G/B` layer handling remains out of scope for AE because the current host path only receives one beauty image
 - smoke coverage now verifies runtime scaling, parameter plumbing, and frame-bridge output for the new control
 
+### Slice 18
+- split shared runtime work into scene, source extraction, ghosts, bloom, haze, and starburst stages with per-stage reuse keyed by actual inputs/settings
+- AE render bridge now keeps a thread-local stage cache so post controls like ghost blur can reuse prior source/ghost/bloom work during iteration
+- output-view planning now skips unrelated systems entirely; `Sources` and `Diagnostics` no longer run flare/bloom/haze/starburst work
+- smoke coverage now verifies cache reuse on blur-only edits and verifies that `Sources` view leaves other stage buffers untouched
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

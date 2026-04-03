@@ -168,10 +168,12 @@ bool render_frame_to_float_image(
     output.alpha = input.alpha;
 
     const FrameRenderSettings settings = build_frame_render_settings(state);
+    const FrameRenderPlan plan = build_output_view_render_plan(state.view);
     const RgbImageView input_view = make_rgb_view(input);
 
+    thread_local FrameRenderCache cache;
     FrameRenderOutputs outputs;
-    if (!render_frame(lens, input_view, settings, outputs)) {
+    if (!render_frame(lens, input_view, settings, outputs, plan, &cache)) {
         return false;
     }
 

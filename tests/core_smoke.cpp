@@ -470,6 +470,95 @@ void test_output_views()
     assert(source_sum > 0.0f);
 }
 
+void test_render_plan_cache()
+{
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    std::vector<float> src_r(64, 0.0f);
+    std::vector<float> src_g(64, 0.0f);
+    std::vector<float> src_b(64, 0.0f);
+    src_r[27] = 12.0f;
+    src_g[27] = 8.0f;
+    src_b[27] = 4.0f;
+
+    const RgbImageView input {src_r.data(), src_g.data(), src_b.data(), 8, 8};
+
+    FrameRenderSettings settings {};
+    settings.fov_h_deg = 60.0f;
+    settings.threshold = 1.0f;
+    settings.downsample = 1;
+    settings.ray_grid = 4;
+    settings.flare_gain = 100.0f;
+    settings.ghost_blur = 0.0f;
+    settings.haze_gain = 0.25f;
+    settings.haze_radius = 0.05f;
+    settings.haze_blur_passes = 1;
+    settings.starburst_gain = 0.1f;
+    settings.starburst_scale = 0.05f;
+    settings.aperture_blades = 6;
+    settings.bloom.threshold = 1.0f;
+    settings.bloom.strength = 0.5f;
+    settings.bloom.radius = 0.08f;
+    settings.bloom.passes = 1;
+    settings.bloom.octaves = 1;
+    settings.bloom.chromatic = false;
+
+    const FrameRenderPlan composite_plan = build_output_view_render_plan(AeOutputView::Composite);
+    const FrameRenderPlan sources_plan = build_output_view_render_plan(AeOutputView::Sources);
+
+    FrameRenderCache cache;
+
+    FrameRenderOutputs first_outputs;
+    assert(render_frame(lens, input, settings, first_outputs, composite_plan, &cache));
+    assert(first_outputs.stats.recomputed_scene);
+    assert(first_outputs.stats.recomputed_sources);
+    assert(first_outputs.stats.recomputed_ghosts);
+    assert(first_outputs.stats.recomputed_bloom);
+    assert(first_outputs.stats.recomputed_haze);
+    assert(first_outputs.stats.recomputed_starburst);
+
+    float first_peak = 0.0f;
+    for (float v : first_outputs.flare_r) {
+        first_peak = std::max(first_peak, v);
+    }
+    assert(first_peak > 0.0f);
+
+    FrameRenderSettings blurred_settings = settings;
+    blurred_settings.ghost_blur = 0.02f;
+    blurred_settings.ghost_blur_passes = 1;
+
+    FrameRenderOutputs blurred_outputs;
+    assert(render_frame(lens, input, blurred_settings, blurred_outputs, composite_plan, &cache));
+    assert(!blurred_outputs.stats.recomputed_scene);
+    assert(!blurred_outputs.stats.recomputed_sources);
+    assert(!blurred_outputs.stats.recomputed_ghosts);
+    assert(!blurred_outputs.stats.recomputed_bloom);
+    assert(!blurred_outputs.stats.recomputed_haze);
+    assert(!blurred_outputs.stats.recomputed_starburst);
+
+    float blurred_peak = 0.0f;
+    for (float v : blurred_outputs.flare_r) {
+        blurred_peak = std::max(blurred_peak, v);
+    }
+    assert(blurred_peak > 0.0f);
+    assert(blurred_peak <= first_peak);
+
+    FrameRenderOutputs source_outputs;
+    assert(render_frame(lens, input, settings, source_outputs, sources_plan, nullptr));
+    assert(source_outputs.stats.recomputed_sources);
+    assert(!source_outputs.stats.recomputed_ghosts);
+    assert(!source_outputs.stats.recomputed_bloom);
+    assert(!source_outputs.stats.recomputed_haze);
+    assert(!source_outputs.stats.recomputed_starburst);
+    assert(source_outputs.flare_r.empty());
+    assert(source_outputs.bloom_r.empty());
+    assert(source_outputs.haze_r.empty());
+    assert(source_outputs.starburst_r.empty());
+    assert(!source_outputs.sources.empty());
+}
+
 void test_pixel_convert()
 {
     const FloatPixel hdr {1.0f, 1.5f, 0.5f, 2.25f};
@@ -596,6 +685,39 @@ void test_frame_bridge()
     assert(std::abs(out32.r[0] - 0.25f) < 1.0e-6f);
     assert(std::abs(out32.g[0] - 0.25f) < 1.0e-6f);
     assert(std::abs(out32.b[0] - 0.25f) < 1.0e-6f);
+
+    std::fill(src32.begin(), src32.end(), pack_pixel32(FloatPixel {1.0f, 0.0f, 0.0f, 0.0f}));
+    src32[27] = pack_pixel32(FloatPixel {1.0f, 12.0f, 8.0f, 4.0f});
+
+    state.sky_brightness = 1.0f;
+    state.threshold = 1.0f;
+    state.flare_gain = 100.0f;
+    state.haze_gain = 0.0f;
+    state.starburst_gain = 0.0f;
+    state.bloom.strength = 0.0f;
+    state.view = AeOutputView::Composite;
+
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+
+    float composite_sum = 0.0f;
+    for (float v : out32.r) {
+        composite_sum += v;
+    }
+    assert(composite_sum > 12.0f);
+
+    state.view = AeOutputView::Sources;
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+
+    int source_hits = 0;
+    for (float v : out32.r) {
+        if (v > 0.0f) {
+            ++source_hits;
+        }
+    }
+    assert(source_hits > 0);
+    assert(source_hits <= 9);
 }
 
 void test_param_schema()
@@ -721,6 +843,7 @@ int main()
     test_cuda_backend_api();
     test_ae_adapter_bits();
     test_output_views();
+    test_render_plan_cache();
     test_pixel_convert();
     test_frame_bridge();
     test_param_schema();

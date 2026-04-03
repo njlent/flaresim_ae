@@ -6,6 +6,7 @@
 #include "lens.h"
 #include "starburst.h"
 
+#include <cstdint>
 #include <vector>
 
 struct FrameRenderSettings
@@ -41,11 +42,32 @@ struct FrameRenderSettings
     BloomConfig bloom {};
 };
 
+struct FrameRenderPlan
+{
+    bool need_scene_output = true;
+    bool need_source_output = true;
+    bool need_flare = true;
+    bool need_bloom = true;
+    bool need_haze = true;
+    bool need_starburst = true;
+};
+
+struct FrameRenderStats
+{
+    bool recomputed_scene = false;
+    bool recomputed_sources = false;
+    bool recomputed_ghosts = false;
+    bool recomputed_bloom = false;
+    bool recomputed_haze = false;
+    bool recomputed_starburst = false;
+};
+
 struct FrameRenderOutputs
 {
     int width = 0;
     int height = 0;
     GhostRenderBackend ghost_backend = GhostRenderBackend::CPU;
+    FrameRenderStats stats {};
     std::vector<float> scene_r;
     std::vector<float> scene_g;
     std::vector<float> scene_b;
@@ -65,6 +87,47 @@ struct FrameRenderOutputs
     std::vector<BrightPixel> sources;
 };
 
+struct FrameRenderCache
+{
+    std::uint64_t scene_key = 0;
+    bool has_scene = false;
+    std::vector<float> scene_r;
+    std::vector<float> scene_g;
+    std::vector<float> scene_b;
+
+    std::uint64_t source_key = 0;
+    bool has_sources = false;
+    std::vector<BrightPixel> detected_sources;
+    std::vector<BrightPixel> sources;
+
+    std::uint64_t ghost_key = 0;
+    bool has_ghosts = false;
+    GhostRenderBackend ghost_backend = GhostRenderBackend::CPU;
+    std::vector<float> flare_r;
+    std::vector<float> flare_g;
+    std::vector<float> flare_b;
+
+    std::uint64_t bloom_key = 0;
+    bool has_bloom = false;
+    std::vector<float> bloom_r;
+    std::vector<float> bloom_g;
+    std::vector<float> bloom_b;
+
+    std::uint64_t haze_key = 0;
+    bool has_haze = false;
+    std::vector<float> haze_r;
+    std::vector<float> haze_g;
+    std::vector<float> haze_b;
+
+    std::uint64_t starburst_key = 0;
+    bool has_starburst = false;
+    std::vector<float> starburst_r;
+    std::vector<float> starburst_g;
+    std::vector<float> starburst_b;
+
+    void clear();
+};
+
 bool compute_camera_fov(const FrameRenderSettings& settings,
                         int width,
                         int height,
@@ -76,4 +139,13 @@ bool render_frame(
     const RgbImageView& input,
     const FrameRenderSettings& settings,
     FrameRenderOutputs& outputs
+);
+
+bool render_frame(
+    const LensSystem& lens,
+    const RgbImageView& input,
+    const FrameRenderSettings& settings,
+    FrameRenderOutputs& outputs,
+    const FrameRenderPlan& plan,
+    FrameRenderCache* cache
 );

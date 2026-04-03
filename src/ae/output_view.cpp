@@ -97,6 +97,63 @@ void draw_sources(const FrameRenderSettings& settings,
 
 } // namespace
 
+FrameRenderPlan build_output_view_render_plan(AeOutputView view)
+{
+    switch (view) {
+        case AeOutputView::Composite:
+            return {
+                .need_scene_output = true,
+                .need_source_output = false,
+                .need_flare = true,
+                .need_bloom = true,
+                .need_haze = true,
+                .need_starburst = true,
+            };
+
+        case AeOutputView::FlareOnly:
+            return {
+                .need_scene_output = false,
+                .need_source_output = false,
+                .need_flare = true,
+                .need_bloom = false,
+                .need_haze = true,
+                .need_starburst = true,
+            };
+
+        case AeOutputView::BloomOnly:
+            return {
+                .need_scene_output = false,
+                .need_source_output = false,
+                .need_flare = false,
+                .need_bloom = true,
+                .need_haze = false,
+                .need_starburst = false,
+            };
+
+        case AeOutputView::Sources:
+            return {
+                .need_scene_output = false,
+                .need_source_output = true,
+                .need_flare = false,
+                .need_bloom = false,
+                .need_haze = false,
+                .need_starburst = false,
+            };
+
+        case AeOutputView::Diagnostics:
+            return {
+                .need_scene_output = true,
+                .need_source_output = true,
+                .need_flare = false,
+                .need_bloom = false,
+                .need_haze = false,
+                .need_starburst = false,
+            };
+    }
+
+    return {};
+}
+
 bool compose_output_view(
     AeOutputView view,
     const RgbImageView& input,
