@@ -174,11 +174,6 @@ Ship an AE implementation in staged slices, with frequent commits.
 - projected cells now reuse the traced corner throughput as a smooth density field, which breaks up the visible cell lattice without forcing a much higher `ray_grid`
 - total cell energy stays normalized to the interpolated corner average, so the fix targets the grid artifact rather than hiding it with blur
 
-### Slice 28
-- added traced cell-center fan rasterization on top of the corner-weighted projected-cell path
-- low-grid projected cells now split into four center-connected triangles when the traced center is valid, which reduces the remaining coarse lattice from large cells
-- CPU and CUDA both fall back to the earlier four-corner interpolation if the center sample is invalid, so the degrid step stays robust
-
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

@@ -1025,12 +1025,10 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
         float p10x = 0.0f, p10y = 0.0f;
         float p11x = 0.0f, p11y = 0.0f;
         float p01x = 0.0f, p01y = 0.0f;
-        float pcx = 0.0f, pcy = 0.0f;
         float w00 = 0.0f;
         float w10 = 0.0f;
         float w11 = 0.0f;
         float w01 = 0.0f;
-        float wc = 0.0f;
         if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
                                               cell_u0, cell_v0, sample.lambda,
@@ -1062,19 +1060,6 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
         DPixelPoint p10 {p10x, p10y};
         DPixelPoint p11 {p11x, p11y};
         DPixelPoint p01 {p01x, p01y};
-        DPixelPoint pc {
-            0.25f * (p00x + p10x + p11x + p01x),
-            0.25f * (p00y + p10y + p11y + p01y),
-        };
-        const bool have_center = d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
-                                                                  pair.surf_a, pair.surf_b, beam_dir,
-                                                                  cell.uc, cell.vc, sample.lambda,
-                                                                  front_radius, start_z,
-                                                                  sensor_half_w, sensor_half_h,
-                                                                  width, height, pcx, pcy, &wc);
-        if (have_center) {
-            pc = {pcx, pcy};
-        }
         d_apply_cell_coverage_bias(p00, p10, p11, p01, cell_coverage_bias);
         const float quad_area =
             0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11)) +
@@ -1085,28 +1070,13 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
         const float density_boost = d_select_ghost_density_boost(pair.area_boost,
                                                                  pair.reference_footprint_area_px2,
                                                                  quad_area);
-        float total_area = quad_area;
-        float weighted_integral = 0.0f;
-        if (have_center) {
-            const float area00 = 0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, pc));
-            const float area10 = 0.5f * fabsf(d_signed_triangle_twice_area(p10, p11, pc));
-            const float area11 = 0.5f * fabsf(d_signed_triangle_twice_area(p11, p01, pc));
-            const float area01 = 0.5f * fabsf(d_signed_triangle_twice_area(p01, p00, pc));
-            total_area = area00 + area10 + area11 + area01;
-            weighted_integral =
-                area00 * (w00 + w10 + wc) / 3.0f +
-                area10 * (w10 + w11 + wc) / 3.0f +
-                area11 * (w11 + w01 + wc) / 3.0f +
-                area01 * (w01 + w00 + wc) / 3.0f;
-        } else {
-            weighted_integral =
-                0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11)) * (w00 + w10 + w11) / 3.0f +
-                0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01)) * (w00 + w11 + w01) / 3.0f;
-        }
-        if (!(total_area > 1.0e-4f) || !(weighted_integral > 1.0e-6f) || !isfinite(weighted_integral)) {
+        const float weighted_integral =
+            0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11)) * (w00 + w10 + w11) / 3.0f +
+            0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01)) * (w00 + w11 + w01) / 3.0f;
+        if (!(weighted_integral > 1.0e-6f) || !isfinite(weighted_integral)) {
             continue;
         }
-        const float avg_weight = weighted_integral / total_area;
+        const float avg_weight = weighted_integral / quad_area;
         const float contribution = avg_weight * cell_weight * gain * density_boost;
         if (contribution < 1.0e-12f) {
             continue;
@@ -1115,27 +1085,9 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
         const float cr = source.r * sample.rw * contribution;
         const float cg = source.g * sample.gw * contribution;
         const float cb = source.b * sample.bw * contribution;
-        if (have_center) {
-            const float scale_r = cr / weighted_integral;
-            const float scale_g = cg / weighted_integral;
-            const float scale_b = cb / weighted_integral;
-            d_rasterize_triangle_linear(out_r, width, height, p00, p10, pc, w00, w10, wc, scale_r);
-            d_rasterize_triangle_linear(out_r, width, height, p10, p11, pc, w10, w11, wc, scale_r);
-            d_rasterize_triangle_linear(out_r, width, height, p11, p01, pc, w11, w01, wc, scale_r);
-            d_rasterize_triangle_linear(out_r, width, height, p01, p00, pc, w01, w00, wc, scale_r);
-            d_rasterize_triangle_linear(out_g, width, height, p00, p10, pc, w00, w10, wc, scale_g);
-            d_rasterize_triangle_linear(out_g, width, height, p10, p11, pc, w10, w11, wc, scale_g);
-            d_rasterize_triangle_linear(out_g, width, height, p11, p01, pc, w11, w01, wc, scale_g);
-            d_rasterize_triangle_linear(out_g, width, height, p01, p00, pc, w01, w00, wc, scale_g);
-            d_rasterize_triangle_linear(out_b, width, height, p00, p10, pc, w00, w10, wc, scale_b);
-            d_rasterize_triangle_linear(out_b, width, height, p10, p11, pc, w10, w11, wc, scale_b);
-            d_rasterize_triangle_linear(out_b, width, height, p11, p01, pc, w11, w01, wc, scale_b);
-            d_rasterize_triangle_linear(out_b, width, height, p01, p00, pc, w01, w00, wc, scale_b);
-        } else {
-            d_rasterize_quad_linear(out_r, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cr);
-            d_rasterize_quad_linear(out_g, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cg);
-            d_rasterize_quad_linear(out_b, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cb);
-        }
+        d_rasterize_quad_linear(out_r, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cr);
+        d_rasterize_quad_linear(out_g, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cg);
+        d_rasterize_quad_linear(out_b, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cb);
     }
 }
 
