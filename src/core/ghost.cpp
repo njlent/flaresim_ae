@@ -932,13 +932,7 @@ void render_ghosts(const LensSystem &lens,
         }
     }
 
-    const bool needs_cell_rasterization = std::any_of(active_pair_plans.begin(),
-                                                      active_pair_plans.end(),
-                                                      [](const GhostPairPlan& pair_plan) {
-                                                          return pair_plan.use_cell_rasterization;
-                                                      });
-
-    if (!active_pair_plans.empty() && !sources.empty() && !needs_cell_rasterization) {
+    if (!active_pair_plans.empty() && !sources.empty()) {
         thread_local GpuBufferCache gpu_cache;
         std::string cuda_error;
 
@@ -968,8 +962,7 @@ void render_ghosts(const LensSystem &lens,
     }
 
     // ---- CPU path ----
-    printf("Ghost renderer backend: CPU%s\n",
-           needs_cell_rasterization ? " (cell rasterization path)" : "");
+    printf("Ghost renderer backend: CPU fallback\n");
     printf("Splat mode: %s\n",
            config.cleanup_mode == GhostCleanupMode::LegacyBlur
                ? "legacy bilinear"

@@ -648,6 +648,22 @@ struct GPUSample
     float v;
 };
 
+struct GPUCell
+{
+    float u0;
+    float v0;
+    float u1;
+    float v1;
+    float uc;
+    float vc;
+};
+
+struct DPixelPoint
+{
+    float x;
+    float y;
+};
+
 struct GPUSpectralSampleDev
 {
     float lambda;
@@ -716,6 +732,78 @@ __device__ __forceinline__ void d_atomic_splat(float* out,
             }
         }
     }
+}
+
+__device__ __forceinline__ float d_signed_triangle_twice_area(const DPixelPoint& a,
+                                                              const DPixelPoint& b,
+                                                              const DPixelPoint& c)
+{
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+__device__ __forceinline__ void d_rasterize_triangle_uniform(float* out,
+                                                             int width,
+                                                             int height,
+                                                             const DPixelPoint& a,
+                                                             const DPixelPoint& b,
+                                                             const DPixelPoint& c,
+                                                             float value)
+{
+    const float twice_area_signed = d_signed_triangle_twice_area(a, b, c);
+    const float twice_area = fabsf(twice_area_signed);
+    const float area = 0.5f * twice_area;
+    if (!(area > 1.0e-4f) || !isfinite(area) || value <= 1.0e-14f) {
+        return;
+    }
+
+    const int x0 = max(static_cast<int>(floorf(fminf(fminf(a.x, b.x), c.x) - 0.5f)), 0);
+    const int x1 = min(static_cast<int>(ceilf(fmaxf(fmaxf(a.x, b.x), c.x) + 0.5f)), width - 1);
+    const int y0 = max(static_cast<int>(floorf(fminf(fminf(a.y, b.y), c.y) - 0.5f)), 0);
+    const int y1 = min(static_cast<int>(ceilf(fmaxf(fmaxf(a.y, b.y), c.y) + 0.5f)), height - 1);
+    if (x0 > x1 || y0 > y1) {
+        return;
+    }
+
+    const float sign = twice_area_signed >= 0.0f ? 1.0f : -1.0f;
+    const float inv_twice_area = 1.0f / twice_area;
+    const float density = value / area;
+
+    for (int y = y0; y <= y1; ++y) {
+        const float py = y + 0.5f;
+        const int row = y * width;
+        for (int x = x0; x <= x1; ++x) {
+            const float px = x + 0.5f;
+            const float w0 = sign * ((b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x)) * inv_twice_area;
+            const float w1 = sign * ((c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)) * inv_twice_area;
+            const float w2 = sign * ((a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)) * inv_twice_area;
+            if (w0 >= -1.0e-4f && w1 >= -1.0e-4f && w2 >= -1.0e-4f) {
+                atomicAdd(&out[row + x], density);
+            }
+        }
+    }
+}
+
+__device__ __forceinline__ void d_rasterize_quad_uniform(float* out,
+                                                         int width,
+                                                         int height,
+                                                         const DPixelPoint& p00,
+                                                         const DPixelPoint& p10,
+                                                         const DPixelPoint& p11,
+                                                         const DPixelPoint& p01,
+                                                         float value)
+{
+    const float area0 = 0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11));
+    const float area1 = 0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01));
+    const float total_area = area0 + area1;
+    if (!(total_area > 1.0e-4f) || !isfinite(total_area)) {
+        const float center_x = 0.25f * (p00.x + p10.x + p11.x + p01.x);
+        const float center_y = 0.25f * (p00.y + p10.y + p11.y + p01.y);
+        d_atomic_splat(out, width, height, center_x, center_y, value, 1.5f);
+        return;
+    }
+
+    d_rasterize_triangle_uniform(out, width, height, p00, p10, p11, value * (area0 / total_area));
+    d_rasterize_triangle_uniform(out, width, height, p00, p11, p01, value * (area1 / total_area));
 }
 
 __global__ void ghost_kernel(const Surface* surfaces,
@@ -836,6 +924,124 @@ __global__ void ghost_kernel(const Surface* surfaces,
     }
 }
 
+__global__ void ghost_cell_kernel(const Surface* surfaces,
+                                  int num_surfaces,
+                                  float sensor_z,
+                                  const GPUPair* pairs,
+                                  int num_sources,
+                                  const GPUSource* sources,
+                                  const GPUCell* grid_cells,
+                                  int num_grid_cells,
+                                  float front_radius,
+                                  float start_z,
+                                  float sensor_half_w,
+                                  float sensor_half_h,
+                                  int width,
+                                  int height,
+                                  float* out_r,
+                                  float* out_g,
+                                  float* out_b,
+                                  float gain,
+                                  float cell_weight,
+                                  const GPUSpectralSampleDev* spectral_samples,
+                                  int num_spectral_samples)
+{
+    const int pair_source_index = static_cast<int>(blockIdx.x);
+    const int pair_index = pair_source_index / num_sources;
+    const int source_index = pair_source_index % num_sources;
+    const int cell_index = static_cast<int>(blockIdx.y) * kBlockSize + static_cast<int>(threadIdx.x);
+
+    if (cell_index >= num_grid_cells) {
+        return;
+    }
+
+    const GPUPair& pair = pairs[pair_index];
+    if (pair.surf_a < 0 || pair.surf_b <= pair.surf_a || pair.surf_b >= num_surfaces) {
+        return;
+    }
+
+    const GPUSource& source = sources[source_index];
+    const GPUCell& cell = grid_cells[cell_index];
+    const DVec3 beam_dir = dv_normalize(dv(tanf(source.angle_x), tanf(source.angle_y), 1.0f));
+    const float footprint_lambda = spectral_samples[min(1, num_spectral_samples - 1)].lambda;
+
+    float p00x = 0.0f, p00y = 0.0f;
+    float p10x = 0.0f, p10y = 0.0f;
+    float p11x = 0.0f, p11y = 0.0f;
+    float p01x = 0.0f, p01y = 0.0f;
+    if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                          pair.surf_a, pair.surf_b, beam_dir,
+                                          cell.u0, cell.v0, footprint_lambda,
+                                          front_radius, start_z,
+                                          sensor_half_w, sensor_half_h,
+                                          width, height, p00x, p00y) ||
+        !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                          pair.surf_a, pair.surf_b, beam_dir,
+                                          cell.u1, cell.v0, footprint_lambda,
+                                          front_radius, start_z,
+                                          sensor_half_w, sensor_half_h,
+                                          width, height, p10x, p10y) ||
+        !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                          pair.surf_a, pair.surf_b, beam_dir,
+                                          cell.u1, cell.v1, footprint_lambda,
+                                          front_radius, start_z,
+                                          sensor_half_w, sensor_half_h,
+                                          width, height, p11x, p11y) ||
+        !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                          pair.surf_a, pair.surf_b, beam_dir,
+                                          cell.u0, cell.v1, footprint_lambda,
+                                          front_radius, start_z,
+                                          sensor_half_w, sensor_half_h,
+                                          width, height, p01x, p01y)) {
+        return;
+    }
+
+    const DPixelPoint p00 {p00x, p00y};
+    const DPixelPoint p10 {p10x, p10y};
+    const DPixelPoint p11 {p11x, p11y};
+    const DPixelPoint p01 {p01x, p01y};
+    const float quad_area =
+        0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11)) +
+        0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01));
+    if (!(quad_area > 1.0e-4f) || !isfinite(quad_area)) {
+        return;
+    }
+
+    const float density_boost = d_select_ghost_density_boost(pair.area_boost,
+                                                             pair.reference_footprint_area_px2,
+                                                             quad_area);
+
+    DRay center_ray;
+    center_ray.origin = dv(cell.uc * front_radius, cell.vc * front_radius, start_z);
+    center_ray.dir = beam_dir;
+
+    for (int sample_index = 0; sample_index < num_spectral_samples; ++sample_index) {
+        const GPUSpectralSampleDev& sample = spectral_samples[sample_index];
+        const DTraceResult result = d_trace_ghost_ray(center_ray,
+                                                      surfaces,
+                                                      num_surfaces,
+                                                      sensor_z,
+                                                      pair.surf_a,
+                                                      pair.surf_b,
+                                                      sample.lambda);
+        if (!result.valid) {
+            continue;
+        }
+
+        const float contribution = result.weight * cell_weight * gain * density_boost;
+        if (contribution < 1.0e-12f) {
+            continue;
+        }
+
+        const float cr = source.r * sample.rw * contribution;
+        const float cg = source.g * sample.gw * contribution;
+        const float cb = source.b * sample.bw * contribution;
+        d_rasterize_quad_uniform(out_r, width, height, p00, p10, p11, p01, cr);
+        d_rasterize_quad_uniform(out_g, width, height, p00, p10, p11, p01, cg);
+        d_rasterize_quad_uniform(out_b, width, height, p00, p10, p11, p01, cb);
+    }
+}
+
 void report_cuda_error(cudaError_t error, const char* site, std::string* out_error)
 {
     std::fprintf(stderr, "FlareSim CUDA error at %s: %s\n", site, cudaGetErrorString(error));
@@ -883,6 +1089,56 @@ std::vector<GPUSample> build_gpu_grid_samples(int ray_grid,
     }
 
     return grid_samples;
+}
+
+std::vector<GPUCell> build_gpu_grid_cells(int ray_grid,
+                                          int aperture_blades,
+                                          float aperture_rotation_deg)
+{
+    std::vector<GPUCell> grid_cells;
+    grid_cells.reserve(static_cast<std::size_t>(ray_grid) * static_cast<std::size_t>(ray_grid));
+    const bool polygonal = aperture_blades >= 3;
+    const float rotation = aperture_rotation_deg * 3.14159265358979323846f / 180.0f;
+    const float sector_angle = polygonal
+        ? (2.0f * 3.14159265358979323846f / aperture_blades)
+        : 1.0f;
+    const float apothem = polygonal
+        ? std::cos(3.14159265358979323846f / aperture_blades)
+        : 1.0f;
+    auto valid = [&](float u, float v) {
+        const float r2 = u * u + v * v;
+        if (r2 > 1.0f) {
+            return false;
+        }
+        if (!polygonal) {
+            return true;
+        }
+
+        float angle = std::atan2(v, u) - rotation;
+        float sector = std::fmod(angle, sector_angle);
+        if (sector < 0.0f) {
+            sector += sector_angle;
+        }
+        return std::sqrt(r2) * std::cos(sector - sector_angle * 0.5f) <= apothem;
+    };
+
+    for (int gy = 0; gy < ray_grid; ++gy) {
+        const float v0 = (gy / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
+        const float v1 = ((gy + 1) / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
+        for (int gx = 0; gx < ray_grid; ++gx) {
+            const float u0 = (gx / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
+            const float u1 = ((gx + 1) / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
+            const float uc = 0.5f * (u0 + u1);
+            const float vc = 0.5f * (v0 + v1);
+            if (!valid(u0, v0) || !valid(u1, v0) || !valid(u1, v1) || !valid(u0, v1) || !valid(uc, vc)) {
+                continue;
+            }
+
+            grid_cells.push_back({u0, v0, u1, v1, uc, vc});
+        }
+    }
+
+    return grid_cells;
 }
 
 } // namespace
@@ -1129,96 +1385,167 @@ bool launch_ghost_cuda(const LensSystem& lens,
     std::sort(bucket_grids.begin(), bucket_grids.end());
 
     for (int bucket_grid : bucket_grids) {
-        std::vector<GPUPair> gpu_pairs;
-        gpu_pairs.reserve(active_pair_plans.size());
+        std::vector<GPUPair> gpu_splat_pairs;
+        std::vector<GPUPair> gpu_cell_pairs;
+        gpu_splat_pairs.reserve(active_pair_plans.size());
+        gpu_cell_pairs.reserve(active_pair_plans.size());
         for (const GhostPairPlan& pair_plan : active_pair_plans) {
             if (pair_plan.ray_grid != bucket_grid) {
                 continue;
             }
-            gpu_pairs.push_back({
+            GPUPair gpu_pair {
                 pair_plan.pair.surf_a,
                 pair_plan.pair.surf_b,
                 pair_plan.area_boost,
                 pair_plan.splat_radius_px,
                 pair_plan.reference_footprint_area_px2,
-            });
+            };
+            if (pair_plan.use_cell_rasterization) {
+                gpu_cell_pairs.push_back(gpu_pair);
+            } else {
+                gpu_splat_pairs.push_back(gpu_pair);
+            }
         }
 
-        if (gpu_pairs.empty()) {
-            continue;
+        if (!gpu_splat_pairs.empty()) {
+            std::vector<GPUSample> grid_samples = build_gpu_grid_samples(bucket_grid,
+                                                                         config.aperture_blades,
+                                                                         config.aperture_rotation_deg);
+            const int num_grid_samples = static_cast<int>(grid_samples.size());
+            if (num_grid_samples > 0) {
+                if (!ensure_buffer(cache.d_pairs, cache.pairs_bytes, gpu_splat_pairs.size() * sizeof(GPUPair), "d_pairs")) {
+                    cudaFree(d_spectral_samples);
+                    return false;
+                }
+                if (!ensure_buffer(cache.d_grid, cache.grid_bytes, grid_samples.size() * sizeof(GPUSample), "d_grid")) {
+                    cudaFree(d_spectral_samples);
+                    return false;
+                }
+
+                GPU_CHECK(cudaMemcpy(cache.d_pairs,
+                                     gpu_splat_pairs.data(),
+                                     gpu_splat_pairs.size() * sizeof(GPUPair),
+                                     cudaMemcpyHostToDevice));
+                GPU_CHECK(cudaMemcpy(cache.d_grid,
+                                     grid_samples.data(),
+                                     grid_samples.size() * sizeof(GPUSample),
+                                     cudaMemcpyHostToDevice));
+
+                const dim3 block(kBlockSize, 1, 1);
+                const dim3 grid(static_cast<unsigned>(gpu_splat_pairs.size() * gpu_sources.size()),
+                                static_cast<unsigned>((num_grid_samples + kBlockSize - 1) / kBlockSize),
+                                1);
+
+                ghost_kernel<<<grid, block>>>(
+                    static_cast<Surface*>(cache.d_surfs),
+                    num_surfaces,
+                    lens.sensor_z,
+                    static_cast<GPUPair*>(cache.d_pairs),
+                    static_cast<int>(gpu_sources.size()),
+                    static_cast<GPUSource*>(cache.d_src),
+                    static_cast<GPUSample*>(cache.d_grid),
+                    num_grid_samples,
+                    lens.surfaces[0].semi_aperture,
+                    lens.surfaces[0].z - 20.0f,
+                    sensor_half_w,
+                    sensor_half_h,
+                    width,
+                    height,
+                    cache.d_out_r,
+                    cache.d_out_g,
+                    cache.d_out_b,
+                    config.gain,
+                    1.0f / static_cast<float>(num_grid_samples),
+                    2.0f / static_cast<float>(bucket_grid),
+                    config.aperture_blades,
+                    config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
+                    config.footprint_radius_bias,
+                    config.footprint_clamp,
+                    d_spectral_samples,
+                    static_cast<int>(spectral_samples.size()));
+
+                cudaError_t error = cudaGetLastError();
+                if (error != cudaSuccess) {
+                    cudaFree(d_spectral_samples);
+                    report_cuda_error(error, "ghost_kernel", out_error);
+                    return false;
+                }
+
+                error = cudaDeviceSynchronize();
+                if (error != cudaSuccess) {
+                    cudaFree(d_spectral_samples);
+                    report_cuda_error(error, "cudaDeviceSynchronize", out_error);
+                    return false;
+                }
+            }
         }
 
-        std::vector<GPUSample> grid_samples = build_gpu_grid_samples(bucket_grid,
-                                                                     config.aperture_blades,
-                                                                     config.aperture_rotation_deg);
-        const int num_grid_samples = static_cast<int>(grid_samples.size());
-        if (num_grid_samples == 0) {
-            continue;
-        }
+        if (!gpu_cell_pairs.empty()) {
+            std::vector<GPUCell> grid_cells = build_gpu_grid_cells(bucket_grid,
+                                                                   config.aperture_blades,
+                                                                   config.aperture_rotation_deg);
+            const int num_grid_cells = static_cast<int>(grid_cells.size());
+            if (num_grid_cells > 0) {
+                if (!ensure_buffer(cache.d_pairs, cache.pairs_bytes, gpu_cell_pairs.size() * sizeof(GPUPair), "d_pairs")) {
+                    cudaFree(d_spectral_samples);
+                    return false;
+                }
+                if (!ensure_buffer(cache.d_grid, cache.grid_bytes, grid_cells.size() * sizeof(GPUCell), "d_grid")) {
+                    cudaFree(d_spectral_samples);
+                    return false;
+                }
 
-        if (!ensure_buffer(cache.d_pairs, cache.pairs_bytes, gpu_pairs.size() * sizeof(GPUPair), "d_pairs")) {
-            cudaFree(d_spectral_samples);
-            return false;
-        }
-        if (!ensure_buffer(cache.d_grid, cache.grid_bytes, grid_samples.size() * sizeof(GPUSample), "d_grid")) {
-            cudaFree(d_spectral_samples);
-            return false;
-        }
+                GPU_CHECK(cudaMemcpy(cache.d_pairs,
+                                     gpu_cell_pairs.data(),
+                                     gpu_cell_pairs.size() * sizeof(GPUPair),
+                                     cudaMemcpyHostToDevice));
+                GPU_CHECK(cudaMemcpy(cache.d_grid,
+                                     grid_cells.data(),
+                                     grid_cells.size() * sizeof(GPUCell),
+                                     cudaMemcpyHostToDevice));
 
-        GPU_CHECK(cudaMemcpy(cache.d_pairs,
-                             gpu_pairs.data(),
-                             gpu_pairs.size() * sizeof(GPUPair),
-                             cudaMemcpyHostToDevice));
-        GPU_CHECK(cudaMemcpy(cache.d_grid,
-                             grid_samples.data(),
-                             grid_samples.size() * sizeof(GPUSample),
-                             cudaMemcpyHostToDevice));
+                const dim3 block(kBlockSize, 1, 1);
+                const dim3 grid(static_cast<unsigned>(gpu_cell_pairs.size() * gpu_sources.size()),
+                                static_cast<unsigned>((num_grid_cells + kBlockSize - 1) / kBlockSize),
+                                1);
 
-        const dim3 block(kBlockSize, 1, 1);
-        const dim3 grid(static_cast<unsigned>(gpu_pairs.size() * gpu_sources.size()),
-                        static_cast<unsigned>((num_grid_samples + kBlockSize - 1) / kBlockSize),
-                        1);
+                ghost_cell_kernel<<<grid, block>>>(
+                    static_cast<Surface*>(cache.d_surfs),
+                    num_surfaces,
+                    lens.sensor_z,
+                    static_cast<GPUPair*>(cache.d_pairs),
+                    static_cast<int>(gpu_sources.size()),
+                    static_cast<GPUSource*>(cache.d_src),
+                    static_cast<GPUCell*>(cache.d_grid),
+                    num_grid_cells,
+                    lens.surfaces[0].semi_aperture,
+                    lens.surfaces[0].z - 20.0f,
+                    sensor_half_w,
+                    sensor_half_h,
+                    width,
+                    height,
+                    cache.d_out_r,
+                    cache.d_out_g,
+                    cache.d_out_b,
+                    config.gain,
+                    1.0f / static_cast<float>(num_grid_cells),
+                    d_spectral_samples,
+                    static_cast<int>(spectral_samples.size()));
 
-        ghost_kernel<<<grid, block>>>(
-            static_cast<Surface*>(cache.d_surfs),
-            num_surfaces,
-            lens.sensor_z,
-            static_cast<GPUPair*>(cache.d_pairs),
-            static_cast<int>(gpu_sources.size()),
-            static_cast<GPUSource*>(cache.d_src),
-            static_cast<GPUSample*>(cache.d_grid),
-            num_grid_samples,
-            lens.surfaces[0].semi_aperture,
-            lens.surfaces[0].z - 20.0f,
-            sensor_half_w,
-            sensor_half_h,
-            width,
-            height,
-            cache.d_out_r,
-            cache.d_out_g,
-            cache.d_out_b,
-            config.gain,
-            1.0f / static_cast<float>(num_grid_samples),
-            2.0f / static_cast<float>(bucket_grid),
-            config.aperture_blades,
-            config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
-            config.footprint_radius_bias,
-            config.footprint_clamp,
-            d_spectral_samples,
-            static_cast<int>(spectral_samples.size()));
+                cudaError_t error = cudaGetLastError();
+                if (error != cudaSuccess) {
+                    cudaFree(d_spectral_samples);
+                    report_cuda_error(error, "ghost_cell_kernel", out_error);
+                    return false;
+                }
 
-        cudaError_t error = cudaGetLastError();
-        if (error != cudaSuccess) {
-            cudaFree(d_spectral_samples);
-            report_cuda_error(error, "ghost_kernel", out_error);
-            return false;
-        }
-
-        error = cudaDeviceSynchronize();
-        if (error != cudaSuccess) {
-            cudaFree(d_spectral_samples);
-            report_cuda_error(error, "cudaDeviceSynchronize", out_error);
-            return false;
+                error = cudaDeviceSynchronize();
+                if (error != cudaSuccess) {
+                    cudaFree(d_spectral_samples);
+                    report_cuda_error(error, "cudaDeviceSynchronize", out_error);
+                    return false;
+                }
+            }
         }
     }
 

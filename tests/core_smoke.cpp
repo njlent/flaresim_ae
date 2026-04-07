@@ -383,6 +383,59 @@ void test_cuda_backend_api()
     }
 }
 
+void test_cuda_cell_rasterization_launch()
+{
+    if (!cuda_ghost_renderer_compiled()) {
+        return;
+    }
+
+    std::string reason;
+    if (!cuda_ghost_renderer_available(&reason)) {
+        return;
+    }
+
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    GhostConfig config {};
+    config.ray_grid = 4;
+    config.cleanup_mode = GhostCleanupMode::SharpAdaptive;
+    config.gain = 100.0f;
+    config.aperture_blades = 6;
+
+    const float fov_h = 60.0f * 3.14159265358979323846f / 180.0f;
+    const float fov_v = 40.0f * 3.14159265358979323846f / 180.0f;
+    auto plans = plan_active_ghost_pairs(lens, fov_h, fov_v, 1920, 1080, config);
+    assert(!plans.empty());
+    plans.resize(1);
+    plans[0].use_cell_rasterization = true;
+
+    const float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
+    const float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
+    std::vector<BrightPixel> sources {
+        {0.0f, 0.0f, 8.0f, 8.0f, 8.0f},
+    };
+    std::vector<float> out_r(32 * 32, 0.0f);
+    std::vector<float> out_g(32 * 32, 0.0f);
+    std::vector<float> out_b(32 * 32, 0.0f);
+    GpuBufferCache cache;
+    std::string error;
+    assert(launch_ghost_cuda(lens,
+                             plans,
+                             sources,
+                             sensor_half_w,
+                             sensor_half_h,
+                             out_r.data(),
+                             out_g.data(),
+                             out_b.data(),
+                             32,
+                             32,
+                             config,
+                             cache,
+                             &error));
+}
+
 void test_ae_adapter_bits()
 {
     assert(builtin_lens_count() >= 1375);
@@ -928,6 +981,7 @@ int main()
     test_render_frame();
     test_sky_brightness();
     test_cuda_backend_api();
+    test_cuda_cell_rasterization_launch();
     test_ae_adapter_bits();
     test_output_views();
     test_render_plan_cache();

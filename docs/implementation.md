@@ -146,8 +146,13 @@ Ship an AE implementation in staged slices, with frequent commits.
 ### Slice 22
 - added projected pupil-cell rasterization as an automatic path for large or highly warped sharp-cleanup ghost pairs
 - the CPU renderer now rasterizes projected pupil quads instead of depositing only point splats for those pairs
-- CUDA currently stays disabled for the cell-rasterization path so the new primitive cannot silently diverge from the CPU reference
 - smoke coverage now exercises the cell-rasterization selection heuristic alongside the earlier pair-planning helpers
+
+### Slice 23
+- added CUDA projected pupil-cell rasterization so sharp-cleanup cell pairs stay on the GPU instead of forcing a CPU fallback
+- CUDA ghost dispatch now splits each adaptive grid bucket into splat pairs and cell-rasterized pairs, launching the matching kernel for each subset
+- the CPU renderer is now a real fallback path again; CUDA can cover both adaptive splats and projected pupil cells
+- smoke coverage now forces a CUDA launch through a cell-rasterized pair when a CUDA device is available
 
 Verification:
 - `cmake -S . -B build`
