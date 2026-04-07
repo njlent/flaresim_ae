@@ -990,6 +990,8 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
                                   float* out_b,
                                   float gain,
                                   float cell_weight,
+                                  int aperture_blades,
+                                  float aperture_rotation_rad,
                                   float cell_edge_inset,
                                   float cell_coverage_bias,
                                   const GPUSpectralSampleDev* spectral_samples,
@@ -1014,10 +1016,22 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
     const DVec3 beam_dir = dv_normalize(dv(tanf(source.angle_x), tanf(source.angle_y), 1.0f));
     const float inset = fminf(fmaxf(cell_edge_inset, 0.0f), 0.45f);
     const float trace_scale = 1.0f - inset;
-    const float cell_u0 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
-    const float cell_v0 = cell.vc + (cell.v0 - cell.vc) * trace_scale;
-    const float cell_u1 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
-    const float cell_v1 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
+    const float inset_u00 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
+    const float inset_v00 = cell.vc + (cell.v0 - cell.vc) * trace_scale;
+    const float inset_u10 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
+    const float inset_v10 = cell.vc + (cell.v0 - cell.vc) * trace_scale;
+    const float inset_u11 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
+    const float inset_v11 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
+    const float inset_u01 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
+    const float inset_v01 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
+    const float cell_u00 = d_is_valid_pupil_sample(cell.u0, cell.v0, aperture_blades, aperture_rotation_rad) ? cell.u0 : inset_u00;
+    const float cell_v00 = d_is_valid_pupil_sample(cell.u0, cell.v0, aperture_blades, aperture_rotation_rad) ? cell.v0 : inset_v00;
+    const float cell_u10 = d_is_valid_pupil_sample(cell.u1, cell.v0, aperture_blades, aperture_rotation_rad) ? cell.u1 : inset_u10;
+    const float cell_v10 = d_is_valid_pupil_sample(cell.u1, cell.v0, aperture_blades, aperture_rotation_rad) ? cell.v0 : inset_v10;
+    const float cell_u11 = d_is_valid_pupil_sample(cell.u1, cell.v1, aperture_blades, aperture_rotation_rad) ? cell.u1 : inset_u11;
+    const float cell_v11 = d_is_valid_pupil_sample(cell.u1, cell.v1, aperture_blades, aperture_rotation_rad) ? cell.v1 : inset_v11;
+    const float cell_u01 = d_is_valid_pupil_sample(cell.u0, cell.v1, aperture_blades, aperture_rotation_rad) ? cell.u0 : inset_u01;
+    const float cell_v01 = d_is_valid_pupil_sample(cell.u0, cell.v1, aperture_blades, aperture_rotation_rad) ? cell.v1 : inset_v01;
 
     for (int sample_index = 0; sample_index < num_spectral_samples; ++sample_index) {
         const GPUSpectralSampleDev& sample = spectral_samples[sample_index];
@@ -1031,25 +1045,25 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
         float w01 = 0.0f;
         if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
-                                              cell_u0, cell_v0, sample.lambda,
+                                              cell_u00, cell_v00, sample.lambda,
                                               front_radius, start_z,
                                               sensor_half_w, sensor_half_h,
                                               width, height, p00x, p00y, &w00) ||
             !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
-                                              cell_u1, cell_v0, sample.lambda,
+                                              cell_u10, cell_v10, sample.lambda,
                                               front_radius, start_z,
                                               sensor_half_w, sensor_half_h,
                                               width, height, p10x, p10y, &w10) ||
             !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
-                                              cell_u1, cell_v1, sample.lambda,
+                                              cell_u11, cell_v11, sample.lambda,
                                               front_radius, start_z,
                                               sensor_half_w, sensor_half_h,
                                               width, height, p11x, p11y, &w11) ||
             !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
-                                              cell_u0, cell_v1, sample.lambda,
+                                              cell_u01, cell_v01, sample.lambda,
                                               front_radius, start_z,
                                               sensor_half_w, sensor_half_h,
                                               width, height, p01x, p01y, &w01)) {
@@ -1586,6 +1600,8 @@ bool launch_ghost_cuda(const LensSystem& lens,
                     cache.d_out_b,
                     config.gain,
                     1.0f / static_cast<float>(num_grid_cells),
+                    config.aperture_blades,
+                    config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
                     config.cell_edge_inset,
                     config.cell_coverage_bias,
                     d_spectral_samples,

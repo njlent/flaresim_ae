@@ -783,19 +783,61 @@ static float estimate_ghost_distortion(const LensSystem& lens,
     return std::clamp(rms_px / extent_px, 0.0f, 1.0f);
 }
 
+static void select_cell_trace_corner(float exact_u,
+                                     float exact_v,
+                                     float inset_u,
+                                     float inset_v,
+                                     int aperture_blades,
+                                     float aperture_rotation_deg,
+                                     float& out_u,
+                                     float& out_v)
+{
+    if (is_valid_pupil_sample(exact_u, exact_v, aperture_blades, aperture_rotation_deg)) {
+        out_u = exact_u;
+        out_v = exact_v;
+        return;
+    }
+
+    out_u = inset_u;
+    out_v = inset_v;
+}
+
 static void compute_cell_trace_corners(const GridCell& cell,
                                        float cell_edge_inset,
-                                       float& out_u0,
-                                       float& out_v0,
-                                       float& out_u1,
-                                       float& out_v1)
+                                       int aperture_blades,
+                                       float aperture_rotation_deg,
+                                       float& out_u00,
+                                       float& out_v00,
+                                       float& out_u10,
+                                       float& out_v10,
+                                       float& out_u11,
+                                       float& out_v11,
+                                       float& out_u01,
+                                       float& out_v01)
 {
     const float inset = std::clamp(cell_edge_inset, 0.0f, 0.45f);
     const float trace_scale = 1.0f - inset;
-    out_u0 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
-    out_v0 = cell.vc + (cell.v0 - cell.vc) * trace_scale;
-    out_u1 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
-    out_v1 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
+    const float inset_u00 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
+    const float inset_v00 = cell.vc + (cell.v0 - cell.vc) * trace_scale;
+    const float inset_u10 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
+    const float inset_v10 = cell.vc + (cell.v0 - cell.vc) * trace_scale;
+    const float inset_u11 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
+    const float inset_v11 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
+    const float inset_u01 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
+    const float inset_v01 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
+
+    select_cell_trace_corner(cell.u0, cell.v0, inset_u00, inset_v00,
+                             aperture_blades, aperture_rotation_deg,
+                             out_u00, out_v00);
+    select_cell_trace_corner(cell.u1, cell.v0, inset_u10, inset_v10,
+                             aperture_blades, aperture_rotation_deg,
+                             out_u10, out_v10);
+    select_cell_trace_corner(cell.u1, cell.v1, inset_u11, inset_v11,
+                             aperture_blades, aperture_rotation_deg,
+                             out_u11, out_v11);
+    select_cell_trace_corner(cell.u0, cell.v1, inset_u01, inset_v01,
+                             aperture_blades, aperture_rotation_deg,
+                             out_u01, out_v01);
 }
 
 static void apply_cell_coverage_bias(PixelPoint& p00,
@@ -1160,16 +1202,26 @@ void render_ghosts(const LensSystem &lens,
 
                 for (const GridCell& cell : pair_grid_cells)
                 {
-                    float cell_u0 = 0.0f;
-                    float cell_v0 = 0.0f;
-                    float cell_u1 = 0.0f;
-                    float cell_v1 = 0.0f;
+                    float cell_u00 = 0.0f;
+                    float cell_v00 = 0.0f;
+                    float cell_u10 = 0.0f;
+                    float cell_v10 = 0.0f;
+                    float cell_u11 = 0.0f;
+                    float cell_v11 = 0.0f;
+                    float cell_u01 = 0.0f;
+                    float cell_v01 = 0.0f;
                     compute_cell_trace_corners(cell,
                                                config.cell_edge_inset,
-                                               cell_u0,
-                                               cell_v0,
-                                               cell_u1,
-                                               cell_v1);
+                                               config.aperture_blades,
+                                               config.aperture_rotation_deg,
+                                               cell_u00,
+                                               cell_v00,
+                                               cell_u10,
+                                               cell_v10,
+                                               cell_u11,
+                                               cell_v11,
+                                               cell_u01,
+                                               cell_v01);
                     for (int ch = 0; ch < 3; ++ch)
                     {
                         float p00x = 0.0f, p00y = 0.0f;
@@ -1181,19 +1233,19 @@ void render_ghosts(const LensSystem &lens,
                         float w11 = 0.0f;
                         float w01 = 0.0f;
                         if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u0, cell_v0, config.wavelengths[ch],
+                                                            cell_u00, cell_v00, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p00x, p00y, &w00) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u1, cell_v0, config.wavelengths[ch],
+                                                            cell_u10, cell_v10, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p10x, p10y, &w10) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u1, cell_v1, config.wavelengths[ch],
+                                                            cell_u11, cell_v11, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p11x, p11y, &w11) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u0, cell_v1, config.wavelengths[ch],
+                                                            cell_u01, cell_v01, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p01x, p01y, &w01)) {
                             continue;
