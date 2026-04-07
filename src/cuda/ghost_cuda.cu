@@ -445,7 +445,8 @@ __device__ __forceinline__ bool d_trace_ghost_sensor_position_px(const Surface* 
                                                                  int width,
                                                                  int height,
                                                                  float& out_px,
-                                                                 float& out_py)
+                                                                 float& out_py,
+                                                                 float* out_weight = nullptr)
 {
     DRay ray;
     ray.origin = dv(u * front_radius, v * front_radius, start_z);
@@ -464,6 +465,9 @@ __device__ __forceinline__ bool d_trace_ghost_sensor_position_px(const Surface* 
 
     out_px = (result.position.x / (2.0f * sensor_half_w) + 0.5f) * width;
     out_py = (result.position.y / (2.0f * sensor_half_h) + 0.5f) * height;
+    if (out_weight) {
+        *out_weight = result.weight;
+    }
     return isfinite(out_px) && isfinite(out_py);
 }
 
@@ -741,18 +745,21 @@ __device__ __forceinline__ float d_signed_triangle_twice_area(const DPixelPoint&
     return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 }
 
-__device__ __forceinline__ void d_rasterize_triangle_uniform(float* out,
-                                                             int width,
-                                                             int height,
-                                                             const DPixelPoint& a,
-                                                             const DPixelPoint& b,
-                                                             const DPixelPoint& c,
-                                                             float value)
+__device__ __forceinline__ void d_rasterize_triangle_linear(float* out,
+                                                            int width,
+                                                            int height,
+                                                            const DPixelPoint& a,
+                                                            const DPixelPoint& b,
+                                                            const DPixelPoint& c,
+                                                            float va,
+                                                            float vb,
+                                                            float vc,
+                                                            float density_scale)
 {
     const float twice_area_signed = d_signed_triangle_twice_area(a, b, c);
     const float twice_area = fabsf(twice_area_signed);
     const float area = 0.5f * twice_area;
-    if (!(area > 1.0e-4f) || !isfinite(area) || value <= 1.0e-14f) {
+    if (!(area > 1.0e-4f) || !isfinite(area) || density_scale <= 1.0e-14f) {
         return;
     }
 
@@ -766,7 +773,6 @@ __device__ __forceinline__ void d_rasterize_triangle_uniform(float* out,
 
     const float sign = twice_area_signed >= 0.0f ? 1.0f : -1.0f;
     const float inv_twice_area = 1.0f / twice_area;
-    const float density = value / area;
 
     for (int y = y0; y <= y1; ++y) {
         const float py = y + 0.5f;
@@ -777,33 +783,49 @@ __device__ __forceinline__ void d_rasterize_triangle_uniform(float* out,
             const float w1 = sign * ((c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)) * inv_twice_area;
             const float w2 = sign * ((a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)) * inv_twice_area;
             if (w0 >= -1.0e-4f && w1 >= -1.0e-4f && w2 >= -1.0e-4f) {
-                atomicAdd(&out[row + x], density);
+                const float density = fmaxf(0.0f, va * w2 + vb * w0 + vc * w1);
+                atomicAdd(&out[row + x], density * density_scale);
             }
         }
     }
 }
 
-__device__ __forceinline__ void d_rasterize_quad_uniform(float* out,
-                                                         int width,
-                                                         int height,
-                                                         const DPixelPoint& p00,
-                                                         const DPixelPoint& p10,
-                                                         const DPixelPoint& p11,
-                                                         const DPixelPoint& p01,
-                                                         float value)
+__device__ __forceinline__ void d_rasterize_quad_linear(float* out,
+                                                        int width,
+                                                        int height,
+                                                        const DPixelPoint& p00,
+                                                        const DPixelPoint& p10,
+                                                        const DPixelPoint& p11,
+                                                        const DPixelPoint& p01,
+                                                        float v00,
+                                                        float v10,
+                                                        float v11,
+                                                        float v01,
+                                                        float total_value)
 {
     const float area0 = 0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11));
     const float area1 = 0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01));
     const float total_area = area0 + area1;
-    if (!(total_area > 1.0e-4f) || !isfinite(total_area)) {
+    if (!(total_area > 1.0e-4f) || !isfinite(total_area) || total_value <= 1.0e-14f) {
         const float center_x = 0.25f * (p00.x + p10.x + p11.x + p01.x);
         const float center_y = 0.25f * (p00.y + p10.y + p11.y + p01.y);
-        d_atomic_splat(out, width, height, center_x, center_y, value, 1.5f);
+        d_atomic_splat(out, width, height, center_x, center_y, total_value, 1.5f);
         return;
     }
 
-    d_rasterize_triangle_uniform(out, width, height, p00, p10, p11, value * (area0 / total_area));
-    d_rasterize_triangle_uniform(out, width, height, p00, p11, p01, value * (area1 / total_area));
+    const float weighted_integral =
+        area0 * (v00 + v10 + v11) / 3.0f +
+        area1 * (v00 + v11 + v01) / 3.0f;
+    if (!(weighted_integral > 1.0e-6f) || !isfinite(weighted_integral)) {
+        const float center_x = 0.25f * (p00.x + p10.x + p11.x + p01.x);
+        const float center_y = 0.25f * (p00.y + p10.y + p11.y + p01.y);
+        d_atomic_splat(out, width, height, center_x, center_y, total_value, 1.5f);
+        return;
+    }
+
+    const float density_scale = total_value / weighted_integral;
+    d_rasterize_triangle_linear(out, width, height, p00, p10, p11, v00, v10, v11, density_scale);
+    d_rasterize_triangle_linear(out, width, height, p00, p11, p01, v00, v11, v01, density_scale);
 }
 
 __device__ __forceinline__ void d_apply_cell_coverage_bias(DPixelPoint& p00,
@@ -997,40 +1019,40 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
     const float cell_u1 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
     const float cell_v1 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
 
-    DRay center_ray;
-    center_ray.origin = dv(cell.uc * front_radius, cell.vc * front_radius, start_z);
-    center_ray.dir = beam_dir;
-
     for (int sample_index = 0; sample_index < num_spectral_samples; ++sample_index) {
         const GPUSpectralSampleDev& sample = spectral_samples[sample_index];
         float p00x = 0.0f, p00y = 0.0f;
         float p10x = 0.0f, p10y = 0.0f;
         float p11x = 0.0f, p11y = 0.0f;
         float p01x = 0.0f, p01y = 0.0f;
+        float w00 = 0.0f;
+        float w10 = 0.0f;
+        float w11 = 0.0f;
+        float w01 = 0.0f;
         if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
                                               cell_u0, cell_v0, sample.lambda,
                                               front_radius, start_z,
                                               sensor_half_w, sensor_half_h,
-                                              width, height, p00x, p00y) ||
+                                              width, height, p00x, p00y, &w00) ||
             !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
                                               cell_u1, cell_v0, sample.lambda,
                                               front_radius, start_z,
                                               sensor_half_w, sensor_half_h,
-                                              width, height, p10x, p10y) ||
+                                              width, height, p10x, p10y, &w10) ||
             !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
                                               cell_u1, cell_v1, sample.lambda,
                                               front_radius, start_z,
                                               sensor_half_w, sensor_half_h,
-                                              width, height, p11x, p11y) ||
+                                              width, height, p11x, p11y, &w11) ||
             !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                               pair.surf_a, pair.surf_b, beam_dir,
                                               cell_u0, cell_v1, sample.lambda,
                                               front_radius, start_z,
                                               sensor_half_w, sensor_half_h,
-                                              width, height, p01x, p01y)) {
+                                              width, height, p01x, p01y, &w01)) {
             continue;
         }
 
@@ -1048,19 +1070,14 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
         const float density_boost = d_select_ghost_density_boost(pair.area_boost,
                                                                  pair.reference_footprint_area_px2,
                                                                  quad_area);
-
-        const DTraceResult result = d_trace_ghost_ray(center_ray,
-                                                      surfaces,
-                                                      num_surfaces,
-                                                      sensor_z,
-                                                      pair.surf_a,
-                                                      pair.surf_b,
-                                                      sample.lambda);
-        if (!result.valid) {
+        const float weighted_integral =
+            0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11)) * (w00 + w10 + w11) / 3.0f +
+            0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01)) * (w00 + w11 + w01) / 3.0f;
+        if (!(weighted_integral > 1.0e-6f) || !isfinite(weighted_integral)) {
             continue;
         }
-
-        const float contribution = result.weight * cell_weight * gain * density_boost;
+        const float avg_weight = weighted_integral / quad_area;
+        const float contribution = avg_weight * cell_weight * gain * density_boost;
         if (contribution < 1.0e-12f) {
             continue;
         }
@@ -1068,9 +1085,9 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
         const float cr = source.r * sample.rw * contribution;
         const float cg = source.g * sample.gw * contribution;
         const float cb = source.b * sample.bw * contribution;
-        d_rasterize_quad_uniform(out_r, width, height, p00, p10, p11, p01, cr);
-        d_rasterize_quad_uniform(out_g, width, height, p00, p10, p11, p01, cg);
-        d_rasterize_quad_uniform(out_b, width, height, p00, p10, p11, p01, cb);
+        d_rasterize_quad_linear(out_r, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cr);
+        d_rasterize_quad_linear(out_g, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cg);
+        d_rasterize_quad_linear(out_b, width, height, p00, p10, p11, p01, w00, w10, w11, w01, cb);
     }
 }
 

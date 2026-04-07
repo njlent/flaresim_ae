@@ -160,7 +160,8 @@ static bool trace_ghost_sensor_position_px(const LensSystem& lens,
                                            int width,
                                            int height,
                                            float& out_px,
-                                           float& out_py)
+                                           float& out_py,
+                                           float* out_weight = nullptr)
 {
     Ray ray;
     ray.origin = Vec3f(u * front_radius, v * front_radius, start_z);
@@ -173,6 +174,9 @@ static bool trace_ghost_sensor_position_px(const LensSystem& lens,
 
     out_px = (res.position.x / (2.0f * sensor_half_w) + 0.5f) * width;
     out_py = (res.position.y / (2.0f * sensor_half_h) + 0.5f) * height;
+    if (out_weight) {
+        *out_weight = res.weight;
+    }
     return std::isfinite(out_px) && std::isfinite(out_py);
 }
 
@@ -262,16 +266,20 @@ static float signed_triangle_area(const PixelPoint& a,
     return 0.5f * ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
 }
 
-static void rasterize_triangle_uniform(float* buf,
-                                       int width,
-                                       int height,
-                                       const PixelPoint& a,
-                                       const PixelPoint& b,
-                                       const PixelPoint& c,
-                                       float value)
+static void rasterize_triangle_linear(float* buf,
+                                      int width,
+                                      int height,
+                                      const PixelPoint& a,
+                                      const PixelPoint& b,
+                                      const PixelPoint& c,
+                                      float va,
+                                      float vb,
+                                      float vc,
+                                      float density_scale)
 {
-    const float area = std::abs(signed_triangle_area(a, b, c));
-    if (!(area > 1.0e-4f) || !std::isfinite(area) || value <= 1.0e-14f) {
+    const float signed_area = signed_triangle_area(a, b, c);
+    const float area = std::abs(signed_area);
+    if (!(area > 1.0e-4f) || !std::isfinite(area) || density_scale <= 1.0e-14f) {
         return;
     }
 
@@ -279,45 +287,60 @@ static void rasterize_triangle_uniform(float* buf,
     const int x1 = std::min(width - 1, static_cast<int>(std::ceil(std::max({a.x, b.x, c.x}) + 0.5f)));
     const int y0 = std::max(0, static_cast<int>(std::floor(std::min({a.y, b.y, c.y}) - 0.5f)));
     const int y1 = std::min(height - 1, static_cast<int>(std::ceil(std::max({a.y, b.y, c.y}) + 0.5f)));
-    const float inv_twice_area = 1.0f / (2.0f * area);
-    const float density = value / area;
+    const float inv_twice_signed_area = 1.0f / (2.0f * signed_area);
 
     for (int y = y0; y <= y1; ++y) {
         const float py = y + 0.5f;
         const int row = y * width;
         for (int x = x0; x <= x1; ++x) {
             const float px = x + 0.5f;
-            const float w0 = ((b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x)) * inv_twice_area;
-            const float w1 = ((c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)) * inv_twice_area;
-            const float w2 = ((a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)) * inv_twice_area;
+            const float w0 = ((b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x)) * inv_twice_signed_area;
+            const float w1 = ((c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)) * inv_twice_signed_area;
+            const float w2 = ((a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)) * inv_twice_signed_area;
             if (w0 >= -1.0e-4f && w1 >= -1.0e-4f && w2 >= -1.0e-4f) {
-                buf[row + x] += density;
+                const float density = std::max(0.0f, va * w2 + vb * w0 + vc * w1);
+                buf[row + x] += density * density_scale;
             }
         }
     }
 }
 
-static void rasterize_quad_uniform(float* buf,
-                                   int width,
-                                   int height,
-                                   const PixelPoint& p00,
-                                   const PixelPoint& p10,
-                                   const PixelPoint& p11,
-                                   const PixelPoint& p01,
-                                   float value)
+static void rasterize_quad_linear(float* buf,
+                                  int width,
+                                  int height,
+                                  const PixelPoint& p00,
+                                  const PixelPoint& p10,
+                                  const PixelPoint& p11,
+                                  const PixelPoint& p01,
+                                  float v00,
+                                  float v10,
+                                  float v11,
+                                  float v01,
+                                  float total_value)
 {
     const float area0 = std::abs(signed_triangle_area(p00, p10, p11));
     const float area1 = std::abs(signed_triangle_area(p00, p11, p01));
     const float total_area = area0 + area1;
-    if (!(total_area > 1.0e-4f) || !std::isfinite(total_area)) {
+    if (!(total_area > 1.0e-4f) || !std::isfinite(total_area) || total_value <= 1.0e-14f) {
         const float center_x = 0.25f * (p00.x + p10.x + p11.x + p01.x);
         const float center_y = 0.25f * (p00.y + p10.y + p11.y + p01.y);
-        splat_tent(buf, width, height, center_x, center_y, value, 1.5f);
+        splat_tent(buf, width, height, center_x, center_y, total_value, 1.5f);
         return;
     }
 
-    rasterize_triangle_uniform(buf, width, height, p00, p10, p11, value * (area0 / total_area));
-    rasterize_triangle_uniform(buf, width, height, p00, p11, p01, value * (area1 / total_area));
+    const float weighted_integral =
+        area0 * (v00 + v10 + v11) / 3.0f +
+        area1 * (v00 + v11 + v01) / 3.0f;
+    if (!(weighted_integral > 1.0e-6f) || !std::isfinite(weighted_integral)) {
+        const float center_x = 0.25f * (p00.x + p10.x + p11.x + p01.x);
+        const float center_y = 0.25f * (p00.y + p10.y + p11.y + p01.y);
+        splat_tent(buf, width, height, center_x, center_y, total_value, 1.5f);
+        return;
+    }
+
+    const float density_scale = total_value / weighted_integral;
+    rasterize_triangle_linear(buf, width, height, p00, p10, p11, v00, v10, v11, density_scale);
+    rasterize_triangle_linear(buf, width, height, p00, p11, p01, v00, v11, v01, density_scale);
 }
 
 static GhostSampleFootprint estimate_ghost_sample_footprint(const LensSystem& lens,
@@ -1153,22 +1176,26 @@ void render_ghosts(const LensSystem &lens,
                         float p10x = 0.0f, p10y = 0.0f;
                         float p11x = 0.0f, p11y = 0.0f;
                         float p01x = 0.0f, p01y = 0.0f;
+                        float w00 = 0.0f;
+                        float w10 = 0.0f;
+                        float w11 = 0.0f;
+                        float w01 = 0.0f;
                         if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
                                                             cell_u0, cell_v0, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
-                                                            width, height, p00x, p00y) ||
+                                                            width, height, p00x, p00y, &w00) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
                                                             cell_u1, cell_v0, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
-                                                            width, height, p10x, p10y) ||
+                                                            width, height, p10x, p10y, &w10) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
                                                             cell_u1, cell_v1, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
-                                                            width, height, p11x, p11y) ||
+                                                            width, height, p11x, p11y, &w11) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
                                                             cell_u0, cell_v1, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
-                                                            width, height, p01x, p01y)) {
+                                                            width, height, p01x, p01y, &w01)) {
                             continue;
                         }
 
@@ -1198,26 +1225,38 @@ void render_ghosts(const LensSystem &lens,
                         const float density_boost = select_ghost_density_boost(pair_plan.area_boost,
                                                                                pair_plan.reference_footprint_area_px2,
                                                                                footprint.area_px2);
-
-                        ++attempts;
-                        Ray center_ray;
-                        center_ray.origin = Vec3f(cell.uc * front_R, cell.vc * front_R, start_z);
-                        center_ray.dir = beam_dir;
-                        const TraceResult res = trace_ghost_ray(center_ray, lens, a, b, config.wavelengths[ch]);
-                        if (!res.valid) {
+                        attempts += 4;
+                        hits += 4;
+                        const float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g : src.b;
+                        const float total_area =
+                            std::abs(signed_triangle_area(p00, p10, p11)) +
+                            std::abs(signed_triangle_area(p00, p11, p01));
+                        const float weighted_integral =
+                            std::abs(signed_triangle_area(p00, p10, p11)) * (w00 + w10 + w11) / 3.0f +
+                            std::abs(signed_triangle_area(p00, p11, p01)) * (w00 + w11 + w01) / 3.0f;
+                        if (!(total_area > 1.0e-4f) || !(weighted_integral > 1.0e-6f)) {
                             continue;
                         }
-
-                        ++hits;
-                        const float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g : src.b;
+                        const float avg_weight = weighted_integral / total_area;
                         const float contribution =
-                            src_i * res.weight * cell_weight * config.gain * density_boost;
+                            src_i * avg_weight * cell_weight * config.gain * density_boost;
                         if (contribution < 1.0e-12f) {
                             continue;
                         }
 
                         auto& buf = (ch == 0) ? tbuf_r[tid] : (ch == 1) ? tbuf_g[tid] : tbuf_b[tid];
-                        rasterize_quad_uniform(buf.data(), width, height, p00, p10, p11, p01, contribution);
+                        rasterize_quad_linear(buf.data(),
+                                              width,
+                                              height,
+                                              p00,
+                                              p10,
+                                              p11,
+                                              p01,
+                                              w00,
+                                              w10,
+                                              w11,
+                                              w01,
+                                              contribution);
                     }
                 }
 

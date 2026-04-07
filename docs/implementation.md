@@ -169,6 +169,11 @@ Ship an AE implementation in staged slices, with frequent commits.
 - ghost pair planning now honors `Off` by disabling projected cells completely and honors `Force` by using projected cells for every sharp-cleanup pair
 - runtime cache keys, AE parameter checkout, and smoke coverage now all track the mode enum so toggling the control changes both output and render cost
 
+### Slice 27
+- replaced flat-shaded projected-cell deposition with corner-weighted interpolation on both CPU and CUDA
+- projected cells now reuse the traced corner throughput as a smooth density field, which breaks up the visible cell lattice without forcing a much higher `ray_grid`
+- total cell energy stays normalized to the interpolated corner average, so the fix targets the grid artifact rather than hiding it with blur
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`
