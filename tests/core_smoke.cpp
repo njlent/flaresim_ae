@@ -144,7 +144,7 @@ void test_ghost_pair_planning()
     GhostConfig config {};
     config.ray_grid = 8;
     config.cleanup_mode = GhostCleanupMode::SharpAdaptive;
-    config.projected_cells_mode = ProjectedCellsMode::Auto;
+    config.projected_cells_mode = ProjectedCellsMode::Force;
 
     const auto plans = plan_active_ghost_pairs(
         lens,
@@ -882,7 +882,8 @@ void test_param_schema()
     assert(lens_section_end_param() + 1 == camera_section_start_param());
     assert(camera_section_end_param() + 1 == aperture_section_start_param());
     assert(aperture_section_end_param() + 1 == flare_section_start_param());
-    assert(flare_section_start_param() + 1 == flare_gain_param());
+    assert(flare_section_start_param() + 1 == projected_cells_mode_param());
+    assert(projected_cells_mode_param() + 1 == flare_gain_param());
     assert(flare_gain_param() + 1 == sky_brightness_param());
     assert(sky_brightness_param() + 1 == threshold_param());
     assert(flare_section_end_param() + 1 == post_section_start_param());
@@ -892,8 +893,7 @@ void test_param_schema()
     assert(adaptive_sampling_strength_param() + 1 == footprint_radius_bias_param());
     assert(footprint_radius_bias_param() + 1 == footprint_clamp_param());
     assert(footprint_clamp_param() + 1 == max_adaptive_pair_grid_param());
-    assert(max_adaptive_pair_grid_param() + 1 == projected_cells_mode_param());
-    assert(projected_cells_mode_param() + 1 == cell_coverage_bias_param());
+    assert(max_adaptive_pair_grid_param() + 1 == cell_coverage_bias_param());
     assert(cell_coverage_bias_param() + 1 == cell_edge_inset_param());
     assert(cell_edge_inset_param() + 1 == advanced_ghosts_section_end_param());
     assert(advanced_ghosts_section_end_param() + 1 == post_section_end_param());
@@ -919,6 +919,7 @@ void test_param_schema()
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_popup = build_spectral_samples_popup_string();
     const std::string cleanup_popup = build_ghost_cleanup_mode_popup_string();
+    const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
     assert(legacy_lens_popup.find("Double Gauss") != std::string::npos);
     assert(manufacturer_popup.find("Canon") != std::string::npos);
@@ -926,6 +927,8 @@ void test_param_schema()
     assert(sensor_preset_popup.find("Full Frame") != std::string::npos);
     assert(spectral_popup.find("11") != std::string::npos);
     assert(cleanup_popup.find("Sharp Adaptive") != std::string::npos);
+    assert(projected_cells_popup.find("Disabled") != std::string::npos);
+    assert(projected_cells_popup.find("Enabled") != std::string::npos);
     assert(view_popup.find("Flare Only") != std::string::npos);
 
     const char* canon_lens_id = "canon-1-4x-tc-canon-extender-ef1-4x-iii";

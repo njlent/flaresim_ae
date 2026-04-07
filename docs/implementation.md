@@ -174,10 +174,15 @@ Ship an AE implementation in staged slices, with frequent commits.
 - projected-cell tracing now uses exact cell corners whenever they are valid, and only falls back to inset corners at aperture-risk boundaries
 - this targets the warped grid/gap lattice directly while keeping the edge-safety behavior for boundary cells
 
-### Slice 27
+### Slice 28
 - replaced flat-shaded projected-cell deposition with corner-weighted interpolation on both CPU and CUDA
 - projected cells now reuse the traced corner throughput as a smooth density field, which breaks up the visible cell lattice without forcing a much higher `ray_grid`
 - total cell energy stays normalized to the interpolated corner average, so the fix targets the grid artifact rather than hiding it with blur
+
+### Slice 29
+- moved the projected-cell mode control to the top of `Flare Settings` and relabeled it to `Adaptive Sampling`
+- simplified the projected-cell UI to `Disabled` / `Enabled`, with `Disabled` as the new default and old `Auto` removed from the exposed popup
+- renamed the Advanced Ghosts scalar control to `Adaptive Strength` so the UI no longer has two unrelated `Adaptive Sampling` controls
 
 Verification:
 - `cmake -S . -B build`

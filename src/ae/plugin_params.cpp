@@ -212,6 +212,14 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_FLARE_SECTION_START);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Adaptive Sampling",
+                  static_cast<A_short>(projected_cells_mode_popup_count()),
+                  static_cast<A_short>(defaults.projected_cells_mode_index),
+                  projected_cells_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_PROJECTED_CELLS_MODE);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Flare Gain",
                          0.0f,
                          kManualFloatMax,
@@ -383,7 +391,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_ADVANCED_GHOSTS_SECTION_START);
 
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Adaptive Sampling",
+    PF_ADD_FLOAT_SLIDERX("Adaptive Strength",
                          0.0f,
                          kManualFloatMax,
                          0.0f,
@@ -426,14 +434,6 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   512,
                   defaults.max_adaptive_pair_grid,
                   PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_POPUPX("Projected Cells",
-                  static_cast<A_short>(projected_cells_mode_popup_count()),
-                  static_cast<A_short>(defaults.projected_cells_mode_index),
-                  projected_cells_popup.data(),
-                  PF_ParamFlag_NONE,
-                  PARAM_ID_PROJECTED_CELLS_MODE);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Cell Coverage",
