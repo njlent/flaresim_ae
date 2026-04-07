@@ -28,7 +28,8 @@ bool render_frame_to_float_image(
     const std::string& asset_root,
     const AeParameterState& state,
     const FloatImageBuffer& input,
-    FloatImageBuffer& output
+    FloatImageBuffer& output,
+    const FloatImageBuffer* detection_mask = nullptr
 );
 
 bool render_frame_to_pixels(
@@ -37,7 +38,8 @@ bool render_frame_to_pixels(
     const AePixel8Like* input_pixels,
     AePixel8Like* output_pixels,
     int width,
-    int height
+    int height,
+    const AePixel8Like* mask_pixels = nullptr
 );
 
 bool render_frame_to_pixels(
@@ -46,7 +48,8 @@ bool render_frame_to_pixels(
     const AePixel16Like* input_pixels,
     AePixel16Like* output_pixels,
     int width,
-    int height
+    int height,
+    const AePixel16Like* mask_pixels = nullptr
 );
 
 bool render_frame_to_pixels(
@@ -55,5 +58,6 @@ bool render_frame_to_pixels(
     const AePixel32Like* input_pixels,
     AePixel32Like* output_pixels,
     int width,
-    int height
+    int height,
+    const AePixel32Like* mask_pixels = nullptr
 );

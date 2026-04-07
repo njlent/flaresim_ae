@@ -126,6 +126,71 @@ Ship an AE implementation in staged slices, with frequent commits.
 - output-view planning now skips unrelated systems entirely; `Sources` and `Diagnostics` no longer run flare/bloom/haze/starburst work
 - smoke coverage now verifies cache reuse on blur-only edits and verifies that `Sources` view leaves other stage buffers untouched
 
+### Slice 19
+- added per-pair ghost sampling plans with local footprint probes in the sharp cleanup path
+- `SharpAdaptive` now derives splat radius from traced pupil-to-sensor footprint estimates instead of relying only on pair-wide spacing heuristics
+- CUDA ghost rendering now mirrors the same footprint-aware radius selection per sample
+- smoke coverage now exercises footprint-radius selection alongside adaptive pair planning
+
+### Slice 20
+- added a collapsed AE `Advanced Ghosts` topic for adaptive sampling strength, footprint bias, footprint clamp, and max adaptive pair grid
+- advanced ghost controls default to neutral auto-like behavior and only affect the sharp cleanup internals when adjusted
+- shared runtime ghost cache keys now include the advanced ghost controls so AE invalidation stays correct across expert tweaks
+
+### Slice 21
+- added Jacobian-aware local density compensation on top of the footprint-aware splat path
+- `SharpAdaptive` now scales per-sample ghost contribution against a per-pair reference footprint area instead of relying only on one pair-wide area boost
+- CUDA ghost rendering now mirrors the same local density compensation term so preview/final paths stay aligned
+- smoke coverage now exercises the density compensation helper and verifies planned reference footprint areas
+
+### Slice 22
+- added projected pupil-cell rasterization as an automatic path for large or highly warped sharp-cleanup ghost pairs
+- the CPU renderer now rasterizes projected pupil quads instead of depositing only point splats for those pairs
+- smoke coverage now exercises the cell-rasterization selection heuristic alongside the earlier pair-planning helpers
+
+### Slice 23
+- added CUDA projected pupil-cell rasterization so sharp-cleanup cell pairs stay on the GPU instead of forcing a CPU fallback
+- CUDA ghost dispatch now splits each adaptive grid bucket into splat pairs and cell-rasterized pairs, launching the matching kernel for each subset
+- the CPU renderer is now a real fallback path again; CUDA can cover both adaptive splats and projected pupil cells
+- smoke coverage now forces a CUDA launch through a cell-rasterized pair when a CUDA device is available
+
+### Slice 24
+- added Advanced Ghost controls for `Cell Coverage` and `Cell Edge Inset` so truncated projected-cell ghosts can be widened or made more edge-safe from the AE UI
+- projected pupil cells now trace inset corners instead of only exact cell corners, which keeps more edge cells alive near the aperture boundary
+- CPU and CUDA cell rasterization now apply the same projected-quad coverage bias before rasterization so full-flare coverage can be tuned without falling back to blur
+
+### Slice 25
+- fixed projected-cell color loss by tracing channel/spectral-sample-specific quads instead of reusing the green quad geometry for all channels
+- added an `Advanced Ghosts` `Projected Cells` mode selector so the projected-cell path can run in `Auto`, `Off`, or `Force`
+- CPU and CUDA cell paths now preserve red/blue fringe placement while still supporting the coverage and edge-inset controls
+
+### Slice 26
+- replaced the ambiguous `Projected Cells` checkbox semantics with an explicit `Auto` / `Off` / `Force` mode end to end
+- ghost pair planning now honors `Off` by disabling projected cells completely and honors `Force` by using projected cells for every sharp-cleanup pair
+- runtime cache keys, AE parameter checkout, and smoke coverage now all track the mode enum so toggling the control changes both output and render cost
+
+### Slice 27
+- stopped shrinking every projected cell corner by default when `Cell Edge Inset` is non-zero
+- projected-cell tracing now uses exact cell corners whenever they are valid, and only falls back to inset corners at aperture-risk boundaries
+- this targets the warped grid/gap lattice directly while keeping the edge-safety behavior for boundary cells
+
+### Slice 28
+- replaced flat-shaded projected-cell deposition with corner-weighted interpolation on both CPU and CUDA
+- projected cells now reuse the traced corner throughput as a smooth density field, which breaks up the visible cell lattice without forcing a much higher `ray_grid`
+- total cell energy stays normalized to the interpolated corner average, so the fix targets the grid artifact rather than hiding it with blur
+
+### Slice 29
+- moved the projected-cell mode control to the top of `Flare Settings` and relabeled it to `Adaptive Sampling`
+- simplified the projected-cell UI to `Disabled` / `Enabled`, with `Disabled` as the new default and old `Auto` removed from the exposed popup
+- renamed the Advanced Ghosts scalar control to `Adaptive Strength` so the UI no longer has two unrelated `Adaptive Sampling` controls
+
+### Slice 30
+- wired the existing AE `Mask Layer` selector into the real SmartFX render path instead of leaving it UI-only
+- source extraction now treats the selected AE layer as a comp-space detection mask using visible content (`max(R,G,B) * alpha`), not alpha alone
+- flare/haze/starburst generation now stays full-frame after source selection; the selected mask only decides which sources survive
+- AE bridge alpha now expands from rendered RGB energy so masked source isolation does not clip flare lobes outside the source matte
+- SmartFX pre-render/render now carries the checked-out mask layer rect through to rendering so smaller selected layers align correctly in comp space
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

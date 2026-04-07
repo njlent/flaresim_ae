@@ -51,6 +51,17 @@ constexpr GhostCleanupModeDescriptor kGhostCleanupModes[] = {
     {GhostCleanupMode::SharpAdaptivePlusBlur, "Sharp + Blur"},
 };
 
+struct ProjectedCellsModeDescriptor
+{
+    ProjectedCellsMode mode;
+    std::string_view label;
+};
+
+constexpr ProjectedCellsModeDescriptor kProjectedCellsModes[] = {
+    {ProjectedCellsMode::Off, "Disabled"},
+    {ProjectedCellsMode::Force, "Enabled"},
+};
+
 std::string build_popup_string_from_labels(const char* const* labels, std::size_t count)
 {
     std::string popup;
@@ -119,7 +130,8 @@ int aperture_rotation_param() { return aperture_blades_param() + 1; }
 int aperture_section_end_param() { return aperture_rotation_param() + 1; }
 
 int flare_section_start_param() { return aperture_section_end_param() + 1; }
-int flare_gain_param() { return flare_section_start_param() + 1; }
+int projected_cells_mode_param() { return flare_section_start_param() + 1; }
+int flare_gain_param() { return projected_cells_mode_param() + 1; }
 int sky_brightness_param() { return flare_gain_param() + 1; }
 int threshold_param() { return sky_brightness_param() + 1; }
 int ray_grid_param() { return threshold_param() + 1; }
@@ -136,7 +148,15 @@ int starburst_gain_param() { return haze_blur_passes_param() + 1; }
 int starburst_scale_param() { return starburst_gain_param() + 1; }
 int spectral_samples_param() { return starburst_scale_param() + 1; }
 int ghost_cleanup_mode_param() { return spectral_samples_param() + 1; }
-int post_section_end_param() { return ghost_cleanup_mode_param() + 1; }
+int advanced_ghosts_section_start_param() { return ghost_cleanup_mode_param() + 1; }
+int adaptive_sampling_strength_param() { return advanced_ghosts_section_start_param() + 1; }
+int footprint_radius_bias_param() { return adaptive_sampling_strength_param() + 1; }
+int footprint_clamp_param() { return footprint_radius_bias_param() + 1; }
+int max_adaptive_pair_grid_param() { return footprint_clamp_param() + 1; }
+int cell_coverage_bias_param() { return max_adaptive_pair_grid_param() + 1; }
+int cell_edge_inset_param() { return cell_coverage_bias_param() + 1; }
+int advanced_ghosts_section_end_param() { return cell_edge_inset_param() + 1; }
+int post_section_end_param() { return advanced_ghosts_section_end_param() + 1; }
 int view_mode_param() { return post_section_end_param() + 1; }
 int mask_layer_param() { return view_mode_param() + 1; }
 int parameter_count() { return mask_layer_param() + 1; }
@@ -248,6 +268,15 @@ std::string build_ghost_cleanup_mode_popup_string()
         labels[i] = kGhostCleanupModes[i].label.data();
     }
     return build_popup_string_from_labels(labels, std::size(kGhostCleanupModes));
+}
+
+std::string build_projected_cells_mode_popup_string()
+{
+    const char* labels[std::size(kProjectedCellsModes)] {};
+    for (std::size_t i = 0; i < std::size(kProjectedCellsModes); ++i) {
+        labels[i] = kProjectedCellsModes[i].label.data();
+    }
+    return build_popup_string_from_labels(labels, std::size(kProjectedCellsModes));
 }
 
 std::string build_output_view_popup_string()
@@ -408,6 +437,33 @@ bool ghost_cleanup_mode_from_popup(int popup_index, GhostCleanupMode& out_mode)
     return true;
 }
 
+int projected_cells_mode_popup_count()
+{
+    return static_cast<int>(std::size(kProjectedCellsModes));
+}
+
+int projected_cells_mode_popup_index(ProjectedCellsMode mode)
+{
+    if (mode == ProjectedCellsMode::Force) {
+        return 2;
+    }
+    return 1;
+}
+
+bool projected_cells_mode_from_popup(int popup_index, ProjectedCellsMode& out_mode)
+{
+    if (popup_index <= 0) {
+        out_mode = ProjectedCellsMode::Off;
+        return true;
+    }
+    if (popup_index == 1) {
+        out_mode = ProjectedCellsMode::Off;
+        return true;
+    }
+    out_mode = ProjectedCellsMode::Force;
+    return true;
+}
+
 int output_view_popup_index(AeOutputView view)
 {
     for (std::size_t i = 0; i < std::size(kOutputViews); ++i) {
@@ -441,6 +497,12 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.ghost_blur_passes < 0 ||
         ui_state.haze_blur_passes < 0 ||
         ui_state.aperture_blades < 0 ||
+        ui_state.adaptive_sampling_strength < 0.0f ||
+        ui_state.footprint_radius_bias <= 0.0f ||
+        ui_state.footprint_clamp <= 0.0f ||
+        ui_state.max_adaptive_pair_grid < 0 ||
+        ui_state.cell_coverage_bias <= 0.0f ||
+        ui_state.cell_edge_inset < 0.0f ||
         ui_state.sensor_width_mm < 0.0f ||
         ui_state.sensor_height_mm < 0.0f ||
         ui_state.focal_length_mm <= 0.0f) {
@@ -483,6 +545,11 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         return false;
     }
 
+    ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Off;
+    if (!projected_cells_mode_from_popup(ui_state.projected_cells_mode_index, projected_cells_mode)) {
+        return false;
+    }
+
     out_state.view = view;
     out_state.use_sensor_size = ui_state.use_sensor_size;
     out_state.sensor_preset_index = ui_state.sensor_preset_index;
@@ -509,6 +576,13 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.starburst_gain = ui_state.starburst_gain;
     out_state.starburst_scale = ui_state.starburst_scale;
     out_state.spectral_samples = spectral_samples;
+    out_state.adaptive_sampling_strength = ui_state.adaptive_sampling_strength;
+    out_state.footprint_radius_bias = ui_state.footprint_radius_bias;
+    out_state.footprint_clamp = ui_state.footprint_clamp;
+    out_state.max_adaptive_pair_grid = ui_state.max_adaptive_pair_grid;
+    out_state.projected_cells_mode = projected_cells_mode;
+    out_state.cell_coverage_bias = ui_state.cell_coverage_bias;
+    out_state.cell_edge_inset = ui_state.cell_edge_inset;
 
     float preset_width = 0.0f;
     float preset_height = 0.0f;

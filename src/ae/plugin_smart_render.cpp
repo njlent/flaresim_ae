@@ -23,6 +23,20 @@
 namespace {
 
 constexpr A_long kSmartInputCheckoutId = 1;
+constexpr A_long kSmartMaskCheckoutId = 2;
+
+struct SmartRenderLayerRects
+{
+    PF_LRect input_rect {};
+    PF_LRect mask_rect {};
+    PF_Boolean has_mask = FALSE;
+};
+
+void delete_smart_render_layer_rects(void* data)
+{
+    auto* rects = reinterpret_cast<SmartRenderLayerRects*>(data);
+    delete rects;
+}
 
 bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_state)
 {
@@ -65,6 +79,13 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.starburst_gain = params[starburst_gain_param()]->u.fs_d.value;
     out_state.starburst_scale = params[starburst_scale_param()]->u.fs_d.value;
     out_state.spectral_samples_index = params[spectral_samples_param()]->u.pd.value;
+    out_state.adaptive_sampling_strength = params[adaptive_sampling_strength_param()]->u.fs_d.value;
+    out_state.footprint_radius_bias = params[footprint_radius_bias_param()]->u.fs_d.value;
+    out_state.footprint_clamp = params[footprint_clamp_param()]->u.fs_d.value;
+    out_state.max_adaptive_pair_grid = params[max_adaptive_pair_grid_param()]->u.sd.value;
+    out_state.projected_cells_mode_index = params[projected_cells_mode_param()]->u.pd.value;
+    out_state.cell_coverage_bias = params[cell_coverage_bias_param()]->u.fs_d.value;
+    out_state.cell_edge_inset = params[cell_edge_inset_param()]->u.fs_d.value;
     out_state.view_mode_index = params[view_mode_param()]->u.pd.value;
     return true;
 }
@@ -145,9 +166,64 @@ void copy_linear_to_world(const std::vector<PixelT>& pixels, PF_EffectWorld& wor
 }
 
 template <typename HostPixelT, typename BridgePixelT>
+bool expand_mask_world_to_bridge_pixels(const PF_EffectWorld& world,
+                                        int target_width,
+                                        int target_height,
+                                        const PF_LRect* layer_rect,
+                                        std::vector<BridgePixelT>& out_pixels)
+{
+    if (!world.data || target_width <= 0 || target_height <= 0) {
+        return false;
+    }
+
+    out_pixels.assign(static_cast<size_t>(target_width) * static_cast<size_t>(target_height), {});
+
+    int dst_left = 0;
+    int dst_top = 0;
+    int copy_width = std::min(world.width, target_width);
+    int copy_height = std::min(world.height, target_height);
+
+    if (world.width == target_width && world.height == target_height) {
+        dst_left = 0;
+        dst_top = 0;
+    } else if (layer_rect) {
+        const int rect_width = layer_rect->right - layer_rect->left;
+        const int rect_height = layer_rect->bottom - layer_rect->top;
+        const bool rect_matches_buffer =
+            layer_rect->left >= 0 &&
+            layer_rect->top >= 0 &&
+            layer_rect->right <= target_width &&
+            layer_rect->bottom <= target_height &&
+            rect_width == world.width &&
+            rect_height == world.height;
+
+        if (rect_matches_buffer) {
+            dst_left = layer_rect->left;
+            dst_top = layer_rect->top;
+            copy_width = std::min(copy_width, target_width - dst_left);
+            copy_height = std::min(copy_height, target_height - dst_top);
+        }
+    }
+
+    const char* row = reinterpret_cast<const char*>(world.data);
+    for (int y = 0; y < copy_height; ++y) {
+        const auto* src = reinterpret_cast<const HostPixelT*>(row);
+        auto* dst = out_pixels.data() +
+                    (static_cast<size_t>(dst_top + y) * static_cast<size_t>(target_width)) +
+                    static_cast<size_t>(dst_left);
+        std::memcpy(dst, src, static_cast<size_t>(copy_width) * sizeof(BridgePixelT));
+        row += world.rowbytes;
+    }
+
+    return true;
+}
+
+template <typename HostPixelT, typename BridgePixelT>
 bool render_world_pixels(const std::string& asset_root,
                          const AeParameterState& state,
                          const PF_EffectWorld& input_world,
+                         const PF_EffectWorld* mask_world,
+                         const PF_LRect* mask_rect,
                          PF_EffectWorld& output_world)
 {
     if (!input_world.data || !output_world.data ||
@@ -164,6 +240,15 @@ bool render_world_pixels(const std::string& asset_root,
                 host_input.data(),
                 bridge_input.size() * sizeof(BridgePixelT));
 
+    const BridgePixelT* bridge_mask_pixels = nullptr;
+    std::vector<BridgePixelT> bridge_mask;
+    if (mask_world &&
+        mask_world->data &&
+        expand_mask_world_to_bridge_pixels<HostPixelT, BridgePixelT>(
+            *mask_world, input_world.width, input_world.height, mask_rect, bridge_mask)) {
+        bridge_mask_pixels = bridge_mask.data();
+    }
+
     std::vector<BridgePixelT> bridge_output(
         static_cast<size_t>(input_world.width) * static_cast<size_t>(input_world.height));
 
@@ -172,7 +257,8 @@ bool render_world_pixels(const std::string& asset_root,
                                 bridge_input.data(),
                                 bridge_output.data(),
                                 input_world.width,
-                                input_world.height)) {
+                                input_world.height,
+                                bridge_mask_pixels)) {
         return false;
     }
 
@@ -189,6 +275,8 @@ PF_Err render_checked_out_worlds(PF_InData* in_data,
                                  PF_OutData* out_data,
                                  const AeParameterState& state,
                                  PF_EffectWorld* input_world,
+                                 PF_EffectWorld* mask_world,
+                                 const PF_LRect* mask_rect,
                                  PF_EffectWorld* output_world)
 {
     if (!input_world || !output_world) {
@@ -216,15 +304,15 @@ PF_Err render_checked_out_worlds(PF_InData* in_data,
     switch (format) {
         case PF_PixelFormat_ARGB128:
             rendered = render_world_pixels<PF_PixelFloat, AePixel32Like>(
-                asset_root, state, *input_world, *output_world);
+                asset_root, state, *input_world, mask_world, mask_rect, *output_world);
             break;
         case PF_PixelFormat_ARGB64:
             rendered = render_world_pixels<PF_Pixel16, AePixel16Like>(
-                asset_root, state, *input_world, *output_world);
+                asset_root, state, *input_world, mask_world, mask_rect, *output_world);
             break;
         case PF_PixelFormat_ARGB32:
             rendered = render_world_pixels<PF_Pixel8, AePixel8Like>(
-                asset_root, state, *input_world, *output_world);
+                asset_root, state, *input_world, mask_world, mask_rect, *output_world);
             break;
         default:
             return PF_COPY(input_world, output_world, nullptr, nullptr);
@@ -270,7 +358,15 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef starburst_gain_param_def;
     PF_ParamDef starburst_scale_param_def;
     PF_ParamDef spectral_samples_param_def;
+    PF_ParamDef adaptive_sampling_strength_param_def;
+    PF_ParamDef footprint_radius_bias_param_def;
+    PF_ParamDef footprint_clamp_param_def;
+    PF_ParamDef max_adaptive_pair_grid_param_def;
+    PF_ParamDef projected_cells_mode_param_def;
+    PF_ParamDef cell_coverage_bias_param_def;
+    PF_ParamDef cell_edge_inset_param_def;
     PF_ParamDef view_param_def;
+    PF_ParamDef mask_layer_param_def;
     AEFX_CLR_STRUCT(legacy_lens_param);
     AEFX_CLR_STRUCT(manufacturer_param);
     AEFX_CLR_STRUCT(lens_model_param);
@@ -299,7 +395,15 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(starburst_gain_param_def);
     AEFX_CLR_STRUCT(starburst_scale_param_def);
     AEFX_CLR_STRUCT(spectral_samples_param_def);
+    AEFX_CLR_STRUCT(adaptive_sampling_strength_param_def);
+    AEFX_CLR_STRUCT(footprint_radius_bias_param_def);
+    AEFX_CLR_STRUCT(footprint_clamp_param_def);
+    AEFX_CLR_STRUCT(max_adaptive_pair_grid_param_def);
+    AEFX_CLR_STRUCT(projected_cells_mode_param_def);
+    AEFX_CLR_STRUCT(cell_coverage_bias_param_def);
+    AEFX_CLR_STRUCT(cell_edge_inset_param_def);
     AEFX_CLR_STRUCT(view_param_def);
+    AEFX_CLR_STRUCT(mask_layer_param_def);
 
     bool legacy_lens_checked_out = false;
     bool manufacturer_checked_out = false;
@@ -329,7 +433,15 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool starburst_gain_checked_out = false;
     bool starburst_scale_checked_out = false;
     bool spectral_samples_checked_out = false;
+    bool adaptive_sampling_strength_checked_out = false;
+    bool footprint_radius_bias_checked_out = false;
+    bool footprint_clamp_checked_out = false;
+    bool max_adaptive_pair_grid_checked_out = false;
+    bool projected_cells_mode_checked_out = false;
+    bool cell_coverage_bias_checked_out = false;
+    bool cell_edge_inset_checked_out = false;
     bool view_checked_out = false;
+    bool mask_layer_checked_out = false;
 
     ERR(PF_CHECKOUT_PARAM(in_data,
                           PARAM_LEGACY_LENS_PRESET,
@@ -562,12 +674,76 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     spectral_samples_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          adaptive_sampling_strength_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &adaptive_sampling_strength_param_def));
+    adaptive_sampling_strength_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          footprint_radius_bias_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &footprint_radius_bias_param_def));
+    footprint_radius_bias_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          footprint_clamp_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &footprint_clamp_param_def));
+    footprint_clamp_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          max_adaptive_pair_grid_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &max_adaptive_pair_grid_param_def));
+    max_adaptive_pair_grid_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          projected_cells_mode_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &projected_cells_mode_param_def));
+    projected_cells_mode_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          cell_coverage_bias_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &cell_coverage_bias_param_def));
+    cell_coverage_bias_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          cell_edge_inset_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &cell_edge_inset_param_def));
+    cell_edge_inset_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           view_mode_param(),
                           in_data->current_time,
                           in_data->time_step,
                           in_data->time_scale,
                           &view_param_def));
     view_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          mask_layer_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &mask_layer_param_def));
+    mask_layer_checked_out = (err == PF_Err_NONE);
 
     if (!err) {
         AeUiParameterState ui_state {};
@@ -599,6 +775,13 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.starburst_gain = starburst_gain_param_def.u.fs_d.value;
         ui_state.starburst_scale = starburst_scale_param_def.u.fs_d.value;
         ui_state.spectral_samples_index = spectral_samples_param_def.u.pd.value;
+        ui_state.adaptive_sampling_strength = adaptive_sampling_strength_param_def.u.fs_d.value;
+        ui_state.footprint_radius_bias = footprint_radius_bias_param_def.u.fs_d.value;
+        ui_state.footprint_clamp = footprint_clamp_param_def.u.fs_d.value;
+        ui_state.max_adaptive_pair_grid = max_adaptive_pair_grid_param_def.u.sd.value;
+        ui_state.projected_cells_mode_index = projected_cells_mode_param_def.u.pd.value;
+        ui_state.cell_coverage_bias = cell_coverage_bias_param_def.u.fs_d.value;
+        ui_state.cell_edge_inset = cell_edge_inset_param_def.u.fs_d.value;
         ui_state.view_mode_index = view_param_def.u.pd.value;
 
         if (!apply_ui_parameter_state(ui_state, out_state)) {
@@ -608,6 +791,30 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
 
     if (view_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &view_param_def));
+    }
+    if (mask_layer_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &mask_layer_param_def));
+    }
+    if (max_adaptive_pair_grid_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &max_adaptive_pair_grid_param_def));
+    }
+    if (projected_cells_mode_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &projected_cells_mode_param_def));
+    }
+    if (cell_edge_inset_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &cell_edge_inset_param_def));
+    }
+    if (cell_coverage_bias_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &cell_coverage_bias_param_def));
+    }
+    if (footprint_clamp_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &footprint_clamp_param_def));
+    }
+    if (footprint_radius_bias_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &footprint_radius_bias_param_def));
+    }
+    if (adaptive_sampling_strength_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &adaptive_sampling_strength_param_def));
     }
     if (spectral_samples_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &spectral_samples_param_def));
@@ -715,6 +922,11 @@ PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
     }
 
     PF_RenderRequest request = render_extra->input->output_request;
+    request.rect.left = 0;
+    request.rect.top = 0;
+    request.rect.right = in_data->width;
+    request.rect.bottom = in_data->height;
+
     PF_CheckoutResult input_result;
     AEFX_CLR_STRUCT(input_result);
 
@@ -731,8 +943,29 @@ PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
         return err;
     }
 
+    PF_CheckoutResult mask_result;
+    AEFX_CLR_STRUCT(mask_result);
+    const PF_Err mask_err = render_extra->cb->checkout_layer(
+        in_data->effect_ref,
+        mask_layer_param(),
+        kSmartMaskCheckoutId,
+        &request,
+        in_data->current_time,
+        in_data->time_step,
+        in_data->time_scale,
+        &mask_result);
+
     union_rects(input_result.result_rect, render_extra->output->result_rect);
     union_rects(input_result.max_result_rect, render_extra->output->max_result_rect);
+
+    auto* rects = new SmartRenderLayerRects {};
+    rects->input_rect = input_result.result_rect;
+    if (mask_err == PF_Err_NONE) {
+        rects->mask_rect = mask_result.result_rect;
+        rects->has_mask = TRUE;
+    }
+    render_extra->output->pre_render_data = rects;
+    render_extra->output->delete_pre_render_data_func = delete_smart_render_layer_rects;
     return PF_Err_NONE;
 }
 
@@ -745,25 +978,42 @@ PF_Err PluginHandleSmartRender(PF_InData* in_data, PF_OutData* out_data, void* e
 
     PF_Err err = PF_Err_NONE;
     PF_Err err2 = PF_Err_NONE;
+    const auto* rects =
+        reinterpret_cast<const SmartRenderLayerRects*>(render_extra->input->pre_render_data);
+    const PF_LRect* mask_rect = (rects && rects->has_mask) ? &rects->mask_rect : nullptr;
 
     AeParameterState state {};
     ERR(build_render_state_from_checked_out_params(in_data, state));
 
     PF_EffectWorld* input_world = nullptr;
+    PF_EffectWorld* mask_world = nullptr;
     PF_EffectWorld* output_world = nullptr;
+    bool mask_checked_out = false;
 
     if (!err) {
         ERR(render_extra->cb->checkout_layer_pixels(in_data->effect_ref, kSmartInputCheckoutId, &input_world));
     }
     if (!err) {
+        const PF_Err mask_err =
+            render_extra->cb->checkout_layer_pixels(in_data->effect_ref, kSmartMaskCheckoutId, &mask_world);
+        if (mask_err == PF_Err_NONE) {
+            mask_checked_out = true;
+        } else {
+            mask_world = nullptr;
+        }
+    }
+    if (!err) {
         ERR(render_extra->cb->checkout_output(in_data->effect_ref, &output_world));
     }
     if (!err) {
-        ERR(render_checked_out_worlds(in_data, out_data, state, input_world, output_world));
+        ERR(render_checked_out_worlds(in_data, out_data, state, input_world, mask_world, mask_rect, output_world));
     }
 
     if (input_world) {
         ERR2(render_extra->cb->checkin_layer_pixels(in_data->effect_ref, kSmartInputCheckoutId));
+    }
+    if (mask_checked_out) {
+        ERR2(render_extra->cb->checkin_layer_pixels(in_data->effect_ref, kSmartMaskCheckoutId));
     }
 
     return err ? err : err2;
@@ -788,5 +1038,10 @@ PF_Err PluginHandleLegacyRender(PF_InData* in_data,
         return PF_COPY(&params[PARAM_INPUT]->u.ld, output, nullptr, nullptr);
     }
 
-    return render_checked_out_worlds(in_data, out_data, state, &params[PARAM_INPUT]->u.ld, output);
+    PF_EffectWorld* mask_world = nullptr;
+    if (params[mask_layer_param()]) {
+        mask_world = &params[mask_layer_param()]->u.ld;
+    }
+
+    return render_checked_out_worlds(in_data, out_data, state, &params[PARAM_INPUT]->u.ld, mask_world, nullptr, output);
 }

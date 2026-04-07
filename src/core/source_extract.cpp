@@ -8,7 +8,8 @@ std::vector<BrightPixel> extract_bright_pixels(
     float threshold,
     int downsample,
     float fov_h,
-    float fov_v)
+    float fov_v,
+    const MonoImageView* mask)
 {
     std::vector<BrightPixel> result;
 
@@ -22,6 +23,9 @@ std::vector<BrightPixel> extract_bright_pixels(
 
     const float tan_half_h = std::tan(fov_h * 0.5f);
     const float tan_half_v = std::tan(fov_v * 0.5f);
+    const bool use_mask = mask && mask->value &&
+                          mask->width == img.width &&
+                          mask->height == img.height;
 
     for (int dy = 0; dy < dh; ++dy) {
         for (int dx = 0; dx < dw; ++dx) {
@@ -40,9 +44,17 @@ std::vector<BrightPixel> extract_bright_pixels(
             for (int y = y0; y < y1; ++y) {
                 for (int x = x0; x < x1; ++x) {
                     const int i = y * img.width + x;
-                    const float r = img.r[i];
-                    const float g = img.g[i];
-                    const float b = img.b[i];
+                    float mask_alpha = 1.0f;
+                    if (use_mask) {
+                        mask_alpha = std::clamp(mask->value[i], 0.0f, 1.0f);
+                        if (mask_alpha <= 0.0f) {
+                            continue;
+                        }
+                    }
+
+                    const float r = img.r[i] * mask_alpha;
+                    const float g = img.g[i] * mask_alpha;
+                    const float b = img.b[i] * mask_alpha;
                     const float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
                     if (lum > peak_lum) {
                         peak_lum = lum;

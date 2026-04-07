@@ -21,11 +21,30 @@ enum class GhostCleanupMode
     SharpAdaptivePlusBlur,
 };
 
+enum class ProjectedCellsMode
+{
+    Auto,
+    Off,
+    Force,
+};
+
 // A ghost bounce pair: surfaces where light reflects instead of transmitting.
 struct GhostPair
 {
     int surf_a; // first bounce surface (closer to front)
     int surf_b; // second bounce surface (closer to sensor)
+};
+
+struct GhostPairPlan
+{
+    GhostPair pair {};
+    float area_boost = 1.0f;
+    float splat_radius_px = 1.0f;
+    float estimated_extent_px = 1.0f;
+    float reference_footprint_area_px2 = 1.0f;
+    float distortion_score = 0.0f;
+    int ray_grid = 0;
+    bool use_cell_rasterization = false;
 };
 
 // A bright pixel extracted from the input image.
@@ -52,12 +71,40 @@ struct GhostConfig
     bool ghost_normalize = true;   // enable per-pair area correction
     float max_area_boost = 100.0f; // clamp the correction factor
     GhostCleanupMode cleanup_mode = GhostCleanupMode::LegacyBlur;
+    float adaptive_sampling_strength = 1.0f; // 1.0 = auto baseline
+    float footprint_radius_bias = 1.0f;      // 1.0 = traced footprint radius as-is
+    float footprint_clamp = 1.15f;           // max multiplier over fallback radius
+    int max_adaptive_pair_grid = 0;          // 0 = auto (2x base grid)
+    ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Auto;
+    float cell_coverage_bias = 1.0f;         // 1.0 = exact projected quad size
+    float cell_edge_inset = 0.1f;            // inward inset before tracing cell corners
 };
 
 // Enumerate all valid ghost bounce pairs for the lens system.
 // Returns C(N, 2) pairs where N = number of surfaces.
 std::vector<GhostPair> enumerate_ghost_pairs(const LensSystem &lens);
 const char* ghost_render_backend_name(GhostRenderBackend backend);
+int select_ghost_pair_ray_grid(int base_ray_grid,
+                               float estimated_extent_px,
+                               float distortion_score,
+                               float adaptive_sampling_strength,
+                               int max_adaptive_pair_grid);
+float select_ghost_footprint_radius(float fallback_radius_px,
+                                    float footprint_area_px2,
+                                    float anisotropy,
+                                    float footprint_radius_bias,
+                                    float footprint_clamp);
+float select_ghost_density_boost(float pair_area_boost,
+                                 float reference_footprint_area_px2,
+                                 float local_footprint_area_px2);
+bool select_ghost_cell_rasterization(float estimated_extent_px,
+                                     float distortion_score);
+std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
+                                                   float fov_h,
+                                                   float fov_v,
+                                                   int width,
+                                                   int height,
+                                                   const GhostConfig& config);
 
 // Render all ghost reflections onto the output flare image.
 //

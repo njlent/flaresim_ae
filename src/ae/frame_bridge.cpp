@@ -34,6 +34,20 @@ bool validate_image(const FloatImageBuffer& image)
            image.b.size() == np;
 }
 
+void expand_alpha_from_rgb(FloatImageBuffer& image)
+{
+    if (!validate_image(image)) {
+        return;
+    }
+
+    const size_t np = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+    for (size_t i = 0; i < np; ++i) {
+        const float rendered_alpha =
+            std::clamp(std::max({image.r[i], image.g[i], image.b[i], 0.0f}), 0.0f, 1.0f);
+        image.alpha[i] = std::max(image.alpha[i], rendered_alpha);
+    }
+}
+
 RgbImageView make_rgb_view(const FloatImageBuffer& image)
 {
     return {
@@ -54,6 +68,23 @@ MutableRgbImageView make_mutable_rgb_view(FloatImageBuffer& image)
         image.width,
         image.height,
     };
+}
+
+void build_detection_mask_values(const FloatImageBuffer& image, std::vector<float>& out_values)
+{
+    out_values.clear();
+    if (!validate_image(image)) {
+        return;
+    }
+
+    const size_t np = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+    out_values.resize(np, 0.0f);
+    for (size_t i = 0; i < np; ++i) {
+        const float alpha = std::clamp(image.alpha[i], 0.0f, 1.0f);
+        const float visible =
+            std::clamp(std::max({image.r[i], image.g[i], image.b[i], 0.0f}), 0.0f, 1.0f);
+        out_values[i] = visible * alpha;
+    }
 }
 
 template <typename PixelT>
@@ -99,15 +130,25 @@ bool render_frame_to_pixels_impl(const std::string& asset_root,
                                  const PixelT* input_pixels,
                                  PixelT* output_pixels,
                                  int width,
-                                 int height)
+                                 int height,
+                                 const PixelT* mask_pixels)
 {
     FloatImageBuffer input;
     if (!unpack_image_impl(input_pixels, width, height, input)) {
         return false;
     }
 
+    FloatImageBuffer mask;
+    const FloatImageBuffer* detection_mask = nullptr;
+    if (mask_pixels) {
+        if (!unpack_image_impl(mask_pixels, width, height, mask)) {
+            return false;
+        }
+        detection_mask = &mask;
+    }
+
     FloatImageBuffer output;
-    if (!render_frame_to_float_image(asset_root, state, input, output)) {
+    if (!render_frame_to_float_image(asset_root, state, input, output, detection_mask)) {
         return false;
     }
 
@@ -150,7 +191,8 @@ bool render_frame_to_float_image(
     const std::string& asset_root,
     const AeParameterState& state,
     const FloatImageBuffer& input,
-    FloatImageBuffer& output)
+    FloatImageBuffer& output,
+    const FloatImageBuffer* detection_mask)
 {
     if (!validate_image(input) || asset_root.empty()) {
         return false;
@@ -170,19 +212,42 @@ bool render_frame_to_float_image(
     const FrameRenderSettings settings = build_frame_render_settings(state);
     const FrameRenderPlan plan = build_output_view_render_plan(state.view);
     const RgbImageView input_view = make_rgb_view(input);
+    const bool use_detection_mask = detection_mask && validate_image(*detection_mask) &&
+                                    detection_mask->width == input.width &&
+                                    detection_mask->height == input.height;
+    std::vector<float> detection_mask_values;
+    if (use_detection_mask) {
+        build_detection_mask_values(*detection_mask, detection_mask_values);
+    }
+    const MonoImageView detection_mask_view = {
+        detection_mask_values.data(),
+        input.width,
+        input.height,
+    };
 
     thread_local FrameRenderCache cache;
     FrameRenderOutputs outputs;
-    if (!render_frame(lens, input_view, settings, outputs, plan, &cache)) {
+    if (!render_frame(lens,
+                      input_view,
+                      settings,
+                      outputs,
+                      plan,
+                      &cache,
+                      use_detection_mask && !detection_mask_values.empty() ? &detection_mask_view : nullptr)) {
         return false;
     }
 
-    return compose_output_view(
-        state.view,
-        input_view,
-        settings,
-        outputs,
-        make_mutable_rgb_view(output));
+    if (!compose_output_view(
+            state.view,
+            input_view,
+            settings,
+            outputs,
+            make_mutable_rgb_view(output))) {
+        return false;
+    }
+
+    expand_alpha_from_rgb(output);
+    return true;
 }
 
 bool render_frame_to_pixels(
@@ -191,9 +256,11 @@ bool render_frame_to_pixels(
     const AePixel8Like* input_pixels,
     AePixel8Like* output_pixels,
     int width,
-    int height)
+    int height,
+    const AePixel8Like* mask_pixels)
 {
-    return render_frame_to_pixels_impl(asset_root, state, input_pixels, output_pixels, width, height);
+    return render_frame_to_pixels_impl(
+        asset_root, state, input_pixels, output_pixels, width, height, mask_pixels);
 }
 
 bool render_frame_to_pixels(
@@ -202,9 +269,11 @@ bool render_frame_to_pixels(
     const AePixel16Like* input_pixels,
     AePixel16Like* output_pixels,
     int width,
-    int height)
+    int height,
+    const AePixel16Like* mask_pixels)
 {
-    return render_frame_to_pixels_impl(asset_root, state, input_pixels, output_pixels, width, height);
+    return render_frame_to_pixels_impl(
+        asset_root, state, input_pixels, output_pixels, width, height, mask_pixels);
 }
 
 bool render_frame_to_pixels(
@@ -213,7 +282,9 @@ bool render_frame_to_pixels(
     const AePixel32Like* input_pixels,
     AePixel32Like* output_pixels,
     int width,
-    int height)
+    int height,
+    const AePixel32Like* mask_pixels)
 {
-    return render_frame_to_pixels_impl(asset_root, state, input_pixels, output_pixels, width, height);
+    return render_frame_to_pixels_impl(
+        asset_root, state, input_pixels, output_pixels, width, height, mask_pixels);
 }

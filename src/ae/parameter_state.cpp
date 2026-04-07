@@ -31,6 +31,13 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.spectral_samples = state.spectral_samples;
     settings.ghost_normalize = state.ghost_normalize;
     settings.max_area_boost = state.max_area_boost;
+    settings.adaptive_sampling_strength = state.adaptive_sampling_strength;
+    settings.footprint_radius_bias = state.footprint_radius_bias;
+    settings.footprint_clamp = state.footprint_clamp;
+    settings.max_adaptive_pair_grid = state.max_adaptive_pair_grid;
+    settings.projected_cells_mode = state.projected_cells_mode;
+    settings.cell_coverage_bias = state.cell_coverage_bias;
+    settings.cell_edge_inset = state.cell_edge_inset;
     settings.bloom = state.bloom;
     return settings;
 }

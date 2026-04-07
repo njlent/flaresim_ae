@@ -24,6 +24,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_samples_popup = build_spectral_samples_popup_string();
     const std::string ghost_cleanup_popup = build_ghost_cleanup_mode_popup_string();
+    const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
 
     AEFX_CLR_STRUCT(def);
@@ -211,6 +212,14 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_FLARE_SECTION_START);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Adaptive Sampling",
+                  static_cast<A_short>(projected_cells_mode_popup_count()),
+                  static_cast<A_short>(defaults.projected_cells_mode_index),
+                  projected_cells_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_PROJECTED_CELLS_MODE);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Flare Gain",
                          0.0f,
                          kManualFloatMax,
@@ -375,6 +384,83 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   ghost_cleanup_popup.data(),
                   PF_ParamFlag_NONE,
                   PARAM_ID_GHOST_CLEANUP_MODE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_TOPICX("Advanced Ghosts",
+                  PF_ParamFlag_START_COLLAPSED,
+                  PARAM_ID_ADVANCED_GHOSTS_SECTION_START);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Adaptive Strength",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         2.0f,
+                         defaults.adaptive_sampling_strength,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_ADAPTIVE_SAMPLING_STRENGTH);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Footprint Bias",
+                         0.1f,
+                         kManualFloatMax,
+                         0.25f,
+                         2.0f,
+                         defaults.footprint_radius_bias,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_FOOTPRINT_RADIUS_BIAS);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Footprint Clamp",
+                         0.1f,
+                         kManualFloatMax,
+                         0.5f,
+                         4.0f,
+                         defaults.footprint_clamp,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_FOOTPRINT_CLAMP);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Max Pair Grid",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.max_adaptive_pair_grid,
+                  PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Cell Coverage",
+                         0.1f,
+                         kManualFloatMax,
+                         0.5f,
+                         2.5f,
+                         defaults.cell_coverage_bias,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_CELL_COVERAGE_BIAS);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Cell Edge Inset",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         0.45f,
+                         defaults.cell_edge_inset,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_CELL_EDGE_INSET);
+
+    AEFX_CLR_STRUCT(def);
+    PF_END_TOPIC(PARAM_ID_ADVANCED_GHOSTS_SECTION_END);
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_POST_SECTION_END);
