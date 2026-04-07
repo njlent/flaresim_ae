@@ -24,6 +24,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_samples_popup = build_spectral_samples_popup_string();
     const std::string ghost_cleanup_popup = build_ghost_cleanup_mode_popup_string();
+    const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
 
     AEFX_CLR_STRUCT(def);
@@ -427,10 +428,12 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
 
     AEFX_CLR_STRUCT(def);
-    PF_ADD_CHECKBOXX("Projected Cells",
-                     defaults.enable_cell_rasterization,
-                     PF_ParamFlag_NONE,
-                     PARAM_ID_ENABLE_CELL_RASTERIZATION);
+    PF_ADD_POPUPX("Projected Cells",
+                  static_cast<A_short>(projected_cells_mode_popup_count()),
+                  static_cast<A_short>(defaults.projected_cells_mode_index),
+                  projected_cells_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_PROJECTED_CELLS_MODE);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Cell Coverage",

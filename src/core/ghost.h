@@ -21,6 +21,13 @@ enum class GhostCleanupMode
     SharpAdaptivePlusBlur,
 };
 
+enum class ProjectedCellsMode
+{
+    Auto,
+    Off,
+    Force,
+};
+
 // A ghost bounce pair: surfaces where light reflects instead of transmitting.
 struct GhostPair
 {
@@ -68,7 +75,7 @@ struct GhostConfig
     float footprint_radius_bias = 1.0f;      // 1.0 = traced footprint radius as-is
     float footprint_clamp = 1.15f;           // max multiplier over fallback radius
     int max_adaptive_pair_grid = 0;          // 0 = auto (2x base grid)
-    bool enable_cell_rasterization = true;   // projected pupil-cell quads
+    ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Auto;
     float cell_coverage_bias = 1.0f;         // 1.0 = exact projected quad size
     float cell_edge_inset = 0.1f;            // inward inset before tracing cell corners
 };

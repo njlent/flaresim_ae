@@ -161,8 +161,13 @@ Ship an AE implementation in staged slices, with frequent commits.
 
 ### Slice 25
 - fixed projected-cell color loss by tracing channel/spectral-sample-specific quads instead of reusing the green quad geometry for all channels
-- added an `Advanced Ghosts` `Projected Cells` toggle so the projected-cell path can be disabled without giving up the other sharp-cleanup controls
+- added an `Advanced Ghosts` `Projected Cells` mode selector so the projected-cell path can run in `Auto`, `Off`, or `Force`
 - CPU and CUDA cell paths now preserve red/blue fringe placement while still supporting the coverage and edge-inset controls
+
+### Slice 26
+- replaced the ambiguous `Projected Cells` checkbox semantics with an explicit `Auto` / `Off` / `Force` mode end to end
+- ghost pair planning now honors `Off` by disabling projected cells completely and honors `Force` by using projected cells for every sharp-cleanup pair
+- runtime cache keys, AE parameter checkout, and smoke coverage now all track the mode enum so toggling the control changes both output and render cost
 
 Verification:
 - `cmake -S . -B build`

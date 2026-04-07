@@ -51,6 +51,18 @@ constexpr GhostCleanupModeDescriptor kGhostCleanupModes[] = {
     {GhostCleanupMode::SharpAdaptivePlusBlur, "Sharp + Blur"},
 };
 
+struct ProjectedCellsModeDescriptor
+{
+    ProjectedCellsMode mode;
+    std::string_view label;
+};
+
+constexpr ProjectedCellsModeDescriptor kProjectedCellsModes[] = {
+    {ProjectedCellsMode::Auto, "Auto"},
+    {ProjectedCellsMode::Off, "Off"},
+    {ProjectedCellsMode::Force, "Force"},
+};
+
 std::string build_popup_string_from_labels(const char* const* labels, std::size_t count)
 {
     std::string popup;
@@ -141,8 +153,8 @@ int adaptive_sampling_strength_param() { return advanced_ghosts_section_start_pa
 int footprint_radius_bias_param() { return adaptive_sampling_strength_param() + 1; }
 int footprint_clamp_param() { return footprint_radius_bias_param() + 1; }
 int max_adaptive_pair_grid_param() { return footprint_clamp_param() + 1; }
-int enable_cell_rasterization_param() { return max_adaptive_pair_grid_param() + 1; }
-int cell_coverage_bias_param() { return enable_cell_rasterization_param() + 1; }
+int projected_cells_mode_param() { return max_adaptive_pair_grid_param() + 1; }
+int cell_coverage_bias_param() { return projected_cells_mode_param() + 1; }
 int cell_edge_inset_param() { return cell_coverage_bias_param() + 1; }
 int advanced_ghosts_section_end_param() { return cell_edge_inset_param() + 1; }
 int post_section_end_param() { return advanced_ghosts_section_end_param() + 1; }
@@ -257,6 +269,15 @@ std::string build_ghost_cleanup_mode_popup_string()
         labels[i] = kGhostCleanupModes[i].label.data();
     }
     return build_popup_string_from_labels(labels, std::size(kGhostCleanupModes));
+}
+
+std::string build_projected_cells_mode_popup_string()
+{
+    const char* labels[std::size(kProjectedCellsModes)] {};
+    for (std::size_t i = 0; i < std::size(kProjectedCellsModes); ++i) {
+        labels[i] = kProjectedCellsModes[i].label.data();
+    }
+    return build_popup_string_from_labels(labels, std::size(kProjectedCellsModes));
 }
 
 std::string build_output_view_popup_string()
@@ -417,6 +438,35 @@ bool ghost_cleanup_mode_from_popup(int popup_index, GhostCleanupMode& out_mode)
     return true;
 }
 
+int projected_cells_mode_popup_count()
+{
+    return static_cast<int>(std::size(kProjectedCellsModes));
+}
+
+int projected_cells_mode_popup_index(ProjectedCellsMode mode)
+{
+    for (std::size_t i = 0; i < std::size(kProjectedCellsModes); ++i) {
+        if (kProjectedCellsModes[i].mode == mode) {
+            return static_cast<int>(i) + 1;
+        }
+    }
+    return 1;
+}
+
+bool projected_cells_mode_from_popup(int popup_index, ProjectedCellsMode& out_mode)
+{
+    if (popup_index <= 0) {
+        out_mode = ProjectedCellsMode::Auto;
+        return true;
+    }
+    if (popup_index > static_cast<int>(std::size(kProjectedCellsModes))) {
+        return false;
+    }
+
+    out_mode = kProjectedCellsModes[popup_index - 1].mode;
+    return true;
+}
+
 int output_view_popup_index(AeOutputView view)
 {
     for (std::size_t i = 0; i < std::size(kOutputViews); ++i) {
@@ -498,6 +548,11 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         return false;
     }
 
+    ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Auto;
+    if (!projected_cells_mode_from_popup(ui_state.projected_cells_mode_index, projected_cells_mode)) {
+        return false;
+    }
+
     out_state.view = view;
     out_state.use_sensor_size = ui_state.use_sensor_size;
     out_state.sensor_preset_index = ui_state.sensor_preset_index;
@@ -528,7 +583,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.footprint_radius_bias = ui_state.footprint_radius_bias;
     out_state.footprint_clamp = ui_state.footprint_clamp;
     out_state.max_adaptive_pair_grid = ui_state.max_adaptive_pair_grid;
-    out_state.enable_cell_rasterization = ui_state.enable_cell_rasterization;
+    out_state.projected_cells_mode = projected_cells_mode;
     out_state.cell_coverage_bias = ui_state.cell_coverage_bias;
     out_state.cell_edge_inset = ui_state.cell_edge_inset;
 

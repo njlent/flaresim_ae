@@ -863,10 +863,21 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                           width,
                                                           height,
                                                           config);
-        plan.use_cell_rasterization =
-            config.enable_cell_rasterization &&
-            config.cleanup_mode != GhostCleanupMode::LegacyBlur &&
-            select_ghost_cell_rasterization(plan.estimated_extent_px, plan.distortion_score);
+        const bool sharp_cleanup = config.cleanup_mode != GhostCleanupMode::LegacyBlur;
+        switch (config.projected_cells_mode) {
+            case ProjectedCellsMode::Off:
+                plan.use_cell_rasterization = false;
+                break;
+            case ProjectedCellsMode::Force:
+                plan.use_cell_rasterization = sharp_cleanup;
+                break;
+            case ProjectedCellsMode::Auto:
+            default:
+                plan.use_cell_rasterization =
+                    sharp_cleanup &&
+                    select_ghost_cell_rasterization(plan.estimated_extent_px, plan.distortion_score);
+                break;
+        }
         plan.ray_grid = select_ghost_pair_ray_grid(config.ray_grid,
                                                    plan.estimated_extent_px,
                                                    plan.distortion_score,
