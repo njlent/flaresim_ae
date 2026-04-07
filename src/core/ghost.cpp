@@ -96,6 +96,21 @@ struct GridSample
     float u, v;
 };
 
+struct GridCell
+{
+    float u0, v0;
+    float u1, v1;
+    float uc, vc;
+};
+
+struct PixelPoint
+{
+    float x, y;
+};
+
+static inline void splat_tent(float *buf, int w, int h,
+                              float px, float py, float value, float radius);
+
 struct GhostSampleFootprint
 {
     float area_px2 = 0.0f;
@@ -232,6 +247,77 @@ float select_ghost_density_boost(float pair_area_boost,
     const float area_ratio = local_footprint_area_px2 / reference_footprint_area_px2;
     const float local_scale = std::clamp(std::sqrt(area_ratio), 0.5f, 2.5f);
     return pair_boost * local_scale;
+}
+
+bool select_ghost_cell_rasterization(float estimated_extent_px,
+                                     float distortion_score)
+{
+    return estimated_extent_px >= 24.0f || distortion_score >= 0.08f;
+}
+
+static float signed_triangle_area(const PixelPoint& a,
+                                  const PixelPoint& b,
+                                  const PixelPoint& c)
+{
+    return 0.5f * ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+}
+
+static void rasterize_triangle_uniform(float* buf,
+                                       int width,
+                                       int height,
+                                       const PixelPoint& a,
+                                       const PixelPoint& b,
+                                       const PixelPoint& c,
+                                       float value)
+{
+    const float area = std::abs(signed_triangle_area(a, b, c));
+    if (!(area > 1.0e-4f) || !std::isfinite(area) || value <= 1.0e-14f) {
+        return;
+    }
+
+    const int x0 = std::max(0, static_cast<int>(std::floor(std::min({a.x, b.x, c.x}) - 0.5f)));
+    const int x1 = std::min(width - 1, static_cast<int>(std::ceil(std::max({a.x, b.x, c.x}) + 0.5f)));
+    const int y0 = std::max(0, static_cast<int>(std::floor(std::min({a.y, b.y, c.y}) - 0.5f)));
+    const int y1 = std::min(height - 1, static_cast<int>(std::ceil(std::max({a.y, b.y, c.y}) + 0.5f)));
+    const float inv_twice_area = 1.0f / (2.0f * area);
+    const float density = value / area;
+
+    for (int y = y0; y <= y1; ++y) {
+        const float py = y + 0.5f;
+        const int row = y * width;
+        for (int x = x0; x <= x1; ++x) {
+            const float px = x + 0.5f;
+            const float w0 = ((b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x)) * inv_twice_area;
+            const float w1 = ((c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)) * inv_twice_area;
+            const float w2 = ((a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)) * inv_twice_area;
+            if (w0 >= -1.0e-4f && w1 >= -1.0e-4f && w2 >= -1.0e-4f) {
+                buf[row + x] += density;
+            }
+        }
+    }
+}
+
+static void rasterize_quad_uniform(float* buf,
+                                   int width,
+                                   int height,
+                                   const PixelPoint& p00,
+                                   const PixelPoint& p10,
+                                   const PixelPoint& p11,
+                                   const PixelPoint& p01,
+                                   float value)
+{
+    const float area0 = std::abs(signed_triangle_area(p00, p10, p11));
+    const float area1 = std::abs(signed_triangle_area(p00, p11, p01));
+    const float total_area = area0 + area1;
+    if (!(total_area > 1.0e-4f) || !std::isfinite(total_area)) {
+        const float center_x = 0.25f * (p00.x + p10.x + p11.x + p01.x);
+        const float center_y = 0.25f * (p00.y + p10.y + p11.y + p01.y);
+        splat_tent(buf, width, height, center_x, center_y, value, 1.5f);
+        return;
+    }
+
+    rasterize_triangle_uniform(buf, width, height, p00, p10, p11, value * (area0 / total_area));
+    rasterize_triangle_uniform(buf, width, height, p00, p11, p01, value * (area1 / total_area));
 }
 
 static GhostSampleFootprint estimate_ghost_sample_footprint(const LensSystem& lens,
@@ -533,6 +619,37 @@ static std::vector<GridSample> build_grid_samples(int ray_grid,
     return grid_samples;
 }
 
+static std::vector<GridCell> build_grid_cells(int ray_grid,
+                                              int aperture_blades,
+                                              float aperture_rotation_deg)
+{
+    std::vector<GridCell> cells;
+    cells.reserve(ray_grid * ray_grid);
+
+    for (int gy = 0; gy < ray_grid; ++gy) {
+        const float v0 = (gy / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
+        const float v1 = ((gy + 1) / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
+        for (int gx = 0; gx < ray_grid; ++gx) {
+            const float u0 = (gx / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
+            const float u1 = ((gx + 1) / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
+            const float uc = 0.5f * (u0 + u1);
+            const float vc = 0.5f * (v0 + v1);
+
+            if (!is_valid_pupil_sample(u0, v0, aperture_blades, aperture_rotation_deg) ||
+                !is_valid_pupil_sample(u1, v0, aperture_blades, aperture_rotation_deg) ||
+                !is_valid_pupil_sample(u1, v1, aperture_blades, aperture_rotation_deg) ||
+                !is_valid_pupil_sample(u0, v1, aperture_blades, aperture_rotation_deg) ||
+                !is_valid_pupil_sample(uc, vc, aperture_blades, aperture_rotation_deg)) {
+                continue;
+            }
+
+            cells.push_back({u0, v0, u1, v1, uc, vc});
+        }
+    }
+
+    return cells;
+}
+
 static float estimate_ghost_distortion(const LensSystem& lens,
                                        int bounce_a,
                                        int bounce_b,
@@ -699,6 +816,9 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                           width,
                                                           height,
                                                           config);
+        plan.use_cell_rasterization =
+            config.cleanup_mode != GhostCleanupMode::LegacyBlur &&
+            select_ghost_cell_rasterization(plan.estimated_extent_px, plan.distortion_score);
         plan.ray_grid = select_ghost_pair_ray_grid(config.ray_grid,
                                                    plan.estimated_extent_px,
                                                    plan.distortion_score,
@@ -757,6 +877,11 @@ void render_ghosts(const LensSystem &lens,
                                    build_grid_samples(config.ray_grid,
                                                       config.aperture_blades,
                                                       config.aperture_rotation_deg));
+    std::vector<std::pair<int, std::vector<GridCell>>> grid_cell_cache;
+    grid_cell_cache.emplace_back(config.ray_grid,
+                                 build_grid_cells(config.ray_grid,
+                                                  config.aperture_blades,
+                                                  config.aperture_rotation_deg));
     int max_valid_grid_count = static_cast<int>(grid_sample_cache.front().second.size());
     int min_pair_grid = config.ray_grid;
     int max_pair_grid = config.ray_grid;
@@ -771,6 +896,10 @@ void render_ghosts(const LensSystem &lens,
                                            build_grid_samples(pair_plan.ray_grid,
                                                               config.aperture_blades,
                                                               config.aperture_rotation_deg));
+            grid_cell_cache.emplace_back(pair_plan.ray_grid,
+                                         build_grid_cells(pair_plan.ray_grid,
+                                                          config.aperture_blades,
+                                                          config.aperture_rotation_deg));
             max_valid_grid_count = std::max(max_valid_grid_count,
                                             static_cast<int>(grid_sample_cache.back().second.size()));
         }
@@ -803,7 +932,13 @@ void render_ghosts(const LensSystem &lens,
         }
     }
 
-    if (!active_pair_plans.empty() && !sources.empty()) {
+    const bool needs_cell_rasterization = std::any_of(active_pair_plans.begin(),
+                                                      active_pair_plans.end(),
+                                                      [](const GhostPairPlan& pair_plan) {
+                                                          return pair_plan.use_cell_rasterization;
+                                                      });
+
+    if (!active_pair_plans.empty() && !sources.empty() && !needs_cell_rasterization) {
         thread_local GpuBufferCache gpu_cache;
         std::string cuda_error;
 
@@ -833,7 +968,8 @@ void render_ghosts(const LensSystem &lens,
     }
 
     // ---- CPU path ----
-    printf("Ghost renderer backend: CPU\n");
+    printf("Ghost renderer backend: CPU%s\n",
+           needs_cell_rasterization ? " (cell rasterization path)" : "");
     printf("Splat mode: %s\n",
            config.cleanup_mode == GhostCleanupMode::LegacyBlur
                ? "legacy bilinear"
@@ -901,10 +1037,16 @@ void render_ghosts(const LensSystem &lens,
                                           [&](const auto& entry) {
                                               return entry.first == pair_plan.ray_grid;
                                           });
+        const auto cell_it = std::find_if(grid_cell_cache.begin(),
+                                          grid_cell_cache.end(),
+                                          [&](const auto& entry) {
+                                              return entry.first == pair_plan.ray_grid;
+                                          });
         if (grid_it == grid_sample_cache.end() || grid_it->second.empty()) {
             continue;
         }
         const auto& pair_grid_samples = grid_it->second;
+        const auto& pair_grid_cells = (cell_it != grid_cell_cache.end()) ? cell_it->second : grid_cell_cache.front().second;
         const int valid_grid_count = static_cast<int>(pair_grid_samples.size());
         const float ray_weight = 1.0f / valid_grid_count;
         const float cell_size = 2.0f / pair_plan.ray_grid;
@@ -929,16 +1071,100 @@ void render_ghosts(const LensSystem &lens,
         {
             const BrightPixel &src = sources[si];
 
-            // Per-source RNG for stratified jitter (seeded by source index
-            // and ghost pair to get different patterns per pair)
-            std::mt19937 rng((unsigned)(si * 7919 + a * 131 + b * 1031));
-            std::uniform_real_distribution<float> jitter(0.0f, 1.0f);
-
             // Collimated beam direction for this source
             Vec3f beam_dir = Vec3f(std::tan(src.angle_x),
                                    std::tan(src.angle_y),
                                    1.0f)
                                  .normalized();
+
+            if (pair_plan.use_cell_rasterization && !pair_grid_cells.empty())
+            {
+                const float cell_weight = 1.0f / static_cast<float>(pair_grid_cells.size());
+
+                for (const GridCell& cell : pair_grid_cells)
+                {
+                    float p00x = 0.0f, p00y = 0.0f;
+                    float p10x = 0.0f, p10y = 0.0f;
+                    float p11x = 0.0f, p11y = 0.0f;
+                    float p01x = 0.0f, p01y = 0.0f;
+                    if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                        cell.u0, cell.v0, config.wavelengths[1],
+                                                        front_R, start_z, sensor_half_w, sensor_half_h,
+                                                        width, height, p00x, p00y) ||
+                        !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                        cell.u1, cell.v0, config.wavelengths[1],
+                                                        front_R, start_z, sensor_half_w, sensor_half_h,
+                                                        width, height, p10x, p10y) ||
+                        !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                        cell.u1, cell.v1, config.wavelengths[1],
+                                                        front_R, start_z, sensor_half_w, sensor_half_h,
+                                                        width, height, p11x, p11y) ||
+                        !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                        cell.u0, cell.v1, config.wavelengths[1],
+                                                        front_R, start_z, sensor_half_w, sensor_half_h,
+                                                        width, height, p01x, p01y)) {
+                        continue;
+                    }
+
+                    const PixelPoint p00 {p00x, p00y};
+                    const PixelPoint p10 {p10x, p10y};
+                    const PixelPoint p11 {p11x, p11y};
+                    const PixelPoint p01 {p01x, p01y};
+                    const float quad_area =
+                        std::abs(signed_triangle_area(p00, p10, p11)) +
+                        std::abs(signed_triangle_area(p00, p11, p01));
+                    if (!(quad_area > 1.0e-4f) || !std::isfinite(quad_area)) {
+                        continue;
+                    }
+
+                    const GhostSampleFootprint footprint {
+                        quad_area,
+                        std::sqrt((p10x - p00x) * (p10x - p00x) + (p10y - p00y) * (p10y - p00y)),
+                        std::sqrt((p01x - p00x) * (p01x - p00x) + (p01y - p00y) * (p01y - p00y)),
+                        std::max(
+                            std::sqrt((p10x - p00x) * (p10x - p00x) + (p10y - p00y) * (p10y - p00y)),
+                            std::sqrt((p01x - p00x) * (p01x - p00x) + (p01y - p00y) * (p01y - p00y))) /
+                            std::max(std::min(
+                                std::sqrt((p10x - p00x) * (p10x - p00x) + (p10y - p00y) * (p10y - p00y)),
+                                std::sqrt((p01x - p00x) * (p01x - p00x) + (p01y - p00y) * (p01y - p00y))), 1.0e-3f),
+                        true
+                    };
+                    const float density_boost = select_ghost_density_boost(pair_plan.area_boost,
+                                                                           pair_plan.reference_footprint_area_px2,
+                                                                           footprint.area_px2);
+
+                    Ray center_ray;
+                    center_ray.origin = Vec3f(cell.uc * front_R, cell.vc * front_R, start_z);
+                    center_ray.dir = beam_dir;
+
+                    for (int ch = 0; ch < 3; ++ch)
+                    {
+                        ++attempts;
+                        const TraceResult res = trace_ghost_ray(center_ray, lens, a, b, config.wavelengths[ch]);
+                        if (!res.valid) {
+                            continue;
+                        }
+
+                        ++hits;
+                        const float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g : src.b;
+                        const float contribution =
+                            src_i * res.weight * cell_weight * config.gain * density_boost;
+                        if (contribution < 1.0e-12f) {
+                            continue;
+                        }
+
+                        auto& buf = (ch == 0) ? tbuf_r[tid] : (ch == 1) ? tbuf_g[tid] : tbuf_b[tid];
+                        rasterize_quad_uniform(buf.data(), width, height, p00, p10, p11, p01, contribution);
+                    }
+                }
+
+                continue;
+            }
+
+            // Per-source RNG for stratified jitter (seeded by source index
+            // and ghost pair to get different patterns per pair)
+            std::mt19937 rng((unsigned)(si * 7919 + a * 131 + b * 1031));
+            std::uniform_real_distribution<float> jitter(0.0f, 1.0f);
 
             // ---- Pass 1: trace all rays and collect hits ----
             hit_buf.clear(); // reuse capacity, no realloc
@@ -1095,11 +1321,12 @@ void render_ghosts(const LensSystem &lens,
     // Print per-pair diagnostics (after parallel section completes)
     for (size_t pi = 0; pi < active_pair_plans.size(); ++pi)
     {
-        printf("  [%zu/%zu] Ghost pair (%d, %d) [grid %d, area ×%.1f, ref %.2f px2, extent %.1f px, dist %.3f]  %.1f s  "
+        printf("  [%zu/%zu] Ghost pair (%d, %d) [grid %d, %s, area ×%.1f, ref %.2f px2, extent %.1f px, dist %.3f]  %.1f s  "
                "(%lld/%lld rays, %.1f%%)\n",
                pi + 1, active_pair_plans.size(),
                active_pair_plans[pi].pair.surf_a, active_pair_plans[pi].pair.surf_b,
                active_pair_plans[pi].ray_grid,
+               active_pair_plans[pi].use_cell_rasterization ? "cells" : "splats",
                active_pair_plans[pi].area_boost,
                active_pair_plans[pi].reference_footprint_area_px2,
                active_pair_plans[pi].estimated_extent_px,

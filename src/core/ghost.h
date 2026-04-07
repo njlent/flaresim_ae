@@ -37,6 +37,7 @@ struct GhostPairPlan
     float reference_footprint_area_px2 = 1.0f;
     float distortion_score = 0.0f;
     int ray_grid = 0;
+    bool use_cell_rasterization = false;
 };
 
 // A bright pixel extracted from the input image.
@@ -86,6 +87,8 @@ float select_ghost_footprint_radius(float fallback_radius_px,
 float select_ghost_density_boost(float pair_area_boost,
                                  float reference_footprint_area_px2,
                                  float local_footprint_area_px2);
+bool select_ghost_cell_rasterization(float estimated_extent_px,
+                                     float distortion_score);
 std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                    float fov_h,
                                                    float fov_v,

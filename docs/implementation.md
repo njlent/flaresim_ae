@@ -143,6 +143,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - CUDA ghost rendering now mirrors the same local density compensation term so preview/final paths stay aligned
 - smoke coverage now exercises the density compensation helper and verifies planned reference footprint areas
 
+### Slice 22
+- added projected pupil-cell rasterization as an automatic path for large or highly warped sharp-cleanup ghost pairs
+- the CPU renderer now rasterizes projected pupil quads instead of depositing only point splats for those pairs
+- CUDA currently stays disabled for the cell-rasterization path so the new primitive cannot silently diverge from the CPU reference
+- smoke coverage now exercises the cell-rasterization selection heuristic alongside the earlier pair-planning helpers
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

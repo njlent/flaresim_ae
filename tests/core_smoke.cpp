@@ -133,6 +133,9 @@ void test_ghost_pair_planning()
     assert(std::abs(select_ghost_density_boost(3.0f, 4.0f, 4.0f) - 3.0f) < 1.0e-6f);
     assert(select_ghost_density_boost(3.0f, 4.0f, 16.0f) > 3.0f);
     assert(select_ghost_density_boost(3.0f, 4.0f, 1.0f) < 3.0f);
+    assert(!select_ghost_cell_rasterization(8.0f, 0.02f));
+    assert(select_ghost_cell_rasterization(32.0f, 0.02f));
+    assert(select_ghost_cell_rasterization(8.0f, 0.10f));
 
     LensSystem lens;
     const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
@@ -154,6 +157,7 @@ void test_ghost_pair_planning()
 
     int min_grid = plans.front().ray_grid;
     int max_grid = plans.front().ray_grid;
+    int cell_pairs = 0;
     for (const GhostPairPlan& plan : plans) {
         assert(plan.ray_grid >= 4);
         assert(plan.ray_grid <= config.ray_grid * 2);
@@ -162,11 +166,15 @@ void test_ghost_pair_planning()
         assert(plan.reference_footprint_area_px2 > 0.0f);
         assert(plan.distortion_score >= 0.0f);
         assert(plan.distortion_score <= 1.0f);
+        if (plan.use_cell_rasterization) {
+            ++cell_pairs;
+        }
         min_grid = std::min(min_grid, plan.ray_grid);
         max_grid = std::max(max_grid, plan.ray_grid);
     }
 
     assert(max_grid >= min_grid);
+    assert(cell_pairs >= 0);
 }
 
 void test_render_frame()
