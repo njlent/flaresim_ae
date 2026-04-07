@@ -56,6 +56,8 @@ inline constexpr int PARAM_ID_ADAPTIVE_SAMPLING_STRENGTH = 29;
 inline constexpr int PARAM_ID_FOOTPRINT_RADIUS_BIAS = 30;
 inline constexpr int PARAM_ID_FOOTPRINT_CLAMP = 31;
 inline constexpr int PARAM_ID_MAX_ADAPTIVE_PAIR_GRID = 32;
+inline constexpr int PARAM_ID_CELL_COVERAGE_BIAS = 33;
+inline constexpr int PARAM_ID_CELL_EDGE_INSET = 34;
 
 struct AeUiParameterState
 {
@@ -91,6 +93,8 @@ struct AeUiParameterState
     float footprint_radius_bias = 1.0f;
     float footprint_clamp = 1.15f;
     int max_adaptive_pair_grid = 0;
+    float cell_coverage_bias = 1.0f;
+    float cell_edge_inset = 0.1f;
     int view_mode_index = 1;
 };
 
@@ -138,6 +142,8 @@ int adaptive_sampling_strength_param();
 int footprint_radius_bias_param();
 int footprint_clamp_param();
 int max_adaptive_pair_grid_param();
+int cell_coverage_bias_param();
+int cell_edge_inset_param();
 int advanced_ghosts_section_end_param();
 int post_section_end_param();
 int flare_section_end_param();

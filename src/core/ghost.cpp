@@ -621,10 +621,13 @@ static std::vector<GridSample> build_grid_samples(int ray_grid,
 
 static std::vector<GridCell> build_grid_cells(int ray_grid,
                                               int aperture_blades,
-                                              float aperture_rotation_deg)
+                                              float aperture_rotation_deg,
+                                              float cell_edge_inset)
 {
     std::vector<GridCell> cells;
     cells.reserve(ray_grid * ray_grid);
+    const float inset = std::clamp(cell_edge_inset, 0.0f, 0.45f);
+    const float trace_scale = 1.0f - inset;
 
     for (int gy = 0; gy < ray_grid; ++gy) {
         const float v0 = (gy / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
@@ -634,11 +637,15 @@ static std::vector<GridCell> build_grid_cells(int ray_grid,
             const float u1 = ((gx + 1) / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
             const float uc = 0.5f * (u0 + u1);
             const float vc = 0.5f * (v0 + v1);
+            const float tu0 = uc + (u0 - uc) * trace_scale;
+            const float tv0 = vc + (v0 - vc) * trace_scale;
+            const float tu1 = uc + (u1 - uc) * trace_scale;
+            const float tv1 = vc + (v1 - vc) * trace_scale;
 
-            if (!is_valid_pupil_sample(u0, v0, aperture_blades, aperture_rotation_deg) ||
-                !is_valid_pupil_sample(u1, v0, aperture_blades, aperture_rotation_deg) ||
-                !is_valid_pupil_sample(u1, v1, aperture_blades, aperture_rotation_deg) ||
-                !is_valid_pupil_sample(u0, v1, aperture_blades, aperture_rotation_deg) ||
+            if (!is_valid_pupil_sample(tu0, tv0, aperture_blades, aperture_rotation_deg) ||
+                !is_valid_pupil_sample(tu1, tv0, aperture_blades, aperture_rotation_deg) ||
+                !is_valid_pupil_sample(tu1, tv1, aperture_blades, aperture_rotation_deg) ||
+                !is_valid_pupil_sample(tu0, tv1, aperture_blades, aperture_rotation_deg) ||
                 !is_valid_pupil_sample(uc, vc, aperture_blades, aperture_rotation_deg)) {
                 continue;
             }
@@ -751,6 +758,46 @@ static float estimate_ghost_distortion(const LensSystem& lens,
 
     const float rms_px = std::sqrt(residual_sq / residual_count);
     return std::clamp(rms_px / extent_px, 0.0f, 1.0f);
+}
+
+static void compute_cell_trace_corners(const GridCell& cell,
+                                       float cell_edge_inset,
+                                       float& out_u0,
+                                       float& out_v0,
+                                       float& out_u1,
+                                       float& out_v1)
+{
+    const float inset = std::clamp(cell_edge_inset, 0.0f, 0.45f);
+    const float trace_scale = 1.0f - inset;
+    out_u0 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
+    out_v0 = cell.vc + (cell.v0 - cell.vc) * trace_scale;
+    out_u1 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
+    out_v1 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
+}
+
+static void apply_cell_coverage_bias(PixelPoint& p00,
+                                     PixelPoint& p10,
+                                     PixelPoint& p11,
+                                     PixelPoint& p01,
+                                     float cell_coverage_bias)
+{
+    const float bias = std::clamp(cell_coverage_bias, 0.5f, 2.5f);
+    if (std::abs(bias - 1.0f) <= 1.0e-6f) {
+        return;
+    }
+
+    const PixelPoint center {
+        0.25f * (p00.x + p10.x + p11.x + p01.x),
+        0.25f * (p00.y + p10.y + p11.y + p01.y),
+    };
+    auto scale_point = [&](PixelPoint& point) {
+        point.x = center.x + (point.x - center.x) * bias;
+        point.y = center.y + (point.y - center.y) * bias;
+    };
+    scale_point(p00);
+    scale_point(p10);
+    scale_point(p11);
+    scale_point(p01);
 }
 
 std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
@@ -881,7 +928,8 @@ void render_ghosts(const LensSystem &lens,
     grid_cell_cache.emplace_back(config.ray_grid,
                                  build_grid_cells(config.ray_grid,
                                                   config.aperture_blades,
-                                                  config.aperture_rotation_deg));
+                                                  config.aperture_rotation_deg,
+                                                  config.cell_edge_inset));
     int max_valid_grid_count = static_cast<int>(grid_sample_cache.front().second.size());
     int min_pair_grid = config.ray_grid;
     int max_pair_grid = config.ray_grid;
@@ -899,7 +947,8 @@ void render_ghosts(const LensSystem &lens,
             grid_cell_cache.emplace_back(pair_plan.ray_grid,
                                          build_grid_cells(pair_plan.ray_grid,
                                                           config.aperture_blades,
-                                                          config.aperture_rotation_deg));
+                                                          config.aperture_rotation_deg,
+                                                          config.cell_edge_inset));
             max_valid_grid_count = std::max(max_valid_grid_count,
                                             static_cast<int>(grid_sample_cache.back().second.size()));
         }
@@ -1076,33 +1125,44 @@ void render_ghosts(const LensSystem &lens,
 
                 for (const GridCell& cell : pair_grid_cells)
                 {
+                    float cell_u0 = 0.0f;
+                    float cell_v0 = 0.0f;
+                    float cell_u1 = 0.0f;
+                    float cell_v1 = 0.0f;
+                    compute_cell_trace_corners(cell,
+                                               config.cell_edge_inset,
+                                               cell_u0,
+                                               cell_v0,
+                                               cell_u1,
+                                               cell_v1);
                     float p00x = 0.0f, p00y = 0.0f;
                     float p10x = 0.0f, p10y = 0.0f;
                     float p11x = 0.0f, p11y = 0.0f;
                     float p01x = 0.0f, p01y = 0.0f;
                     if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                        cell.u0, cell.v0, config.wavelengths[1],
+                                                        cell_u0, cell_v0, config.wavelengths[1],
                                                         front_R, start_z, sensor_half_w, sensor_half_h,
                                                         width, height, p00x, p00y) ||
                         !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                        cell.u1, cell.v0, config.wavelengths[1],
+                                                        cell_u1, cell_v0, config.wavelengths[1],
                                                         front_R, start_z, sensor_half_w, sensor_half_h,
                                                         width, height, p10x, p10y) ||
                         !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                        cell.u1, cell.v1, config.wavelengths[1],
+                                                        cell_u1, cell_v1, config.wavelengths[1],
                                                         front_R, start_z, sensor_half_w, sensor_half_h,
                                                         width, height, p11x, p11y) ||
                         !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                        cell.u0, cell.v1, config.wavelengths[1],
+                                                        cell_u0, cell_v1, config.wavelengths[1],
                                                         front_R, start_z, sensor_half_w, sensor_half_h,
                                                         width, height, p01x, p01y)) {
                         continue;
                     }
 
-                    const PixelPoint p00 {p00x, p00y};
-                    const PixelPoint p10 {p10x, p10y};
-                    const PixelPoint p11 {p11x, p11y};
-                    const PixelPoint p01 {p01x, p01y};
+                    PixelPoint p00 {p00x, p00y};
+                    PixelPoint p10 {p10x, p10y};
+                    PixelPoint p11 {p11x, p11y};
+                    PixelPoint p01 {p01x, p01y};
+                    apply_cell_coverage_bias(p00, p10, p11, p01, config.cell_coverage_bias);
                     const float quad_area =
                         std::abs(signed_triangle_area(p00, p10, p11)) +
                         std::abs(signed_triangle_area(p00, p11, p01));
@@ -1112,14 +1172,14 @@ void render_ghosts(const LensSystem &lens,
 
                     const GhostSampleFootprint footprint {
                         quad_area,
-                        std::sqrt((p10x - p00x) * (p10x - p00x) + (p10y - p00y) * (p10y - p00y)),
-                        std::sqrt((p01x - p00x) * (p01x - p00x) + (p01y - p00y) * (p01y - p00y)),
+                        std::sqrt((p10.x - p00.x) * (p10.x - p00.x) + (p10.y - p00.y) * (p10.y - p00.y)),
+                        std::sqrt((p01.x - p00.x) * (p01.x - p00.x) + (p01.y - p00.y) * (p01.y - p00.y)),
                         std::max(
-                            std::sqrt((p10x - p00x) * (p10x - p00x) + (p10y - p00y) * (p10y - p00y)),
-                            std::sqrt((p01x - p00x) * (p01x - p00x) + (p01y - p00y) * (p01y - p00y))) /
+                            std::sqrt((p10.x - p00.x) * (p10.x - p00.x) + (p10.y - p00.y) * (p10.y - p00.y)),
+                            std::sqrt((p01.x - p00.x) * (p01.x - p00.x) + (p01.y - p00.y) * (p01.y - p00.y))) /
                             std::max(std::min(
-                                std::sqrt((p10x - p00x) * (p10x - p00x) + (p10y - p00y) * (p10y - p00y)),
-                                std::sqrt((p01x - p00x) * (p01x - p00x) + (p01y - p00y) * (p01y - p00y))), 1.0e-3f),
+                                std::sqrt((p10.x - p00.x) * (p10.x - p00.x) + (p10.y - p00.y) * (p10.y - p00.y)),
+                                std::sqrt((p01.x - p00.x) * (p01.x - p00.x) + (p01.y - p00.y) * (p01.y - p00.y))), 1.0e-3f),
                         true
                     };
                     const float density_boost = select_ghost_density_boost(pair_plan.area_boost,

@@ -35,6 +35,8 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.footprint_radius_bias = state.footprint_radius_bias;
     settings.footprint_clamp = state.footprint_clamp;
     settings.max_adaptive_pair_grid = state.max_adaptive_pair_grid;
+    settings.cell_coverage_bias = state.cell_coverage_bias;
+    settings.cell_edge_inset = state.cell_edge_inset;
     settings.bloom = state.bloom;
     return settings;
 }

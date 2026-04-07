@@ -806,6 +806,31 @@ __device__ __forceinline__ void d_rasterize_quad_uniform(float* out,
     d_rasterize_triangle_uniform(out, width, height, p00, p11, p01, value * (area1 / total_area));
 }
 
+__device__ __forceinline__ void d_apply_cell_coverage_bias(DPixelPoint& p00,
+                                                           DPixelPoint& p10,
+                                                           DPixelPoint& p11,
+                                                           DPixelPoint& p01,
+                                                           float cell_coverage_bias)
+{
+    const float bias = fminf(fmaxf(cell_coverage_bias, 0.5f), 2.5f);
+    if (fabsf(bias - 1.0f) <= 1.0e-6f) {
+        return;
+    }
+
+    const DPixelPoint center {
+        0.25f * (p00.x + p10.x + p11.x + p01.x),
+        0.25f * (p00.y + p10.y + p11.y + p01.y),
+    };
+    auto scale_point = [&](DPixelPoint& point) {
+        point.x = center.x + (point.x - center.x) * bias;
+        point.y = center.y + (point.y - center.y) * bias;
+    };
+    scale_point(p00);
+    scale_point(p10);
+    scale_point(p11);
+    scale_point(p01);
+}
+
 __global__ void ghost_kernel(const Surface* surfaces,
                              int num_surfaces,
                              float sensor_z,
@@ -943,6 +968,8 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
                                   float* out_b,
                                   float gain,
                                   float cell_weight,
+                                  float cell_edge_inset,
+                                  float cell_coverage_bias,
                                   const GPUSpectralSampleDev* spectral_samples,
                                   int num_spectral_samples)
 {
@@ -964,6 +991,12 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
     const GPUCell& cell = grid_cells[cell_index];
     const DVec3 beam_dir = dv_normalize(dv(tanf(source.angle_x), tanf(source.angle_y), 1.0f));
     const float footprint_lambda = spectral_samples[min(1, num_spectral_samples - 1)].lambda;
+    const float inset = fminf(fmaxf(cell_edge_inset, 0.0f), 0.45f);
+    const float trace_scale = 1.0f - inset;
+    const float cell_u0 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
+    const float cell_v0 = cell.vc + (cell.v0 - cell.vc) * trace_scale;
+    const float cell_u1 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
+    const float cell_v1 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
 
     float p00x = 0.0f, p00y = 0.0f;
     float p10x = 0.0f, p10y = 0.0f;
@@ -971,35 +1004,36 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
     float p01x = 0.0f, p01y = 0.0f;
     if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                           pair.surf_a, pair.surf_b, beam_dir,
-                                          cell.u0, cell.v0, footprint_lambda,
+                                          cell_u0, cell_v0, footprint_lambda,
                                           front_radius, start_z,
                                           sensor_half_w, sensor_half_h,
                                           width, height, p00x, p00y) ||
         !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                           pair.surf_a, pair.surf_b, beam_dir,
-                                          cell.u1, cell.v0, footprint_lambda,
+                                          cell_u1, cell_v0, footprint_lambda,
                                           front_radius, start_z,
                                           sensor_half_w, sensor_half_h,
                                           width, height, p10x, p10y) ||
         !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                           pair.surf_a, pair.surf_b, beam_dir,
-                                          cell.u1, cell.v1, footprint_lambda,
+                                          cell_u1, cell_v1, footprint_lambda,
                                           front_radius, start_z,
                                           sensor_half_w, sensor_half_h,
                                           width, height, p11x, p11y) ||
         !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
                                           pair.surf_a, pair.surf_b, beam_dir,
-                                          cell.u0, cell.v1, footprint_lambda,
+                                          cell_u0, cell_v1, footprint_lambda,
                                           front_radius, start_z,
                                           sensor_half_w, sensor_half_h,
                                           width, height, p01x, p01y)) {
         return;
     }
 
-    const DPixelPoint p00 {p00x, p00y};
-    const DPixelPoint p10 {p10x, p10y};
-    const DPixelPoint p11 {p11x, p11y};
-    const DPixelPoint p01 {p01x, p01y};
+    DPixelPoint p00 {p00x, p00y};
+    DPixelPoint p10 {p10x, p10y};
+    DPixelPoint p11 {p11x, p11y};
+    DPixelPoint p01 {p01x, p01y};
+    d_apply_cell_coverage_bias(p00, p10, p11, p01, cell_coverage_bias);
     const float quad_area =
         0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11)) +
         0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01));
@@ -1093,10 +1127,13 @@ std::vector<GPUSample> build_gpu_grid_samples(int ray_grid,
 
 std::vector<GPUCell> build_gpu_grid_cells(int ray_grid,
                                           int aperture_blades,
-                                          float aperture_rotation_deg)
+                                          float aperture_rotation_deg,
+                                          float cell_edge_inset)
 {
     std::vector<GPUCell> grid_cells;
     grid_cells.reserve(static_cast<std::size_t>(ray_grid) * static_cast<std::size_t>(ray_grid));
+    const float inset = std::clamp(cell_edge_inset, 0.0f, 0.45f);
+    const float trace_scale = 1.0f - inset;
     const bool polygonal = aperture_blades >= 3;
     const float rotation = aperture_rotation_deg * 3.14159265358979323846f / 180.0f;
     const float sector_angle = polygonal
@@ -1130,7 +1167,11 @@ std::vector<GPUCell> build_gpu_grid_cells(int ray_grid,
             const float u1 = ((gx + 1) / static_cast<float>(ray_grid)) * 2.0f - 1.0f;
             const float uc = 0.5f * (u0 + u1);
             const float vc = 0.5f * (v0 + v1);
-            if (!valid(u0, v0) || !valid(u1, v0) || !valid(u1, v1) || !valid(u0, v1) || !valid(uc, vc)) {
+            const float tu0 = uc + (u0 - uc) * trace_scale;
+            const float tv0 = vc + (v0 - vc) * trace_scale;
+            const float tu1 = uc + (u1 - uc) * trace_scale;
+            const float tv1 = vc + (v1 - vc) * trace_scale;
+            if (!valid(tu0, tv0) || !valid(tu1, tv0) || !valid(tu1, tv1) || !valid(tu0, tv1) || !valid(uc, vc)) {
                 continue;
             }
 
@@ -1483,7 +1524,8 @@ bool launch_ghost_cuda(const LensSystem& lens,
         if (!gpu_cell_pairs.empty()) {
             std::vector<GPUCell> grid_cells = build_gpu_grid_cells(bucket_grid,
                                                                    config.aperture_blades,
-                                                                   config.aperture_rotation_deg);
+                                                                   config.aperture_rotation_deg,
+                                                                   config.cell_edge_inset);
             const int num_grid_cells = static_cast<int>(grid_cells.size());
             if (num_grid_cells > 0) {
                 if (!ensure_buffer(cache.d_pairs, cache.pairs_bytes, gpu_cell_pairs.size() * sizeof(GPUPair), "d_pairs")) {
@@ -1529,6 +1571,8 @@ bool launch_ghost_cuda(const LensSystem& lens,
                     cache.d_out_b,
                     config.gain,
                     1.0f / static_cast<float>(num_grid_cells),
+                    config.cell_edge_inset,
+                    config.cell_coverage_bias,
                     d_spectral_samples,
                     static_cast<int>(spectral_samples.size()));
 

@@ -43,6 +43,8 @@ struct FrameRenderSettings
     float footprint_radius_bias = 1.0f;
     float footprint_clamp = 1.15f;
     int max_adaptive_pair_grid = 0;
+    float cell_coverage_bias = 1.0f;
+    float cell_edge_inset = 0.1f;
     BloomConfig bloom {};
 };
 

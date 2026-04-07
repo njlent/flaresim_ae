@@ -427,6 +427,30 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Cell Coverage",
+                         0.1f,
+                         kManualFloatMax,
+                         0.5f,
+                         2.5f,
+                         defaults.cell_coverage_bias,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_CELL_COVERAGE_BIAS);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Cell Edge Inset",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         0.45f,
+                         defaults.cell_edge_inset,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_CELL_EDGE_INSET);
+
+    AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_ADVANCED_GHOSTS_SECTION_END);
 
     AEFX_CLR_STRUCT(def);

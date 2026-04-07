@@ -475,6 +475,8 @@ void test_ae_adapter_bits()
     state.footprint_radius_bias = 0.9f;
     state.footprint_clamp = 1.4f;
     state.max_adaptive_pair_grid = 48;
+    state.cell_coverage_bias = 1.2f;
+    state.cell_edge_inset = 0.15f;
     state.bloom.strength = 0.75f;
 
     const auto settings = build_frame_render_settings(state);
@@ -507,6 +509,8 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.footprint_radius_bias - 0.9f) < 1e-6f);
     assert(std::abs(settings.footprint_clamp - 1.4f) < 1e-6f);
     assert(settings.max_adaptive_pair_grid == 48);
+    assert(std::abs(settings.cell_coverage_bias - 1.2f) < 1e-6f);
+    assert(std::abs(settings.cell_edge_inset - 0.15f) < 1e-6f);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
 
     state.ray_grid = 2048;
@@ -858,7 +862,9 @@ void test_param_schema()
     assert(adaptive_sampling_strength_param() + 1 == footprint_radius_bias_param());
     assert(footprint_radius_bias_param() + 1 == footprint_clamp_param());
     assert(footprint_clamp_param() + 1 == max_adaptive_pair_grid_param());
-    assert(max_adaptive_pair_grid_param() + 1 == advanced_ghosts_section_end_param());
+    assert(max_adaptive_pair_grid_param() + 1 == cell_coverage_bias_param());
+    assert(cell_coverage_bias_param() + 1 == cell_edge_inset_param());
+    assert(cell_edge_inset_param() + 1 == advanced_ghosts_section_end_param());
     assert(advanced_ghosts_section_end_param() + 1 == post_section_end_param());
     assert(post_section_end_param() + 1 == view_mode_param());
     assert(mask_layer_param() + 1 == parameter_count());
@@ -872,6 +878,8 @@ void test_param_schema()
     assert(PARAM_ID_FOOTPRINT_RADIUS_BIAS == 30);
     assert(PARAM_ID_FOOTPRINT_CLAMP == 31);
     assert(PARAM_ID_MAX_ADAPTIVE_PAIR_GRID == 32);
+    assert(PARAM_ID_CELL_COVERAGE_BIAS == 33);
+    assert(PARAM_ID_CELL_EDGE_INSET == 34);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -923,6 +931,8 @@ void test_param_schema()
     ui.footprint_radius_bias = 0.85f;
     ui.footprint_clamp = 1.8f;
     ui.max_adaptive_pair_grid = 40;
+    ui.cell_coverage_bias = 1.35f;
+    ui.cell_edge_inset = 0.2f;
 
     AeParameterState state {};
     assert(apply_ui_parameter_state(ui, state));
@@ -957,6 +967,8 @@ void test_param_schema()
     assert(std::abs(state.footprint_radius_bias - 0.85f) < 1e-6f);
     assert(std::abs(state.footprint_clamp - 1.8f) < 1e-6f);
     assert(state.max_adaptive_pair_grid == 40);
+    assert(std::abs(state.cell_coverage_bias - 1.35f) < 1e-6f);
+    assert(std::abs(state.cell_edge_inset - 0.2f) < 1e-6f);
 
     AeUiParameterState legacy_ui {};
     legacy_ui.legacy_lens_preset_index = lens_popup_index_for_builtin("cooke-triplet");

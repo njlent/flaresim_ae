@@ -154,6 +154,11 @@ Ship an AE implementation in staged slices, with frequent commits.
 - the CPU renderer is now a real fallback path again; CUDA can cover both adaptive splats and projected pupil cells
 - smoke coverage now forces a CUDA launch through a cell-rasterized pair when a CUDA device is available
 
+### Slice 24
+- added Advanced Ghost controls for `Cell Coverage` and `Cell Edge Inset` so truncated projected-cell ghosts can be widened or made more edge-safe from the AE UI
+- projected pupil cells now trace inset corners instead of only exact cell corners, which keeps more edge cells alive near the aperture boundary
+- CPU and CUDA cell rasterization now apply the same projected-quad coverage bias before rasterization so full-flare coverage can be tuned without falling back to blur
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

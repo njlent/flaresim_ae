@@ -68,6 +68,8 @@ struct GhostConfig
     float footprint_radius_bias = 1.0f;      // 1.0 = traced footprint radius as-is
     float footprint_clamp = 1.15f;           // max multiplier over fallback radius
     int max_adaptive_pair_grid = 0;          // 0 = auto (2x base grid)
+    float cell_coverage_bias = 1.0f;         // 1.0 = exact projected quad size
+    float cell_edge_inset = 0.1f;            // inward inset before tracing cell corners
 };
 
 // Enumerate all valid ghost bounce pairs for the lens system.
