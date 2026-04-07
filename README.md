@@ -116,7 +116,14 @@ Guidance:
 | Setting | Values / range | Default | Notes |
 | --- | --- | --- | --- |
 | View | `Composite`, `Flare Only`, `Bloom Only`, `Sources`, `Diagnostics` | `Composite` | Debug/output selection inside After Effects. |
-| Mask Layer | AE layer selector | none | Limits source detection to the chosen layer's alpha while flare/haze/starburst still render across the full frame. |
+| Mask Layer | AE layer selector | none | Limits source detection to the chosen layer's visible content in comp space while flare/haze/starburst still render across the full frame. |
+
+Mask Layer behavior:
+- only affects source detection
+- does not crop or matte the generated flare, haze, or starburst
+- uses the selected layer's visible pixels as the detection mask: `max(R,G,B) * alpha`
+- evaluated in full comp space so the chosen layer can be smaller than frame size
+- practical use: isolate which tracked highlights emit flares without cutting off the flare itself
 
 
 ## License

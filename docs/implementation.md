@@ -184,6 +184,13 @@ Ship an AE implementation in staged slices, with frequent commits.
 - simplified the projected-cell UI to `Disabled` / `Enabled`, with `Disabled` as the new default and old `Auto` removed from the exposed popup
 - renamed the Advanced Ghosts scalar control to `Adaptive Strength` so the UI no longer has two unrelated `Adaptive Sampling` controls
 
+### Slice 30
+- wired the existing AE `Mask Layer` selector into the real SmartFX render path instead of leaving it UI-only
+- source extraction now treats the selected AE layer as a comp-space detection mask using visible content (`max(R,G,B) * alpha`), not alpha alone
+- flare/haze/starburst generation now stays full-frame after source selection; the selected mask only decides which sources survive
+- AE bridge alpha now expands from rendered RGB energy so masked source isolation does not clip flare lobes outside the source matte
+- SmartFX pre-render/render now carries the checked-out mask layer rect through to rendering so smaller selected layers align correctly in comp space
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

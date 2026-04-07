@@ -185,9 +185,11 @@ AE effect parameter model:
 - extra `PF_Param_LAYER`: optional mask layer
 
 Mask behavior:
-- sample chosen mask layer alpha
-- use mask alpha only during source extraction
+- sample chosen mask layer in comp space from the AE layer selector
+- derive detection weight from visible content, not alpha alone
+- use `max(R,G,B) * alpha` only during source extraction
 - keep ghost/haze/starburst rendering full-frame from the surviving sources
+- mask choice must not crop final flare output
 
 ## User-Facing Feature Set
 ### MVP controls
