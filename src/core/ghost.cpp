@@ -22,6 +22,7 @@
 #include <chrono>
 #include <random>
 #include <atomic>
+#include <array>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -53,9 +54,37 @@ const char* ghost_render_backend_name(GhostRenderBackend backend)
     }
 }
 
+int select_ghost_pair_ray_grid(int base_ray_grid,
+                               float estimated_extent_px,
+                               float distortion_score)
+{
+    if (base_ray_grid <= 0) {
+        return 0;
+    }
+
+    const int min_grid = std::max(4, base_ray_grid / 2);
+    const int max_grid = std::max(base_ray_grid, base_ray_grid * 2);
+    const float approx_valid_samples = std::max(0.78539816339f * base_ray_grid * base_ray_grid, 1.0f);
+    const float linear_density = std::sqrt(approx_valid_samples);
+    const float sample_spacing_px = estimated_extent_px / linear_density;
+
+    if (sample_spacing_px > 3.5f || distortion_score > 0.12f) {
+        return max_grid;
+    }
+    if (sample_spacing_px < 1.25f && distortion_score < 0.03f) {
+        return min_grid;
+    }
+    return base_ray_grid;
+}
+
 // ---------------------------------------------------------------------------
 // Bilinear splat: distribute a contribution to 4 neighbouring pixels.
 // ---------------------------------------------------------------------------
+
+struct GridSample
+{
+    float u, v;
+};
 
 static inline void splat_bilinear(float *buf, int w, int h,
                                   float px, float py, float value)
@@ -222,6 +251,231 @@ static float estimate_ghost_spread(const LensSystem &lens,
     return std::clamp(area_ratio, 1.0f, config.max_area_boost);
 }
 
+static std::vector<GridSample> build_grid_samples(int ray_grid,
+                                                  int aperture_blades,
+                                                  float aperture_rotation_deg)
+{
+    std::vector<GridSample> grid_samples;
+    grid_samples.reserve(ray_grid * ray_grid);
+
+    const bool polygonal = aperture_blades >= 3;
+    const float rotation = aperture_rotation_deg * 3.14159265358979323846f / 180.0f;
+    const float sector_angle = polygonal
+        ? (2.0f * 3.14159265358979323846f / aperture_blades)
+        : 1.0f;
+    const float apothem = polygonal
+        ? std::cos(3.14159265358979323846f / aperture_blades)
+        : 1.0f;
+
+    for (int gy = 0; gy < ray_grid; ++gy) {
+        for (int gx = 0; gx < ray_grid; ++gx) {
+            const float u = ((gx + 0.5f) / ray_grid) * 2.0f - 1.0f;
+            const float v = ((gy + 0.5f) / ray_grid) * 2.0f - 1.0f;
+            const float r2 = u * u + v * v;
+            if (r2 > 1.0f) {
+                continue;
+            }
+
+            if (polygonal) {
+                float angle = std::atan2(v, u) - rotation;
+                float sector = std::fmod(angle, sector_angle);
+                if (sector < 0.0f) {
+                    sector += sector_angle;
+                }
+                if (std::sqrt(r2) * std::cos(sector - sector_angle * 0.5f) > apothem) {
+                    continue;
+                }
+            }
+
+            grid_samples.push_back({u, v});
+        }
+    }
+
+    return grid_samples;
+}
+
+static float estimate_ghost_distortion(const LensSystem& lens,
+                                       int bounce_a,
+                                       int bounce_b,
+                                       float sensor_half_w,
+                                       float sensor_half_h,
+                                       int width,
+                                       int height,
+                                       const GhostConfig& config)
+{
+    constexpr float kProbeRadius = 0.6f;
+    const float front_R = lens.surfaces[0].semi_aperture;
+    const float start_z = lens.surfaces[0].z - 20.0f;
+
+    struct ProbeSample
+    {
+        float u = 0.0f;
+        float v = 0.0f;
+        float x = 0.0f;
+        float y = 0.0f;
+        bool valid = false;
+    };
+
+    const std::array<ProbeSample, 9> probe_template {{
+        {-kProbeRadius, -kProbeRadius},
+        {0.0f,         -kProbeRadius},
+        {kProbeRadius, -kProbeRadius},
+        {-kProbeRadius, 0.0f},
+        {0.0f,          0.0f},
+        {kProbeRadius,  0.0f},
+        {-kProbeRadius, kProbeRadius},
+        {0.0f,          kProbeRadius},
+        {kProbeRadius,  kProbeRadius},
+    }};
+
+    std::array<ProbeSample, 9> probes = probe_template;
+    float min_x = 1.0e30f;
+    float max_x = -1.0e30f;
+    float min_y = 1.0e30f;
+    float max_y = -1.0e30f;
+    int valid_count = 0;
+
+    for (ProbeSample& probe : probes) {
+        if (probe.u * probe.u + probe.v * probe.v > 1.0f) {
+            continue;
+        }
+
+        Ray ray;
+        ray.origin = Vec3f(probe.u * front_R, probe.v * front_R, start_z);
+        ray.dir = Vec3f(0.0f, 0.0f, 1.0f);
+
+        const TraceResult res = trace_ghost_ray(ray, lens, bounce_a, bounce_b, config.wavelengths[1]);
+        if (!res.valid) {
+            continue;
+        }
+
+        probe.x = (res.position.x / (2.0f * sensor_half_w) + 0.5f) * width;
+        probe.y = (res.position.y / (2.0f * sensor_half_h) + 0.5f) * height;
+        probe.valid = true;
+
+        min_x = std::min(min_x, probe.x);
+        max_x = std::max(max_x, probe.x);
+        min_y = std::min(min_y, probe.y);
+        max_y = std::max(max_y, probe.y);
+        ++valid_count;
+    }
+
+    if (!probes[4].valid || !probes[1].valid || !probes[3].valid || !probes[5].valid || !probes[7].valid ||
+        valid_count < 5) {
+        return 0.0f;
+    }
+
+    const float extent_px = std::max(std::max(max_x - min_x, max_y - min_y), 1.0f);
+    const float center_x = probes[4].x;
+    const float center_y = probes[4].y;
+    const float inv_probe_span = 0.5f / kProbeRadius;
+    const float du_x = (probes[5].x - probes[3].x) * inv_probe_span;
+    const float du_y = (probes[5].y - probes[3].y) * inv_probe_span;
+    const float dv_x = (probes[7].x - probes[1].x) * inv_probe_span;
+    const float dv_y = (probes[7].y - probes[1].y) * inv_probe_span;
+
+    float residual_sq = 0.0f;
+    int residual_count = 0;
+    for (const ProbeSample& probe : probes) {
+        if (!probe.valid) {
+            continue;
+        }
+
+        const float pred_x = center_x + du_x * probe.u + dv_x * probe.v;
+        const float pred_y = center_y + du_y * probe.u + dv_y * probe.v;
+        const float err_x = probe.x - pred_x;
+        const float err_y = probe.y - pred_y;
+        residual_sq += err_x * err_x + err_y * err_y;
+        ++residual_count;
+    }
+
+    if (residual_count == 0) {
+        return 0.0f;
+    }
+
+    const float rms_px = std::sqrt(residual_sq / residual_count);
+    return std::clamp(rms_px / extent_px, 0.0f, 1.0f);
+}
+
+std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
+                                                   float fov_h,
+                                                   float fov_v,
+                                                   int width,
+                                                   int height,
+                                                   const GhostConfig& config)
+{
+    std::vector<GhostPairPlan> plans;
+    if (width <= 0 || height <= 0 || lens.num_surfaces() <= 0) {
+        return plans;
+    }
+
+    const auto pairs = enumerate_ghost_pairs(lens);
+    const float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
+    const float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
+
+    for (const GhostPair& pair : pairs) {
+        const auto ior_before_a = lens.ior_before(pair.surf_a);
+        const auto ior_after_a = lens.surfaces[pair.surf_a].ior;
+        const auto ior_before_b = lens.ior_before(pair.surf_b);
+        const auto ior_after_b = lens.surfaces[pair.surf_b].ior;
+        if (std::abs(ior_before_a - ior_after_a) < 0.001f ||
+            std::abs(ior_before_b - ior_after_b) < 0.001f) {
+            continue;
+        }
+
+        const float est = estimate_ghost_intensity(lens, pair.surf_a, pair.surf_b, config);
+        if (est < config.min_intensity) {
+            continue;
+        }
+
+        GhostPairPlan plan;
+        plan.pair = pair;
+
+        float ghost_w_mm = 0.0f;
+        float ghost_h_mm = 0.0f;
+        if (config.ghost_normalize || config.cleanup_mode != GhostCleanupMode::LegacyBlur) {
+            plan.area_boost = estimate_ghost_spread(lens,
+                                                    pair.surf_a,
+                                                    pair.surf_b,
+                                                    sensor_half_w,
+                                                    sensor_half_h,
+                                                    config,
+                                                    &ghost_w_mm,
+                                                    &ghost_h_mm);
+        }
+
+        const float ghost_w_px = ghost_w_mm > 0.0f
+            ? (ghost_w_mm / (2.0f * sensor_half_w)) * width
+            : 1.0f;
+        const float ghost_h_px = ghost_h_mm > 0.0f
+            ? (ghost_h_mm / (2.0f * sensor_half_h)) * height
+            : 1.0f;
+        plan.estimated_extent_px = std::max(std::max(ghost_w_px, ghost_h_px), 1.0f);
+        plan.distortion_score = estimate_ghost_distortion(lens,
+                                                          pair.surf_a,
+                                                          pair.surf_b,
+                                                          sensor_half_w,
+                                                          sensor_half_h,
+                                                          width,
+                                                          height,
+                                                          config);
+        plan.ray_grid = select_ghost_pair_ray_grid(config.ray_grid,
+                                                   plan.estimated_extent_px,
+                                                   plan.distortion_score);
+
+        if (config.cleanup_mode != GhostCleanupMode::LegacyBlur) {
+            const float approx_valid_samples =
+                std::max(0.78539816339f * plan.ray_grid * plan.ray_grid, 1.0f);
+            const float spacing_px = plan.estimated_extent_px / std::sqrt(approx_valid_samples);
+            plan.splat_radius_px = std::clamp(spacing_px * 1.2f, 1.25f, 12.0f);
+        }
+
+        plans.push_back(plan);
+    }
+
+    return plans;
+}
+
 // ---------------------------------------------------------------------------
 // Render all ghost reflections.
 // ---------------------------------------------------------------------------
@@ -238,7 +492,7 @@ void render_ghosts(const LensSystem &lens,
         *out_backend = GhostRenderBackend::CPU;
     }
 
-    auto pairs = enumerate_ghost_pairs(lens);
+    const auto pairs = enumerate_ghost_pairs(lens);
     printf("Total ghost pairs: %zu\n", pairs.size());
 
     // Sensor dimensions from focal length and FOV
@@ -251,108 +505,65 @@ void render_ghosts(const LensSystem &lens,
     int N = config.ray_grid;
     size_t num_px = (size_t)width * height;
 
-    // Pre-count valid grid samples (within circular aperture)
-    // and build a lookup table of valid (u,v) coordinates so the inner
-    // loop avoids the branch and index arithmetic.
-    struct GridSample
-    {
-        float u, v;
-    };
-    std::vector<GridSample> grid_samples;
-    grid_samples.reserve(N * N);
-    for (int gy = 0; gy < N; ++gy)
-        for (int gx = 0; gx < N; ++gx)
-        {
-            float u = ((gx + 0.5f) / N) * 2.0f - 1.0f;
-            float v = ((gy + 0.5f) / N) * 2.0f - 1.0f;
-            if (u * u + v * v <= 1.0f)
-                grid_samples.push_back({u, v});
-        }
-    int valid_grid_count = (int)grid_samples.size();
+    const auto active_pair_plans = plan_active_ghost_pairs(lens, fov_h, fov_v, width, height, config);
 
-    if (valid_grid_count == 0)
-    {
+    std::vector<std::pair<int, std::vector<GridSample>>> grid_sample_cache;
+    grid_sample_cache.emplace_back(config.ray_grid,
+                                   build_grid_samples(config.ray_grid,
+                                                      config.aperture_blades,
+                                                      config.aperture_rotation_deg));
+    int max_valid_grid_count = static_cast<int>(grid_sample_cache.front().second.size());
+    int min_pair_grid = config.ray_grid;
+    int max_pair_grid = config.ray_grid;
+    for (const GhostPairPlan& pair_plan : active_pair_plans) {
+        const auto existing = std::find_if(grid_sample_cache.begin(),
+                                           grid_sample_cache.end(),
+                                           [&](const auto& entry) {
+                                               return entry.first == pair_plan.ray_grid;
+                                           });
+        if (existing == grid_sample_cache.end()) {
+            grid_sample_cache.emplace_back(pair_plan.ray_grid,
+                                           build_grid_samples(pair_plan.ray_grid,
+                                                              config.aperture_blades,
+                                                              config.aperture_rotation_deg));
+            max_valid_grid_count = std::max(max_valid_grid_count,
+                                            static_cast<int>(grid_sample_cache.back().second.size()));
+        }
+        min_pair_grid = std::min(min_pair_grid, pair_plan.ray_grid);
+        max_pair_grid = std::max(max_pair_grid, pair_plan.ray_grid);
+    }
+
+    if (grid_sample_cache.front().second.empty()) {
         fprintf(stderr, "WARNING: no valid entrance pupil samples\n");
         return;
     }
-    float ray_weight = 1.0f / valid_grid_count;
 
-    printf("Entrance pupil: %.2f mm radius, %d×%d grid → %d rays/source\n",
-           front_R, N, N, valid_grid_count);
+    printf("Entrance pupil: %.2f mm radius, base %d×%d grid → %zu rays/source\n",
+           front_R, N, N, grid_sample_cache.front().second.size());
     printf("Bright sources: %zu\n", sources.size());
     printf("Sensor: %.2f × %.2f mm (at z = %.2f mm)\n",
            sensor_half_w * 2, sensor_half_h * 2, lens.sensor_z);
-
-    // Pre-filter ghost pairs (shared by GPU and CPU paths)
-    std::vector<GhostPair> active_pairs;
-    std::vector<float> pair_area_boost;
-    std::vector<float> pair_splat_radii_px;
-    for (auto &p : pairs)
-    {
-        auto ior_before_a = lens.ior_before(p.surf_a);
-        auto ior_after_a = lens.surfaces[p.surf_a].ior;
-        auto ior_before_b = lens.ior_before(p.surf_b);
-        auto ior_after_b = lens.surfaces[p.surf_b].ior;
-        if (std::abs(ior_before_a - ior_after_a) < 0.001f ||
-            std::abs(ior_before_b - ior_after_b) < 0.001f)
-            continue;
-
-        float est = estimate_ghost_intensity(lens, p.surf_a, p.surf_b, config);
-        if (est >= config.min_intensity)
-        {
-            float boost = 1.0f;
-            float ghost_w_mm = 0.0f;
-            float ghost_h_mm = 0.0f;
-            if (config.ghost_normalize || config.cleanup_mode != GhostCleanupMode::LegacyBlur)
-            {
-                boost = estimate_ghost_spread(lens, p.surf_a, p.surf_b,
-                                              sensor_half_w, sensor_half_h,
-                                              config,
-                                              &ghost_w_mm,
-                                              &ghost_h_mm);
-            }
-
-            float splat_radius_px = 1.0f;
-            if (config.cleanup_mode != GhostCleanupMode::LegacyBlur)
-            {
-                const float ghost_w_px = ghost_w_mm > 0.0f
-                    ? (ghost_w_mm / (2.0f * sensor_half_w)) * width
-                    : 1.0f;
-                const float ghost_h_px = ghost_h_mm > 0.0f
-                    ? (ghost_h_mm / (2.0f * sensor_half_h)) * height
-                    : 1.0f;
-                const float extent_px = std::max(std::max(ghost_w_px, ghost_h_px), 1.0f);
-                const float spacing_px = extent_px / std::sqrt((float)valid_grid_count);
-                splat_radius_px = std::clamp(spacing_px * 1.2f, 1.25f, 12.0f);
-            }
-
-            active_pairs.push_back(p);
-            pair_area_boost.push_back(boost);
-            pair_splat_radii_px.push_back(splat_radius_px);
-        }
-    }
     printf("Active ghost pairs (above %.1e threshold): %zu / %zu\n",
-           config.min_intensity, active_pairs.size(), pairs.size());
+           config.min_intensity, active_pair_plans.size(), pairs.size());
+    printf("Adaptive pair ray grids: %d..%d\n", min_pair_grid, max_pair_grid);
     if (config.ghost_normalize)
     {
         printf("Area normalization: ON (max boost %.0f×)\n", config.max_area_boost);
-        for (size_t i = 0; i < active_pairs.size(); ++i)
+        for (size_t i = 0; i < active_pair_plans.size(); ++i)
         {
-            if (pair_area_boost[i] > 1.01f)
+            if (active_pair_plans[i].area_boost > 1.01f)
                 printf("  pair (%d,%d): area boost %.1f×\n",
-                       active_pairs[i].surf_a, active_pairs[i].surf_b,
-                       pair_area_boost[i]);
+                       active_pair_plans[i].pair.surf_a, active_pair_plans[i].pair.surf_b,
+                       active_pair_plans[i].area_boost);
         }
     }
 
-    if (!active_pairs.empty() && !sources.empty()) {
+    if (!active_pair_plans.empty() && !sources.empty()) {
         thread_local GpuBufferCache gpu_cache;
         std::string cuda_error;
 
         if (launch_ghost_cuda(lens,
-                              active_pairs,
-                              pair_area_boost,
-                              pair_splat_radii_px,
+                              active_pair_plans,
                               sources,
                               sensor_half_w,
                               sensor_half_h,
@@ -406,8 +617,8 @@ void render_ghosts(const LensSystem &lens,
     // NUMA machines (e.g. 200+ cores), using more threads than pairs
     // just wastes memory on per-thread splat buffers and causes remote
     // NUMA access penalties.  This alone can be a 5-10× speedup.
-    if (num_threads > (int)active_pairs.size())
-        num_threads = std::max((int)active_pairs.size(), 1);
+    if (num_threads > (int)active_pair_plans.size())
+        num_threads = std::max((int)active_pair_plans.size(), 1);
     omp_set_num_threads(num_threads);
 #endif
 
@@ -417,28 +628,41 @@ void render_ghosts(const LensSystem &lens,
     std::vector<std::vector<float>> tbuf_b(num_threads, std::vector<float>(num_px, 0));
 
     // Per-pair stats (written from threads, read after parallel section)
-    std::vector<long long> pair_hits(active_pairs.size(), 0);
-    std::vector<long long> pair_attempts(active_pairs.size(), 0);
-    std::vector<double> pair_time(active_pairs.size(), 0);
+    std::vector<long long> pair_hits(active_pair_plans.size(), 0);
+    std::vector<long long> pair_attempts(active_pair_plans.size(), 0);
+    std::vector<double> pair_time(active_pair_plans.size(), 0);
 
     printf("Rendering %zu ghost pairs × %zu sources across %d thread(s)...\n",
-           active_pairs.size(), sources.size(), num_threads);
+           active_pair_plans.size(), sources.size(), num_threads);
     fflush(stdout);
 
     // Progress tracking for ETA (atomic so all threads can update safely)
-    int total_pairs = (int)active_pairs.size();
+    int total_pairs = (int)active_pair_plans.size();
     std::atomic<int> pairs_done{0};
 
 #pragma omp parallel for schedule(dynamic, 1)
-    for (int pi = 0; pi < (int)active_pairs.size(); ++pi)
+    for (int pi = 0; pi < (int)active_pair_plans.size(); ++pi)
     {
         int tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        int a = active_pairs[pi].surf_a;
-        int b = active_pairs[pi].surf_b;
-        float area_boost = pair_area_boost[pi];
+        const GhostPairPlan& pair_plan = active_pair_plans[pi];
+        int a = pair_plan.pair.surf_a;
+        int b = pair_plan.pair.surf_b;
+        const float area_boost = pair_plan.area_boost;
+        const auto grid_it = std::find_if(grid_sample_cache.begin(),
+                                          grid_sample_cache.end(),
+                                          [&](const auto& entry) {
+                                              return entry.first == pair_plan.ray_grid;
+                                          });
+        if (grid_it == grid_sample_cache.end() || grid_it->second.empty()) {
+            continue;
+        }
+        const auto& pair_grid_samples = grid_it->second;
+        const int valid_grid_count = static_cast<int>(pair_grid_samples.size());
+        const float ray_weight = 1.0f / valid_grid_count;
+        const float cell_size = 2.0f / pair_plan.ray_grid;
 
         auto tp0 = std::chrono::steady_clock::now();
         long long hits = 0, attempts = 0;
@@ -453,7 +677,7 @@ void render_ghosts(const LensSystem &lens,
         // Pre-allocate hit buffer once per thread — max possible hits is
         // grid_samples × 3 channels.  Reused across sources without heap alloc.
         std::vector<SplatHit> hit_buf;
-        hit_buf.reserve((size_t)valid_grid_count * 3);
+        hit_buf.reserve((size_t)max_valid_grid_count * std::max(config.spectral_samples, 3));
 
         // Process every bright source for this ghost pair
         for (int si = 0; si < (int)sources.size(); ++si)
@@ -483,9 +707,8 @@ void render_ghosts(const LensSystem &lens,
             for (int gi = 0; gi < valid_grid_count; ++gi)
             {
                 // Stratified: jitter within cell, using pre-computed base (u,v)
-                float cell_size = 2.0f / N;
-                float u = grid_samples[gi].u + (jitter(rng) - 0.5f) * cell_size;
-                float v = grid_samples[gi].v + (jitter(rng) - 0.5f) * cell_size;
+                float u = pair_grid_samples[gi].u + (jitter(rng) - 0.5f) * cell_size;
+                float v = pair_grid_samples[gi].v + (jitter(rng) - 0.5f) * cell_size;
 
                 Ray ray;
                 ray.origin = Vec3f(u * front_R, v * front_R, start_z);
@@ -553,13 +776,19 @@ void render_ghosts(const LensSystem &lens,
             // ---- Pass 2: splat all collected hits ----
             for (auto &h : hit_buf)
             {
-                auto &buf = (h.ch == 0)   ? tbuf_r[tid]
+               auto &buf = (h.ch == 0)   ? tbuf_r[tid]
                             : (h.ch == 1) ? tbuf_g[tid]
                                           : tbuf_b[tid];
                 if (config.cleanup_mode == GhostCleanupMode::LegacyBlur) {
                     splat_bilinear(buf.data(), width, height, h.px, h.py, h.value);
                 } else {
-                    splat_tent(buf.data(), width, height, h.px, h.py, h.value, adaptive_r);
+                    splat_tent(buf.data(),
+                               width,
+                               height,
+                               h.px,
+                               h.py,
+                               h.value,
+                               std::max(adaptive_r, pair_plan.splat_radius_px));
                 }
             }
         }
@@ -578,21 +807,25 @@ void render_ghosts(const LensSystem &lens,
         int eta_m = (int)(eta_sec / 60.0);
         int eta_s = (int)(eta_sec) % 60;
         printf("\r  [%d/%d] pair (%d,%d) done in %.1fs  |  "
-               "elapsed %.0fs  ETA %dm%02ds   ",
+               "grid %d  elapsed %.0fs  ETA %dm%02ds   ",
                done, total_pairs, a, b, pair_time[pi],
-               elapsed, eta_m, eta_s);
+               pair_plan.ray_grid, elapsed, eta_m, eta_s);
         fflush(stdout);
     }
     printf("\n"); // newline after last \r progress line
 
     // Print per-pair diagnostics (after parallel section completes)
-    for (size_t pi = 0; pi < active_pairs.size(); ++pi)
+    for (size_t pi = 0; pi < active_pair_plans.size(); ++pi)
     {
-        printf("  [%zu/%zu] Ghost pair (%d, %d) [area ×%.1f]  %.1f s  "
+        printf("  [%zu/%zu] Ghost pair (%d, %d) [grid %d, area ×%.1f, extent %.1f px, dist %.3f]  %.1f s  "
                "(%lld/%lld rays, %.1f%%)\n",
-               pi + 1, active_pairs.size(),
-               active_pairs[pi].surf_a, active_pairs[pi].surf_b,
-               pair_area_boost[pi], pair_time[pi],
+               pi + 1, active_pair_plans.size(),
+               active_pair_plans[pi].pair.surf_a, active_pair_plans[pi].pair.surf_b,
+               active_pair_plans[pi].ray_grid,
+               active_pair_plans[pi].area_boost,
+               active_pair_plans[pi].estimated_extent_px,
+               active_pair_plans[pi].distortion_score,
+               pair_time[pi],
                pair_hits[pi], pair_attempts[pi],
                pair_attempts[pi] > 0
                    ? 100.0 * pair_hits[pi] / pair_attempts[pi]
@@ -614,7 +847,7 @@ void render_ghosts(const LensSystem &lens,
     auto t1 = std::chrono::steady_clock::now();
 
     long long total_hits = 0, total_attempts = 0;
-    for (size_t pi = 0; pi < active_pairs.size(); ++pi)
+    for (size_t pi = 0; pi < active_pair_plans.size(); ++pi)
     {
         total_hits += pair_hits[pi];
         total_attempts += pair_attempts[pi];

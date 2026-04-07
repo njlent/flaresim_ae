@@ -117,6 +117,46 @@ void test_bloom()
     assert(sum > 0.0f);
 }
 
+void test_ghost_pair_planning()
+{
+    assert(select_ghost_pair_ray_grid(16, 4.0f, 0.0f) == 8);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f) == 32);
+    assert(select_ghost_pair_ray_grid(16, 12.0f, 0.2f) == 32);
+
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    GhostConfig config {};
+    config.ray_grid = 8;
+    config.cleanup_mode = GhostCleanupMode::SharpAdaptive;
+
+    const auto plans = plan_active_ghost_pairs(
+        lens,
+        60.0f * 3.14159265358979323846f / 180.0f,
+        40.0f * 3.14159265358979323846f / 180.0f,
+        1920,
+        1080,
+        config);
+
+    assert(!plans.empty());
+
+    int min_grid = plans.front().ray_grid;
+    int max_grid = plans.front().ray_grid;
+    for (const GhostPairPlan& plan : plans) {
+        assert(plan.ray_grid >= 4);
+        assert(plan.ray_grid <= config.ray_grid * 2);
+        assert(plan.area_boost >= 1.0f);
+        assert(plan.estimated_extent_px >= 1.0f);
+        assert(plan.distortion_score >= 0.0f);
+        assert(plan.distortion_score <= 1.0f);
+        min_grid = std::min(min_grid, plan.ray_grid);
+        max_grid = std::max(max_grid, plan.ray_grid);
+    }
+
+    assert(max_grid >= min_grid);
+}
+
 void test_render_frame()
 {
     LensSystem lens;
@@ -838,6 +878,7 @@ int main()
     test_source_extract();
     test_source_limit();
     test_bloom();
+    test_ghost_pair_planning();
     test_render_frame();
     test_sky_brightness();
     test_cuda_backend_api();

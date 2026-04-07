@@ -28,6 +28,16 @@ struct GhostPair
     int surf_b; // second bounce surface (closer to sensor)
 };
 
+struct GhostPairPlan
+{
+    GhostPair pair {};
+    float area_boost = 1.0f;
+    float splat_radius_px = 1.0f;
+    float estimated_extent_px = 1.0f;
+    float distortion_score = 0.0f;
+    int ray_grid = 0;
+};
+
 // A bright pixel extracted from the input image.
 struct BrightPixel
 {
@@ -58,6 +68,15 @@ struct GhostConfig
 // Returns C(N, 2) pairs where N = number of surfaces.
 std::vector<GhostPair> enumerate_ghost_pairs(const LensSystem &lens);
 const char* ghost_render_backend_name(GhostRenderBackend backend);
+int select_ghost_pair_ray_grid(int base_ray_grid,
+                               float estimated_extent_px,
+                               float distortion_score);
+std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
+                                                   float fov_h,
+                                                   float fov_v,
+                                                   int width,
+                                                   int height,
+                                                   const GhostConfig& config);
 
 // Render all ghost reflections onto the output flare image.
 //
