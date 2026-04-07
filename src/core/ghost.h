@@ -71,6 +71,9 @@ const char* ghost_render_backend_name(GhostRenderBackend backend);
 int select_ghost_pair_ray_grid(int base_ray_grid,
                                float estimated_extent_px,
                                float distortion_score);
+float select_ghost_footprint_radius(float fallback_radius_px,
+                                    float footprint_area_px2,
+                                    float anisotropy);
 std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                    float fov_h,
                                                    float fov_v,

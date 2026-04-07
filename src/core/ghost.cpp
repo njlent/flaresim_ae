@@ -86,6 +86,234 @@ struct GridSample
     float u, v;
 };
 
+struct GhostSampleFootprint
+{
+    float area_px2 = 0.0f;
+    float axis_u_px = 0.0f;
+    float axis_v_px = 0.0f;
+    float anisotropy = 1.0f;
+    bool valid = false;
+};
+
+static bool is_valid_pupil_sample(float u,
+                                  float v,
+                                  int aperture_blades,
+                                  float aperture_rotation_deg)
+{
+    const float r2 = u * u + v * v;
+    if (r2 > 1.0f) {
+        return false;
+    }
+
+    if (aperture_blades < 3) {
+        return true;
+    }
+
+    const float rotation = aperture_rotation_deg * 3.14159265358979323846f / 180.0f;
+    const float sector_angle = 2.0f * 3.14159265358979323846f / aperture_blades;
+    const float apothem = std::cos(3.14159265358979323846f / aperture_blades);
+    float angle = std::atan2(v, u) - rotation;
+    float sector = std::fmod(angle, sector_angle);
+    if (sector < 0.0f) {
+        sector += sector_angle;
+    }
+
+    return std::sqrt(r2) * std::cos(sector - sector_angle * 0.5f) <= apothem;
+}
+
+static bool trace_ghost_sensor_position_px(const LensSystem& lens,
+                                           int bounce_a,
+                                           int bounce_b,
+                                           const Vec3f& beam_dir,
+                                           float u,
+                                           float v,
+                                           float wavelength_nm,
+                                           float front_radius,
+                                           float start_z,
+                                           float sensor_half_w,
+                                           float sensor_half_h,
+                                           int width,
+                                           int height,
+                                           float& out_px,
+                                           float& out_py)
+{
+    Ray ray;
+    ray.origin = Vec3f(u * front_radius, v * front_radius, start_z);
+    ray.dir = beam_dir;
+
+    const TraceResult res = trace_ghost_ray(ray, lens, bounce_a, bounce_b, wavelength_nm);
+    if (!res.valid) {
+        return false;
+    }
+
+    out_px = (res.position.x / (2.0f * sensor_half_w) + 0.5f) * width;
+    out_py = (res.position.y / (2.0f * sensor_half_h) + 0.5f) * height;
+    return std::isfinite(out_px) && std::isfinite(out_py);
+}
+
+static bool choose_probe_offset(float u,
+                                float v,
+                                float step,
+                                bool along_u,
+                                int aperture_blades,
+                                float aperture_rotation_deg,
+                                float& out_probe_u,
+                                float& out_probe_v,
+                                float& out_delta)
+{
+    const float primary_u = along_u ? (u + step) : u;
+    const float primary_v = along_u ? v : (v + step);
+    if (is_valid_pupil_sample(primary_u, primary_v, aperture_blades, aperture_rotation_deg)) {
+        out_probe_u = primary_u;
+        out_probe_v = primary_v;
+        out_delta = step;
+        return true;
+    }
+
+    const float secondary_u = along_u ? (u - step) : u;
+    const float secondary_v = along_u ? v : (v - step);
+    if (is_valid_pupil_sample(secondary_u, secondary_v, aperture_blades, aperture_rotation_deg)) {
+        out_probe_u = secondary_u;
+        out_probe_v = secondary_v;
+        out_delta = -step;
+        return true;
+    }
+
+    return false;
+}
+
+float select_ghost_footprint_radius(float fallback_radius_px,
+                                    float footprint_area_px2,
+                                    float anisotropy)
+{
+    const float fallback = std::clamp(fallback_radius_px, 1.25f, 16.0f);
+    if (!(footprint_area_px2 > 0.0f) || !std::isfinite(footprint_area_px2)) {
+        return fallback;
+    }
+
+    float radius = std::sqrt(footprint_area_px2) * 0.75f;
+    if (std::isfinite(anisotropy) && anisotropy > 2.5f) {
+        radius *= 0.85f;
+    }
+
+    radius = std::clamp(radius, 1.15f, 16.0f);
+    return std::clamp(std::min(radius, fallback * 1.15f), 1.15f, 16.0f);
+}
+
+static GhostSampleFootprint estimate_ghost_sample_footprint(const LensSystem& lens,
+                                                            int bounce_a,
+                                                            int bounce_b,
+                                                            const Vec3f& beam_dir,
+                                                            float u,
+                                                            float v,
+                                                            float cell_size,
+                                                            float front_radius,
+                                                            float start_z,
+                                                            float sensor_half_w,
+                                                            float sensor_half_h,
+                                                            int width,
+                                                            int height,
+                                                            const GhostConfig& config)
+{
+    GhostSampleFootprint footprint;
+
+    float center_px = 0.0f;
+    float center_py = 0.0f;
+    if (!trace_ghost_sensor_position_px(lens,
+                                        bounce_a,
+                                        bounce_b,
+                                        beam_dir,
+                                        u,
+                                        v,
+                                        config.wavelengths[1],
+                                        front_radius,
+                                        start_z,
+                                        sensor_half_w,
+                                        sensor_half_h,
+                                        width,
+                                        height,
+                                        center_px,
+                                        center_py)) {
+        return footprint;
+    }
+
+    const float probe_step = std::max(cell_size * 0.5f, 1.0e-3f);
+
+    float probe_u_u = 0.0f;
+    float probe_u_v = 0.0f;
+    float delta_u = 0.0f;
+    float probe_v_u = 0.0f;
+    float probe_v_v = 0.0f;
+    float delta_v = 0.0f;
+    if (!choose_probe_offset(u, v, probe_step, true,
+                             config.aperture_blades,
+                             config.aperture_rotation_deg,
+                             probe_u_u, probe_u_v, delta_u) ||
+        !choose_probe_offset(u, v, probe_step, false,
+                             config.aperture_blades,
+                             config.aperture_rotation_deg,
+                             probe_v_u, probe_v_v, delta_v)) {
+        return footprint;
+    }
+
+    float probe_px_u = 0.0f;
+    float probe_py_u = 0.0f;
+    float probe_px_v = 0.0f;
+    float probe_py_v = 0.0f;
+    if (!trace_ghost_sensor_position_px(lens,
+                                        bounce_a,
+                                        bounce_b,
+                                        beam_dir,
+                                        probe_u_u,
+                                        probe_u_v,
+                                        config.wavelengths[1],
+                                        front_radius,
+                                        start_z,
+                                        sensor_half_w,
+                                        sensor_half_h,
+                                        width,
+                                        height,
+                                        probe_px_u,
+                                        probe_py_u) ||
+        !trace_ghost_sensor_position_px(lens,
+                                        bounce_a,
+                                        bounce_b,
+                                        beam_dir,
+                                        probe_v_u,
+                                        probe_v_v,
+                                        config.wavelengths[1],
+                                        front_radius,
+                                        start_z,
+                                        sensor_half_w,
+                                        sensor_half_h,
+                                        width,
+                                        height,
+                                        probe_px_v,
+                                        probe_py_v)) {
+        return footprint;
+    }
+
+    const float inv_delta_u = 1.0f / delta_u;
+    const float inv_delta_v = 1.0f / delta_v;
+    const float dpx_du = (probe_px_u - center_px) * inv_delta_u;
+    const float dpy_du = (probe_py_u - center_py) * inv_delta_u;
+    const float dpx_dv = (probe_px_v - center_px) * inv_delta_v;
+    const float dpy_dv = (probe_py_v - center_py) * inv_delta_v;
+
+    footprint.axis_u_px = std::sqrt(dpx_du * dpx_du + dpy_du * dpy_du) * cell_size;
+    footprint.axis_v_px = std::sqrt(dpx_dv * dpx_dv + dpy_dv * dpy_dv) * cell_size;
+    const float minor_axis = std::max(std::min(footprint.axis_u_px, footprint.axis_v_px), 1.0e-3f);
+    const float major_axis = std::max(footprint.axis_u_px, footprint.axis_v_px);
+    footprint.anisotropy = major_axis / minor_axis;
+    footprint.area_px2 = std::abs(dpx_du * dpy_dv - dpy_du * dpx_dv) * cell_size * cell_size;
+    footprint.valid =
+        std::isfinite(footprint.area_px2) &&
+        std::isfinite(footprint.axis_u_px) &&
+        std::isfinite(footprint.axis_v_px) &&
+        footprint.area_px2 > 0.0f;
+    return footprint;
+}
+
 static inline void splat_bilinear(float *buf, int w, int h,
                                   float px, float py, float value)
 {
@@ -258,36 +486,13 @@ static std::vector<GridSample> build_grid_samples(int ray_grid,
     std::vector<GridSample> grid_samples;
     grid_samples.reserve(ray_grid * ray_grid);
 
-    const bool polygonal = aperture_blades >= 3;
-    const float rotation = aperture_rotation_deg * 3.14159265358979323846f / 180.0f;
-    const float sector_angle = polygonal
-        ? (2.0f * 3.14159265358979323846f / aperture_blades)
-        : 1.0f;
-    const float apothem = polygonal
-        ? std::cos(3.14159265358979323846f / aperture_blades)
-        : 1.0f;
-
     for (int gy = 0; gy < ray_grid; ++gy) {
         for (int gx = 0; gx < ray_grid; ++gx) {
             const float u = ((gx + 0.5f) / ray_grid) * 2.0f - 1.0f;
             const float v = ((gy + 0.5f) / ray_grid) * 2.0f - 1.0f;
-            const float r2 = u * u + v * v;
-            if (r2 > 1.0f) {
-                continue;
+            if (is_valid_pupil_sample(u, v, aperture_blades, aperture_rotation_deg)) {
+                grid_samples.push_back({u, v});
             }
-
-            if (polygonal) {
-                float angle = std::atan2(v, u) - rotation;
-                float sector = std::fmod(angle, sector_angle);
-                if (sector < 0.0f) {
-                    sector += sector_angle;
-                }
-                if (std::sqrt(r2) * std::cos(sector - sector_angle * 0.5f) > apothem) {
-                    continue;
-                }
-            }
-
-            grid_samples.push_back({u, v});
         }
     }
 
@@ -670,7 +875,7 @@ void render_ghosts(const LensSystem &lens,
         // Hit record for collect-then-splat
         struct SplatHit
         {
-            float px, py, value;
+            float px, py, value, radius;
             int ch;
         };
 
@@ -709,10 +914,37 @@ void render_ghosts(const LensSystem &lens,
                 // Stratified: jitter within cell, using pre-computed base (u,v)
                 float u = pair_grid_samples[gi].u + (jitter(rng) - 0.5f) * cell_size;
                 float v = pair_grid_samples[gi].v + (jitter(rng) - 0.5f) * cell_size;
+                if (!is_valid_pupil_sample(u, v, config.aperture_blades, config.aperture_rotation_deg)) {
+                    continue;
+                }
 
                 Ray ray;
                 ray.origin = Vec3f(u * front_R, v * front_R, start_z);
                 ray.dir = beam_dir;
+
+                GhostSampleFootprint footprint;
+                float local_radius_px = pair_plan.splat_radius_px;
+                if (config.cleanup_mode != GhostCleanupMode::LegacyBlur) {
+                    footprint = estimate_ghost_sample_footprint(lens,
+                                                                a,
+                                                                b,
+                                                                beam_dir,
+                                                                u,
+                                                                v,
+                                                                cell_size,
+                                                                front_R,
+                                                                start_z,
+                                                                sensor_half_w,
+                                                                sensor_half_h,
+                                                                width,
+                                                                height,
+                                                                config);
+                    if (footprint.valid) {
+                        local_radius_px = select_ghost_footprint_radius(pair_plan.splat_radius_px,
+                                                                        footprint.area_px2,
+                                                                        footprint.anisotropy);
+                    }
+                }
 
                 // Trace each wavelength independently (chromatic dispersion)
                 for (int ch = 0; ch < 3; ++ch)
@@ -737,7 +969,7 @@ void render_ghosts(const LensSystem &lens,
                     if (contribution < 1e-12f)
                         continue;
 
-                    hit_buf.push_back({px, py, contribution, ch});
+                    hit_buf.push_back({px, py, contribution, local_radius_px, ch});
 
                     // Update bounding box from green channel
                     if (ch == 1)
@@ -788,7 +1020,7 @@ void render_ghosts(const LensSystem &lens,
                                h.px,
                                h.py,
                                h.value,
-                               std::max(adaptive_r, pair_plan.splat_radius_px));
+                               std::max(adaptive_r, h.radius));
                 }
             }
         }

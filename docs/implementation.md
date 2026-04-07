@@ -126,6 +126,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - output-view planning now skips unrelated systems entirely; `Sources` and `Diagnostics` no longer run flare/bloom/haze/starburst work
 - smoke coverage now verifies cache reuse on blur-only edits and verifies that `Sources` view leaves other stage buffers untouched
 
+### Slice 19
+- added per-pair ghost sampling plans with local footprint probes in the sharp cleanup path
+- `SharpAdaptive` now derives splat radius from traced pupil-to-sensor footprint estimates instead of relying only on pair-wide spacing heuristics
+- CUDA ghost rendering now mirrors the same footprint-aware radius selection per sample
+- smoke coverage now exercises footprint-radius selection alongside adaptive pair planning
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

@@ -122,6 +122,10 @@ void test_ghost_pair_planning()
     assert(select_ghost_pair_ray_grid(16, 4.0f, 0.0f) == 8);
     assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f) == 32);
     assert(select_ghost_pair_ray_grid(16, 12.0f, 0.2f) == 32);
+    assert(select_ghost_footprint_radius(4.0f, 1.0f, 1.0f) <= 2.0f);
+    assert(select_ghost_footprint_radius(4.0f, 49.0f, 1.0f) >= 4.0f);
+    assert(select_ghost_footprint_radius(4.0f, 49.0f, 4.0f) <
+           select_ghost_footprint_radius(4.0f, 49.0f, 1.0f));
 
     LensSystem lens;
     const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");

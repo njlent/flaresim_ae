@@ -42,6 +42,31 @@ __device__ __forceinline__ DVec3 dv_normalize(DVec3 v)
     return {v.x * inv, v.y * inv, v.z * inv};
 }
 
+__device__ __forceinline__ bool d_is_valid_pupil_sample(float u,
+                                                        float v,
+                                                        int aperture_blades,
+                                                        float aperture_rotation_rad)
+{
+    const float r2 = u * u + v * v;
+    if (r2 > 1.0f) {
+        return false;
+    }
+
+    if (aperture_blades < 3) {
+        return true;
+    }
+
+    const float sector_angle = 2.0f * 3.14159265358979323846f / aperture_blades;
+    const float apothem = cosf(3.14159265358979323846f / aperture_blades);
+    float angle = atan2f(v, u) - aperture_rotation_rad;
+    float sector = fmodf(angle, sector_angle);
+    if (sector < 0.0f) {
+        sector += sector_angle;
+    }
+
+    return sqrtf(r2) * cosf(sector - sector_angle * 0.5f) <= apothem;
+}
+
 struct DRay
 {
     DVec3 origin;
@@ -280,6 +305,13 @@ struct DTraceResult
     bool valid;
 };
 
+struct DFootprint
+{
+    float area_px2;
+    float anisotropy;
+    bool valid;
+};
+
 __device__ __forceinline__ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
                                                           const Surface* surfaces,
                                                           int num_surfaces,
@@ -397,6 +429,180 @@ __device__ __forceinline__ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
     return {pos, weight, true};
 }
 
+__device__ __forceinline__ bool d_trace_ghost_sensor_position_px(const Surface* surfaces,
+                                                                 int num_surfaces,
+                                                                 float sensor_z,
+                                                                 int bounce_a,
+                                                                 int bounce_b,
+                                                                 const DVec3& beam_dir,
+                                                                 float u,
+                                                                 float v,
+                                                                 float wavelength_nm,
+                                                                 float front_radius,
+                                                                 float start_z,
+                                                                 float sensor_half_w,
+                                                                 float sensor_half_h,
+                                                                 int width,
+                                                                 int height,
+                                                                 float& out_px,
+                                                                 float& out_py)
+{
+    DRay ray;
+    ray.origin = dv(u * front_radius, v * front_radius, start_z);
+    ray.dir = beam_dir;
+
+    const DTraceResult result = d_trace_ghost_ray(ray,
+                                                  surfaces,
+                                                  num_surfaces,
+                                                  sensor_z,
+                                                  bounce_a,
+                                                  bounce_b,
+                                                  wavelength_nm);
+    if (!result.valid) {
+        return false;
+    }
+
+    out_px = (result.position.x / (2.0f * sensor_half_w) + 0.5f) * width;
+    out_py = (result.position.y / (2.0f * sensor_half_h) + 0.5f) * height;
+    return isfinite(out_px) && isfinite(out_py);
+}
+
+__device__ __forceinline__ bool d_choose_probe_offset(float u,
+                                                      float v,
+                                                      float step,
+                                                      bool along_u,
+                                                      int aperture_blades,
+                                                      float aperture_rotation_rad,
+                                                      float& out_probe_u,
+                                                      float& out_probe_v,
+                                                      float& out_delta)
+{
+    const float primary_u = along_u ? (u + step) : u;
+    const float primary_v = along_u ? v : (v + step);
+    if (d_is_valid_pupil_sample(primary_u, primary_v, aperture_blades, aperture_rotation_rad)) {
+        out_probe_u = primary_u;
+        out_probe_v = primary_v;
+        out_delta = step;
+        return true;
+    }
+
+    const float secondary_u = along_u ? (u - step) : u;
+    const float secondary_v = along_u ? v : (v - step);
+    if (d_is_valid_pupil_sample(secondary_u, secondary_v, aperture_blades, aperture_rotation_rad)) {
+        out_probe_u = secondary_u;
+        out_probe_v = secondary_v;
+        out_delta = -step;
+        return true;
+    }
+
+    return false;
+}
+
+__device__ __forceinline__ float d_select_ghost_footprint_radius(float fallback_radius_px,
+                                                                 float footprint_area_px2,
+                                                                 float anisotropy)
+{
+    float fallback = fminf(fmaxf(fallback_radius_px, 1.25f), 16.0f);
+    if (!(footprint_area_px2 > 0.0f) || !isfinite(footprint_area_px2)) {
+        return fallback;
+    }
+
+    float radius = sqrtf(footprint_area_px2) * 0.75f;
+    if (isfinite(anisotropy) && anisotropy > 2.5f) {
+        radius *= 0.85f;
+    }
+
+    radius = fminf(fmaxf(radius, 1.15f), 16.0f);
+    return fminf(fmaxf(fminf(radius, fallback * 1.15f), 1.15f), 16.0f);
+}
+
+__device__ __forceinline__ DFootprint d_estimate_ghost_sample_footprint(const Surface* surfaces,
+                                                                         int num_surfaces,
+                                                                         float sensor_z,
+                                                                         int bounce_a,
+                                                                         int bounce_b,
+                                                                         const DVec3& beam_dir,
+                                                                         float u,
+                                                                         float v,
+                                                                         float cell_size,
+                                                                         float wavelength_nm,
+                                                                         float front_radius,
+                                                                         float start_z,
+                                                                         float sensor_half_w,
+                                                                         float sensor_half_h,
+                                                                         int width,
+                                                                         int height,
+                                                                         int aperture_blades,
+                                                                         float aperture_rotation_rad)
+{
+    DFootprint footprint {0.0f, 1.0f, false};
+
+    float center_px = 0.0f;
+    float center_py = 0.0f;
+    if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                          bounce_a, bounce_b, beam_dir,
+                                          u, v, wavelength_nm,
+                                          front_radius, start_z,
+                                          sensor_half_w, sensor_half_h,
+                                          width, height,
+                                          center_px, center_py)) {
+        return footprint;
+    }
+
+    const float probe_step = fmaxf(cell_size * 0.5f, 1.0e-3f);
+    float probe_u_u = 0.0f;
+    float probe_u_v = 0.0f;
+    float delta_u = 0.0f;
+    float probe_v_u = 0.0f;
+    float probe_v_v = 0.0f;
+    float delta_v = 0.0f;
+    if (!d_choose_probe_offset(u, v, probe_step, true,
+                               aperture_blades, aperture_rotation_rad,
+                               probe_u_u, probe_u_v, delta_u) ||
+        !d_choose_probe_offset(u, v, probe_step, false,
+                               aperture_blades, aperture_rotation_rad,
+                               probe_v_u, probe_v_v, delta_v)) {
+        return footprint;
+    }
+
+    float probe_px_u = 0.0f;
+    float probe_py_u = 0.0f;
+    float probe_px_v = 0.0f;
+    float probe_py_v = 0.0f;
+    if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                          bounce_a, bounce_b, beam_dir,
+                                          probe_u_u, probe_u_v, wavelength_nm,
+                                          front_radius, start_z,
+                                          sensor_half_w, sensor_half_h,
+                                          width, height,
+                                          probe_px_u, probe_py_u) ||
+        !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                          bounce_a, bounce_b, beam_dir,
+                                          probe_v_u, probe_v_v, wavelength_nm,
+                                          front_radius, start_z,
+                                          sensor_half_w, sensor_half_h,
+                                          width, height,
+                                          probe_px_v, probe_py_v)) {
+        return footprint;
+    }
+
+    const float inv_delta_u = 1.0f / delta_u;
+    const float inv_delta_v = 1.0f / delta_v;
+    const float dpx_du = (probe_px_u - center_px) * inv_delta_u;
+    const float dpy_du = (probe_py_u - center_py) * inv_delta_u;
+    const float dpx_dv = (probe_px_v - center_px) * inv_delta_v;
+    const float dpy_dv = (probe_py_v - center_py) * inv_delta_v;
+
+    const float axis_u = sqrtf(dpx_du * dpx_du + dpy_du * dpy_du) * cell_size;
+    const float axis_v = sqrtf(dpx_dv * dpx_dv + dpy_dv * dpy_dv) * cell_size;
+    const float minor_axis = fmaxf(fminf(axis_u, axis_v), 1.0e-3f);
+    const float major_axis = fmaxf(axis_u, axis_v);
+    footprint.anisotropy = major_axis / minor_axis;
+    footprint.area_px2 = fabsf(dpx_du * dpy_dv - dpy_du * dpx_dv) * cell_size * cell_size;
+    footprint.valid = isfinite(footprint.area_px2) && footprint.area_px2 > 0.0f;
+    return footprint;
+}
+
 struct GPUPair
 {
     int surf_a;
@@ -509,6 +715,9 @@ __global__ void ghost_kernel(const Surface* surfaces,
                              float* out_b,
                              float gain,
                              float ray_weight,
+                             float cell_size,
+                             int aperture_blades,
+                             float aperture_rotation_rad,
                              const GPUSpectralSampleDev* spectral_samples,
                              int num_spectral_samples)
 {
@@ -528,12 +737,39 @@ __global__ void ghost_kernel(const Surface* surfaces,
 
     const GPUSource& source = sources[source_index];
     const GPUSample& grid_sample = grid_samples[grid_index];
+    if (!d_is_valid_pupil_sample(grid_sample.u, grid_sample.v, aperture_blades, aperture_rotation_rad)) {
+        return;
+    }
 
     const DVec3 beam_dir = dv_normalize(dv(tanf(source.angle_x), tanf(source.angle_y), 1.0f));
 
     DRay ray;
     ray.origin = dv(grid_sample.u * front_radius, grid_sample.v * front_radius, start_z);
     ray.dir = beam_dir;
+    float splat_radius_px = pair.splat_radius_px;
+    const DFootprint footprint = d_estimate_ghost_sample_footprint(surfaces,
+                                                                   num_surfaces,
+                                                                   sensor_z,
+                                                                   pair.surf_a,
+                                                                   pair.surf_b,
+                                                                   beam_dir,
+                                                                   grid_sample.u,
+                                                                   grid_sample.v,
+                                                                   cell_size,
+                                                                   spectral_samples[1].lambda,
+                                                                   front_radius,
+                                                                   start_z,
+                                                                   sensor_half_w,
+                                                                   sensor_half_h,
+                                                                   width,
+                                                                   height,
+                                                                   aperture_blades,
+                                                                   aperture_rotation_rad);
+    if (footprint.valid) {
+        splat_radius_px = d_select_ghost_footprint_radius(pair.splat_radius_px,
+                                                          footprint.area_px2,
+                                                          footprint.anisotropy);
+    }
 
     for (int sample_index = 0; sample_index < num_spectral_samples; ++sample_index) {
         const GPUSpectralSampleDev& sample = spectral_samples[sample_index];
@@ -564,9 +800,9 @@ __global__ void ghost_kernel(const Surface* surfaces,
         const float cr = source.r * sample.rw * contribution;
         const float cg = source.g * sample.gw * contribution;
         const float cb = source.b * sample.bw * contribution;
-        d_atomic_splat(out_r, width, height, px, py, cr, pair.splat_radius_px);
-        d_atomic_splat(out_g, width, height, px, py, cg, pair.splat_radius_px);
-        d_atomic_splat(out_b, width, height, px, py, cb, pair.splat_radius_px);
+        d_atomic_splat(out_r, width, height, px, py, cr, splat_radius_px);
+        d_atomic_splat(out_g, width, height, px, py, cg, splat_radius_px);
+        d_atomic_splat(out_b, width, height, px, py, cb, splat_radius_px);
     }
 }
 
@@ -932,6 +1168,9 @@ bool launch_ghost_cuda(const LensSystem& lens,
             cache.d_out_b,
             config.gain,
             1.0f / static_cast<float>(num_grid_samples),
+            2.0f / static_cast<float>(bucket_grid),
+            config.aperture_blades,
+            config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
             d_spectral_samples,
             static_cast<int>(spectral_samples.size()));
 
