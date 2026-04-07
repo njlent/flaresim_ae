@@ -1176,10 +1176,12 @@ void render_ghosts(const LensSystem &lens,
                         float p10x = 0.0f, p10y = 0.0f;
                         float p11x = 0.0f, p11y = 0.0f;
                         float p01x = 0.0f, p01y = 0.0f;
+                        float pcx = 0.0f, pcy = 0.0f;
                         float w00 = 0.0f;
                         float w10 = 0.0f;
                         float w11 = 0.0f;
                         float w01 = 0.0f;
+                        float wc = 0.0f;
                         if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
                                                             cell_u0, cell_v0, config.wavelengths[ch],
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
@@ -1203,6 +1205,17 @@ void render_ghosts(const LensSystem &lens,
                         PixelPoint p10 {p10x, p10y};
                         PixelPoint p11 {p11x, p11y};
                         PixelPoint p01 {p01x, p01y};
+                        PixelPoint pc {
+                            0.25f * (p00x + p10x + p11x + p01x),
+                            0.25f * (p00y + p10y + p11y + p01y),
+                        };
+                        bool have_center = trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                                          cell.uc, cell.vc, config.wavelengths[ch],
+                                                                          front_R, start_z, sensor_half_w, sensor_half_h,
+                                                                          width, height, pcx, pcy, &wc);
+                        if (have_center) {
+                            pc = {pcx, pcy};
+                        }
                         apply_cell_coverage_bias(p00, p10, p11, p01, config.cell_coverage_bias);
                         const float quad_area =
                             std::abs(signed_triangle_area(p00, p10, p11)) +
@@ -1228,12 +1241,26 @@ void render_ghosts(const LensSystem &lens,
                         attempts += 4;
                         hits += 4;
                         const float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g : src.b;
-                        const float total_area =
-                            std::abs(signed_triangle_area(p00, p10, p11)) +
-                            std::abs(signed_triangle_area(p00, p11, p01));
-                        const float weighted_integral =
-                            std::abs(signed_triangle_area(p00, p10, p11)) * (w00 + w10 + w11) / 3.0f +
-                            std::abs(signed_triangle_area(p00, p11, p01)) * (w00 + w11 + w01) / 3.0f;
+                        float total_area = quad_area;
+                        float weighted_integral = 0.0f;
+                        if (have_center) {
+                            attempts += 1;
+                            hits += 1;
+                            const float area00 = std::abs(signed_triangle_area(p00, p10, pc));
+                            const float area10 = std::abs(signed_triangle_area(p10, p11, pc));
+                            const float area11 = std::abs(signed_triangle_area(p11, p01, pc));
+                            const float area01 = std::abs(signed_triangle_area(p01, p00, pc));
+                            total_area = area00 + area10 + area11 + area01;
+                            weighted_integral =
+                                area00 * (w00 + w10 + wc) / 3.0f +
+                                area10 * (w10 + w11 + wc) / 3.0f +
+                                area11 * (w11 + w01 + wc) / 3.0f +
+                                area01 * (w01 + w00 + wc) / 3.0f;
+                        } else {
+                            weighted_integral =
+                                std::abs(signed_triangle_area(p00, p10, p11)) * (w00 + w10 + w11) / 3.0f +
+                                std::abs(signed_triangle_area(p00, p11, p01)) * (w00 + w11 + w01) / 3.0f;
+                        }
                         if (!(total_area > 1.0e-4f) || !(weighted_integral > 1.0e-6f)) {
                             continue;
                         }
@@ -1245,18 +1272,26 @@ void render_ghosts(const LensSystem &lens,
                         }
 
                         auto& buf = (ch == 0) ? tbuf_r[tid] : (ch == 1) ? tbuf_g[tid] : tbuf_b[tid];
-                        rasterize_quad_linear(buf.data(),
-                                              width,
-                                              height,
-                                              p00,
-                                              p10,
-                                              p11,
-                                              p01,
-                                              w00,
-                                              w10,
-                                              w11,
-                                              w01,
-                                              contribution);
+                        if (have_center) {
+                            const float density_scale = contribution / weighted_integral;
+                            rasterize_triangle_linear(buf.data(), width, height, p00, p10, pc, w00, w10, wc, density_scale);
+                            rasterize_triangle_linear(buf.data(), width, height, p10, p11, pc, w10, w11, wc, density_scale);
+                            rasterize_triangle_linear(buf.data(), width, height, p11, p01, pc, w11, w01, wc, density_scale);
+                            rasterize_triangle_linear(buf.data(), width, height, p01, p00, pc, w01, w00, wc, density_scale);
+                        } else {
+                            rasterize_quad_linear(buf.data(),
+                                                  width,
+                                                  height,
+                                                  p00,
+                                                  p10,
+                                                  p11,
+                                                  p01,
+                                                  w00,
+                                                  w10,
+                                                  w11,
+                                                  w01,
+                                                  contribution);
+                        }
                     }
                 }
 
