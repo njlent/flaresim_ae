@@ -141,7 +141,8 @@ int adaptive_sampling_strength_param() { return advanced_ghosts_section_start_pa
 int footprint_radius_bias_param() { return adaptive_sampling_strength_param() + 1; }
 int footprint_clamp_param() { return footprint_radius_bias_param() + 1; }
 int max_adaptive_pair_grid_param() { return footprint_clamp_param() + 1; }
-int cell_coverage_bias_param() { return max_adaptive_pair_grid_param() + 1; }
+int enable_cell_rasterization_param() { return max_adaptive_pair_grid_param() + 1; }
+int cell_coverage_bias_param() { return enable_cell_rasterization_param() + 1; }
 int cell_edge_inset_param() { return cell_coverage_bias_param() + 1; }
 int advanced_ghosts_section_end_param() { return cell_edge_inset_param() + 1; }
 int post_section_end_param() { return advanced_ghosts_section_end_param() + 1; }
@@ -527,6 +528,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.footprint_radius_bias = ui_state.footprint_radius_bias;
     out_state.footprint_clamp = ui_state.footprint_clamp;
     out_state.max_adaptive_pair_grid = ui_state.max_adaptive_pair_grid;
+    out_state.enable_cell_rasterization = ui_state.enable_cell_rasterization;
     out_state.cell_coverage_bias = ui_state.cell_coverage_bias;
     out_state.cell_edge_inset = ui_state.cell_edge_inset;
 

@@ -990,7 +990,6 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
     const GPUSource& source = sources[source_index];
     const GPUCell& cell = grid_cells[cell_index];
     const DVec3 beam_dir = dv_normalize(dv(tanf(source.angle_x), tanf(source.angle_y), 1.0f));
-    const float footprint_lambda = spectral_samples[min(1, num_spectral_samples - 1)].lambda;
     const float inset = fminf(fmaxf(cell_edge_inset, 0.0f), 0.45f);
     const float trace_scale = 1.0f - inset;
     const float cell_u0 = cell.uc + (cell.u0 - cell.uc) * trace_scale;
@@ -998,59 +997,58 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
     const float cell_u1 = cell.uc + (cell.u1 - cell.uc) * trace_scale;
     const float cell_v1 = cell.vc + (cell.v1 - cell.vc) * trace_scale;
 
-    float p00x = 0.0f, p00y = 0.0f;
-    float p10x = 0.0f, p10y = 0.0f;
-    float p11x = 0.0f, p11y = 0.0f;
-    float p01x = 0.0f, p01y = 0.0f;
-    if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
-                                          pair.surf_a, pair.surf_b, beam_dir,
-                                          cell_u0, cell_v0, footprint_lambda,
-                                          front_radius, start_z,
-                                          sensor_half_w, sensor_half_h,
-                                          width, height, p00x, p00y) ||
-        !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
-                                          pair.surf_a, pair.surf_b, beam_dir,
-                                          cell_u1, cell_v0, footprint_lambda,
-                                          front_radius, start_z,
-                                          sensor_half_w, sensor_half_h,
-                                          width, height, p10x, p10y) ||
-        !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
-                                          pair.surf_a, pair.surf_b, beam_dir,
-                                          cell_u1, cell_v1, footprint_lambda,
-                                          front_radius, start_z,
-                                          sensor_half_w, sensor_half_h,
-                                          width, height, p11x, p11y) ||
-        !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
-                                          pair.surf_a, pair.surf_b, beam_dir,
-                                          cell_u0, cell_v1, footprint_lambda,
-                                          front_radius, start_z,
-                                          sensor_half_w, sensor_half_h,
-                                          width, height, p01x, p01y)) {
-        return;
-    }
-
-    DPixelPoint p00 {p00x, p00y};
-    DPixelPoint p10 {p10x, p10y};
-    DPixelPoint p11 {p11x, p11y};
-    DPixelPoint p01 {p01x, p01y};
-    d_apply_cell_coverage_bias(p00, p10, p11, p01, cell_coverage_bias);
-    const float quad_area =
-        0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11)) +
-        0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01));
-    if (!(quad_area > 1.0e-4f) || !isfinite(quad_area)) {
-        return;
-    }
-
-    const float density_boost = d_select_ghost_density_boost(pair.area_boost,
-                                                             pair.reference_footprint_area_px2,
-                                                             quad_area);
-
     DRay center_ray;
     center_ray.origin = dv(cell.uc * front_radius, cell.vc * front_radius, start_z);
     center_ray.dir = beam_dir;
 
     for (int sample_index = 0; sample_index < num_spectral_samples; ++sample_index) {
         const GPUSpectralSampleDev& sample = spectral_samples[sample_index];
+        float p00x = 0.0f, p00y = 0.0f;
+        float p10x = 0.0f, p10y = 0.0f;
+        float p11x = 0.0f, p11y = 0.0f;
+        float p01x = 0.0f, p01y = 0.0f;
+        if (!d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                              pair.surf_a, pair.surf_b, beam_dir,
+                                              cell_u0, cell_v0, sample.lambda,
+                                              front_radius, start_z,
+                                              sensor_half_w, sensor_half_h,
+                                              width, height, p00x, p00y) ||
+            !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                              pair.surf_a, pair.surf_b, beam_dir,
+                                              cell_u1, cell_v0, sample.lambda,
+                                              front_radius, start_z,
+                                              sensor_half_w, sensor_half_h,
+                                              width, height, p10x, p10y) ||
+            !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                              pair.surf_a, pair.surf_b, beam_dir,
+                                              cell_u1, cell_v1, sample.lambda,
+                                              front_radius, start_z,
+                                              sensor_half_w, sensor_half_h,
+                                              width, height, p11x, p11y) ||
+            !d_trace_ghost_sensor_position_px(surfaces, num_surfaces, sensor_z,
+                                              pair.surf_a, pair.surf_b, beam_dir,
+                                              cell_u0, cell_v1, sample.lambda,
+                                              front_radius, start_z,
+                                              sensor_half_w, sensor_half_h,
+                                              width, height, p01x, p01y)) {
+            continue;
+        }
+
+        DPixelPoint p00 {p00x, p00y};
+        DPixelPoint p10 {p10x, p10y};
+        DPixelPoint p11 {p11x, p11y};
+        DPixelPoint p01 {p01x, p01y};
+        d_apply_cell_coverage_bias(p00, p10, p11, p01, cell_coverage_bias);
+        const float quad_area =
+            0.5f * fabsf(d_signed_triangle_twice_area(p00, p10, p11)) +
+            0.5f * fabsf(d_signed_triangle_twice_area(p00, p11, p01));
+        if (!(quad_area > 1.0e-4f) || !isfinite(quad_area)) {
+            continue;
+        }
+        const float density_boost = d_select_ghost_density_boost(pair.area_boost,
+                                                                 pair.reference_footprint_area_px2,
+                                                                 quad_area);
+
         const DTraceResult result = d_trace_ghost_ray(center_ray,
                                                       surfaces,
                                                       num_surfaces,

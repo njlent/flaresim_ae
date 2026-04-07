@@ -864,6 +864,7 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                           height,
                                                           config);
         plan.use_cell_rasterization =
+            config.enable_cell_rasterization &&
             config.cleanup_mode != GhostCleanupMode::LegacyBlur &&
             select_ghost_cell_rasterization(plan.estimated_extent_px, plan.distortion_score);
         plan.ray_grid = select_ghost_pair_ray_grid(config.ray_grid,
@@ -1135,64 +1136,62 @@ void render_ghosts(const LensSystem &lens,
                                                cell_v0,
                                                cell_u1,
                                                cell_v1);
-                    float p00x = 0.0f, p00y = 0.0f;
-                    float p10x = 0.0f, p10y = 0.0f;
-                    float p11x = 0.0f, p11y = 0.0f;
-                    float p01x = 0.0f, p01y = 0.0f;
-                    if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                        cell_u0, cell_v0, config.wavelengths[1],
-                                                        front_R, start_z, sensor_half_w, sensor_half_h,
-                                                        width, height, p00x, p00y) ||
-                        !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                        cell_u1, cell_v0, config.wavelengths[1],
-                                                        front_R, start_z, sensor_half_w, sensor_half_h,
-                                                        width, height, p10x, p10y) ||
-                        !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                        cell_u1, cell_v1, config.wavelengths[1],
-                                                        front_R, start_z, sensor_half_w, sensor_half_h,
-                                                        width, height, p11x, p11y) ||
-                        !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                        cell_u0, cell_v1, config.wavelengths[1],
-                                                        front_R, start_z, sensor_half_w, sensor_half_h,
-                                                        width, height, p01x, p01y)) {
-                        continue;
-                    }
-
-                    PixelPoint p00 {p00x, p00y};
-                    PixelPoint p10 {p10x, p10y};
-                    PixelPoint p11 {p11x, p11y};
-                    PixelPoint p01 {p01x, p01y};
-                    apply_cell_coverage_bias(p00, p10, p11, p01, config.cell_coverage_bias);
-                    const float quad_area =
-                        std::abs(signed_triangle_area(p00, p10, p11)) +
-                        std::abs(signed_triangle_area(p00, p11, p01));
-                    if (!(quad_area > 1.0e-4f) || !std::isfinite(quad_area)) {
-                        continue;
-                    }
-
-                    const GhostSampleFootprint footprint {
-                        quad_area,
-                        std::sqrt((p10.x - p00.x) * (p10.x - p00.x) + (p10.y - p00.y) * (p10.y - p00.y)),
-                        std::sqrt((p01.x - p00.x) * (p01.x - p00.x) + (p01.y - p00.y) * (p01.y - p00.y)),
-                        std::max(
-                            std::sqrt((p10.x - p00.x) * (p10.x - p00.x) + (p10.y - p00.y) * (p10.y - p00.y)),
-                            std::sqrt((p01.x - p00.x) * (p01.x - p00.x) + (p01.y - p00.y) * (p01.y - p00.y))) /
-                            std::max(std::min(
-                                std::sqrt((p10.x - p00.x) * (p10.x - p00.x) + (p10.y - p00.y) * (p10.y - p00.y)),
-                                std::sqrt((p01.x - p00.x) * (p01.x - p00.x) + (p01.y - p00.y) * (p01.y - p00.y))), 1.0e-3f),
-                        true
-                    };
-                    const float density_boost = select_ghost_density_boost(pair_plan.area_boost,
-                                                                           pair_plan.reference_footprint_area_px2,
-                                                                           footprint.area_px2);
-
-                    Ray center_ray;
-                    center_ray.origin = Vec3f(cell.uc * front_R, cell.vc * front_R, start_z);
-                    center_ray.dir = beam_dir;
-
                     for (int ch = 0; ch < 3; ++ch)
                     {
+                        float p00x = 0.0f, p00y = 0.0f;
+                        float p10x = 0.0f, p10y = 0.0f;
+                        float p11x = 0.0f, p11y = 0.0f;
+                        float p01x = 0.0f, p01y = 0.0f;
+                        if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                            cell_u0, cell_v0, config.wavelengths[ch],
+                                                            front_R, start_z, sensor_half_w, sensor_half_h,
+                                                            width, height, p00x, p00y) ||
+                            !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                            cell_u1, cell_v0, config.wavelengths[ch],
+                                                            front_R, start_z, sensor_half_w, sensor_half_h,
+                                                            width, height, p10x, p10y) ||
+                            !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                            cell_u1, cell_v1, config.wavelengths[ch],
+                                                            front_R, start_z, sensor_half_w, sensor_half_h,
+                                                            width, height, p11x, p11y) ||
+                            !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
+                                                            cell_u0, cell_v1, config.wavelengths[ch],
+                                                            front_R, start_z, sensor_half_w, sensor_half_h,
+                                                            width, height, p01x, p01y)) {
+                            continue;
+                        }
+
+                        PixelPoint p00 {p00x, p00y};
+                        PixelPoint p10 {p10x, p10y};
+                        PixelPoint p11 {p11x, p11y};
+                        PixelPoint p01 {p01x, p01y};
+                        apply_cell_coverage_bias(p00, p10, p11, p01, config.cell_coverage_bias);
+                        const float quad_area =
+                            std::abs(signed_triangle_area(p00, p10, p11)) +
+                            std::abs(signed_triangle_area(p00, p11, p01));
+                        if (!(quad_area > 1.0e-4f) || !std::isfinite(quad_area)) {
+                            continue;
+                        }
+
+                        const float edge_u = std::sqrt((p10.x - p00.x) * (p10.x - p00.x) +
+                                                       (p10.y - p00.y) * (p10.y - p00.y));
+                        const float edge_v = std::sqrt((p01.x - p00.x) * (p01.x - p00.x) +
+                                                       (p01.y - p00.y) * (p01.y - p00.y));
+                        const GhostSampleFootprint footprint {
+                            quad_area,
+                            edge_u,
+                            edge_v,
+                            std::max(edge_u, edge_v) / std::max(std::min(edge_u, edge_v), 1.0e-3f),
+                            true
+                        };
+                        const float density_boost = select_ghost_density_boost(pair_plan.area_boost,
+                                                                               pair_plan.reference_footprint_area_px2,
+                                                                               footprint.area_px2);
+
                         ++attempts;
+                        Ray center_ray;
+                        center_ray.origin = Vec3f(cell.uc * front_R, cell.vc * front_R, start_z);
+                        center_ray.dir = beam_dir;
                         const TraceResult res = trace_ghost_ray(center_ray, lens, a, b, config.wavelengths[ch]);
                         if (!res.valid) {
                             continue;

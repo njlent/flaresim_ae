@@ -159,6 +159,11 @@ Ship an AE implementation in staged slices, with frequent commits.
 - projected pupil cells now trace inset corners instead of only exact cell corners, which keeps more edge cells alive near the aperture boundary
 - CPU and CUDA cell rasterization now apply the same projected-quad coverage bias before rasterization so full-flare coverage can be tuned without falling back to blur
 
+### Slice 25
+- fixed projected-cell color loss by tracing channel/spectral-sample-specific quads instead of reusing the green quad geometry for all channels
+- added an `Advanced Ghosts` `Projected Cells` toggle so the projected-cell path can be disabled without giving up the other sharp-cleanup controls
+- CPU and CUDA cell paths now preserve red/blue fringe placement while still supporting the coverage and edge-inset controls
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

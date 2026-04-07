@@ -166,6 +166,7 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     hash_append_value(hash, settings.footprint_radius_bias);
     hash_append_value(hash, settings.footprint_clamp);
     hash_append_value(hash, settings.max_adaptive_pair_grid);
+    hash_append_value(hash, settings.enable_cell_rasterization);
     hash_append_value(hash, settings.cell_coverage_bias);
     hash_append_value(hash, settings.cell_edge_inset);
     return hash;
@@ -477,6 +478,7 @@ bool render_frame(
                 ghost.footprint_radius_bias = settings.footprint_radius_bias;
                 ghost.footprint_clamp = settings.footprint_clamp;
                 ghost.max_adaptive_pair_grid = settings.max_adaptive_pair_grid;
+                ghost.enable_cell_rasterization = settings.enable_cell_rasterization;
                 ghost.cell_coverage_bias = settings.cell_coverage_bias;
                 ghost.cell_edge_inset = settings.cell_edge_inset;
 

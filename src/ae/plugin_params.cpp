@@ -427,6 +427,12 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("Projected Cells",
+                     defaults.enable_cell_rasterization,
+                     PF_ParamFlag_NONE,
+                     PARAM_ID_ENABLE_CELL_RASTERIZATION);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Cell Coverage",
                          0.1f,
                          kManualFloatMax,

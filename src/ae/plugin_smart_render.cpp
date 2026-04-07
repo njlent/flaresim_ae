@@ -69,6 +69,7 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.footprint_radius_bias = params[footprint_radius_bias_param()]->u.fs_d.value;
     out_state.footprint_clamp = params[footprint_clamp_param()]->u.fs_d.value;
     out_state.max_adaptive_pair_grid = params[max_adaptive_pair_grid_param()]->u.sd.value;
+    out_state.enable_cell_rasterization = params[enable_cell_rasterization_param()]->u.bd.value != 0;
     out_state.cell_coverage_bias = params[cell_coverage_bias_param()]->u.fs_d.value;
     out_state.cell_edge_inset = params[cell_edge_inset_param()]->u.fs_d.value;
     out_state.view_mode_index = params[view_mode_param()]->u.pd.value;
@@ -280,6 +281,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef footprint_radius_bias_param_def;
     PF_ParamDef footprint_clamp_param_def;
     PF_ParamDef max_adaptive_pair_grid_param_def;
+    PF_ParamDef enable_cell_rasterization_param_def;
     PF_ParamDef cell_coverage_bias_param_def;
     PF_ParamDef cell_edge_inset_param_def;
     PF_ParamDef view_param_def;
@@ -315,6 +317,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(footprint_radius_bias_param_def);
     AEFX_CLR_STRUCT(footprint_clamp_param_def);
     AEFX_CLR_STRUCT(max_adaptive_pair_grid_param_def);
+    AEFX_CLR_STRUCT(enable_cell_rasterization_param_def);
     AEFX_CLR_STRUCT(cell_coverage_bias_param_def);
     AEFX_CLR_STRUCT(cell_edge_inset_param_def);
     AEFX_CLR_STRUCT(view_param_def);
@@ -351,6 +354,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool footprint_radius_bias_checked_out = false;
     bool footprint_clamp_checked_out = false;
     bool max_adaptive_pair_grid_checked_out = false;
+    bool enable_cell_rasterization_checked_out = false;
     bool cell_coverage_bias_checked_out = false;
     bool cell_edge_inset_checked_out = false;
     bool view_checked_out = false;
@@ -618,6 +622,14 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     max_adaptive_pair_grid_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          enable_cell_rasterization_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &enable_cell_rasterization_param_def));
+    enable_cell_rasterization_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           cell_coverage_bias_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -675,6 +687,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.footprint_radius_bias = footprint_radius_bias_param_def.u.fs_d.value;
         ui_state.footprint_clamp = footprint_clamp_param_def.u.fs_d.value;
         ui_state.max_adaptive_pair_grid = max_adaptive_pair_grid_param_def.u.sd.value;
+        ui_state.enable_cell_rasterization = enable_cell_rasterization_param_def.u.bd.value != 0;
         ui_state.cell_coverage_bias = cell_coverage_bias_param_def.u.fs_d.value;
         ui_state.cell_edge_inset = cell_edge_inset_param_def.u.fs_d.value;
         ui_state.view_mode_index = view_param_def.u.pd.value;
@@ -689,6 +702,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (max_adaptive_pair_grid_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &max_adaptive_pair_grid_param_def));
+    }
+    if (enable_cell_rasterization_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &enable_cell_rasterization_param_def));
     }
     if (cell_edge_inset_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &cell_edge_inset_param_def));
