@@ -119,13 +119,17 @@ void test_bloom()
 
 void test_ghost_pair_planning()
 {
-    assert(select_ghost_pair_ray_grid(16, 4.0f, 0.0f) == 8);
-    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f) == 32);
-    assert(select_ghost_pair_ray_grid(16, 12.0f, 0.2f) == 32);
-    assert(select_ghost_footprint_radius(4.0f, 1.0f, 1.0f) <= 2.0f);
-    assert(select_ghost_footprint_radius(4.0f, 49.0f, 1.0f) >= 4.0f);
-    assert(select_ghost_footprint_radius(4.0f, 49.0f, 4.0f) <
-           select_ghost_footprint_radius(4.0f, 49.0f, 1.0f));
+    assert(select_ghost_pair_ray_grid(16, 4.0f, 0.0f, 1.0f, 0) == 8);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 0) == 32);
+    assert(select_ghost_pair_ray_grid(16, 12.0f, 0.2f, 1.0f, 0) == 32);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 24) == 24);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 0.0f, 0) == 16);
+    assert(select_ghost_footprint_radius(4.0f, 1.0f, 1.0f, 1.0f, 1.15f) <= 2.0f);
+    assert(select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 1.0f, 1.15f) >= 4.0f);
+    assert(select_ghost_footprint_radius(4.0f, 49.0f, 4.0f, 1.0f, 1.15f) <
+           select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 1.0f, 1.15f));
+    assert(select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 0.5f, 1.15f) <
+           select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 1.0f, 1.15f));
 
     LensSystem lens;
     const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
@@ -402,6 +406,10 @@ void test_ae_adapter_bits()
     state.starburst_gain = 0.3f;
     state.starburst_scale = 0.2f;
     state.spectral_samples = 9;
+    state.adaptive_sampling_strength = 1.25f;
+    state.footprint_radius_bias = 0.9f;
+    state.footprint_clamp = 1.4f;
+    state.max_adaptive_pair_grid = 48;
     state.bloom.strength = 0.75f;
 
     const auto settings = build_frame_render_settings(state);
@@ -430,6 +438,10 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.starburst_gain - 0.3f) < 1e-6f);
     assert(std::abs(settings.starburst_scale - 0.2f) < 1e-6f);
     assert(settings.spectral_samples == 9);
+    assert(std::abs(settings.adaptive_sampling_strength - 1.25f) < 1e-6f);
+    assert(std::abs(settings.footprint_radius_bias - 0.9f) < 1e-6f);
+    assert(std::abs(settings.footprint_clamp - 1.4f) < 1e-6f);
+    assert(settings.max_adaptive_pair_grid == 48);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
 
     state.ray_grid = 2048;
@@ -776,7 +788,13 @@ void test_param_schema()
     assert(sky_brightness_param() + 1 == threshold_param());
     assert(flare_section_end_param() + 1 == post_section_start_param());
     assert(spectral_samples_param() + 1 == ghost_cleanup_mode_param());
-    assert(ghost_cleanup_mode_param() + 1 == post_section_end_param());
+    assert(ghost_cleanup_mode_param() + 1 == advanced_ghosts_section_start_param());
+    assert(advanced_ghosts_section_start_param() + 1 == adaptive_sampling_strength_param());
+    assert(adaptive_sampling_strength_param() + 1 == footprint_radius_bias_param());
+    assert(footprint_radius_bias_param() + 1 == footprint_clamp_param());
+    assert(footprint_clamp_param() + 1 == max_adaptive_pair_grid_param());
+    assert(max_adaptive_pair_grid_param() + 1 == advanced_ghosts_section_end_param());
+    assert(advanced_ghosts_section_end_param() + 1 == post_section_end_param());
     assert(post_section_end_param() + 1 == view_mode_param());
     assert(mask_layer_param() + 1 == parameter_count());
     assert(PARAM_ID_HAZE_GAIN == 19);
@@ -785,6 +803,10 @@ void test_param_schema()
     assert(PARAM_ID_MASK_LAYER == 26);
     assert(PARAM_ID_GHOST_CLEANUP_MODE == 27);
     assert(PARAM_ID_SKY_BRIGHTNESS == 28);
+    assert(PARAM_ID_ADAPTIVE_SAMPLING_STRENGTH == 29);
+    assert(PARAM_ID_FOOTPRINT_RADIUS_BIAS == 30);
+    assert(PARAM_ID_FOOTPRINT_CLAMP == 31);
+    assert(PARAM_ID_MAX_ADAPTIVE_PAIR_GRID == 32);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -832,6 +854,10 @@ void test_param_schema()
     ui.starburst_gain = 0.2f;
     ui.starburst_scale = 0.1f;
     ui.spectral_samples_index = spectral_samples_popup_index(11);
+    ui.adaptive_sampling_strength = 1.5f;
+    ui.footprint_radius_bias = 0.85f;
+    ui.footprint_clamp = 1.8f;
+    ui.max_adaptive_pair_grid = 40;
 
     AeParameterState state {};
     assert(apply_ui_parameter_state(ui, state));
@@ -862,6 +888,10 @@ void test_param_schema()
     assert(std::abs(state.starburst_gain - 0.2f) < 1e-6f);
     assert(std::abs(state.starburst_scale - 0.1f) < 1e-6f);
     assert(state.spectral_samples == 11);
+    assert(std::abs(state.adaptive_sampling_strength - 1.5f) < 1e-6f);
+    assert(std::abs(state.footprint_radius_bias - 0.85f) < 1e-6f);
+    assert(std::abs(state.footprint_clamp - 1.8f) < 1e-6f);
+    assert(state.max_adaptive_pair_grid == 40);
 
     AeUiParameterState legacy_ui {};
     legacy_ui.legacy_lens_preset_index = lens_popup_index_for_builtin("cooke-triplet");

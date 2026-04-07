@@ -65,6 +65,10 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.starburst_gain = params[starburst_gain_param()]->u.fs_d.value;
     out_state.starburst_scale = params[starburst_scale_param()]->u.fs_d.value;
     out_state.spectral_samples_index = params[spectral_samples_param()]->u.pd.value;
+    out_state.adaptive_sampling_strength = params[adaptive_sampling_strength_param()]->u.fs_d.value;
+    out_state.footprint_radius_bias = params[footprint_radius_bias_param()]->u.fs_d.value;
+    out_state.footprint_clamp = params[footprint_clamp_param()]->u.fs_d.value;
+    out_state.max_adaptive_pair_grid = params[max_adaptive_pair_grid_param()]->u.sd.value;
     out_state.view_mode_index = params[view_mode_param()]->u.pd.value;
     return true;
 }
@@ -270,6 +274,10 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef starburst_gain_param_def;
     PF_ParamDef starburst_scale_param_def;
     PF_ParamDef spectral_samples_param_def;
+    PF_ParamDef adaptive_sampling_strength_param_def;
+    PF_ParamDef footprint_radius_bias_param_def;
+    PF_ParamDef footprint_clamp_param_def;
+    PF_ParamDef max_adaptive_pair_grid_param_def;
     PF_ParamDef view_param_def;
     AEFX_CLR_STRUCT(legacy_lens_param);
     AEFX_CLR_STRUCT(manufacturer_param);
@@ -299,6 +307,10 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(starburst_gain_param_def);
     AEFX_CLR_STRUCT(starburst_scale_param_def);
     AEFX_CLR_STRUCT(spectral_samples_param_def);
+    AEFX_CLR_STRUCT(adaptive_sampling_strength_param_def);
+    AEFX_CLR_STRUCT(footprint_radius_bias_param_def);
+    AEFX_CLR_STRUCT(footprint_clamp_param_def);
+    AEFX_CLR_STRUCT(max_adaptive_pair_grid_param_def);
     AEFX_CLR_STRUCT(view_param_def);
 
     bool legacy_lens_checked_out = false;
@@ -329,6 +341,10 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool starburst_gain_checked_out = false;
     bool starburst_scale_checked_out = false;
     bool spectral_samples_checked_out = false;
+    bool adaptive_sampling_strength_checked_out = false;
+    bool footprint_radius_bias_checked_out = false;
+    bool footprint_clamp_checked_out = false;
+    bool max_adaptive_pair_grid_checked_out = false;
     bool view_checked_out = false;
 
     ERR(PF_CHECKOUT_PARAM(in_data,
@@ -562,6 +578,38 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     spectral_samples_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          adaptive_sampling_strength_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &adaptive_sampling_strength_param_def));
+    adaptive_sampling_strength_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          footprint_radius_bias_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &footprint_radius_bias_param_def));
+    footprint_radius_bias_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          footprint_clamp_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &footprint_clamp_param_def));
+    footprint_clamp_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          max_adaptive_pair_grid_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &max_adaptive_pair_grid_param_def));
+    max_adaptive_pair_grid_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           view_mode_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -599,6 +647,10 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.starburst_gain = starburst_gain_param_def.u.fs_d.value;
         ui_state.starburst_scale = starburst_scale_param_def.u.fs_d.value;
         ui_state.spectral_samples_index = spectral_samples_param_def.u.pd.value;
+        ui_state.adaptive_sampling_strength = adaptive_sampling_strength_param_def.u.fs_d.value;
+        ui_state.footprint_radius_bias = footprint_radius_bias_param_def.u.fs_d.value;
+        ui_state.footprint_clamp = footprint_clamp_param_def.u.fs_d.value;
+        ui_state.max_adaptive_pair_grid = max_adaptive_pair_grid_param_def.u.sd.value;
         ui_state.view_mode_index = view_param_def.u.pd.value;
 
         if (!apply_ui_parameter_state(ui_state, out_state)) {
@@ -608,6 +660,18 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
 
     if (view_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &view_param_def));
+    }
+    if (max_adaptive_pair_grid_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &max_adaptive_pair_grid_param_def));
+    }
+    if (footprint_clamp_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &footprint_clamp_param_def));
+    }
+    if (footprint_radius_bias_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &footprint_radius_bias_param_def));
+    }
+    if (adaptive_sampling_strength_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &adaptive_sampling_strength_param_def));
     }
     if (spectral_samples_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &spectral_samples_param_def));

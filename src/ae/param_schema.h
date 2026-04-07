@@ -23,6 +23,8 @@ inline constexpr int PARAM_ID_FLARE_SECTION_START = 9006;
 inline constexpr int PARAM_ID_FLARE_SECTION_END = 9007;
 inline constexpr int PARAM_ID_POST_SECTION_START = 9008;
 inline constexpr int PARAM_ID_POST_SECTION_END = 9009;
+inline constexpr int PARAM_ID_ADVANCED_GHOSTS_SECTION_START = 9010;
+inline constexpr int PARAM_ID_ADVANCED_GHOSTS_SECTION_END = 9011;
 inline constexpr int PARAM_ID_USE_SENSOR_SIZE = 2;
 inline constexpr int PARAM_ID_SENSOR_PRESET = 3;
 inline constexpr int PARAM_ID_FOV_H = 4;
@@ -50,6 +52,10 @@ inline constexpr int PARAM_ID_VIEW_MODE = 25;
 inline constexpr int PARAM_ID_MASK_LAYER = 26;
 inline constexpr int PARAM_ID_GHOST_CLEANUP_MODE = 27;
 inline constexpr int PARAM_ID_SKY_BRIGHTNESS = 28;
+inline constexpr int PARAM_ID_ADAPTIVE_SAMPLING_STRENGTH = 29;
+inline constexpr int PARAM_ID_FOOTPRINT_RADIUS_BIAS = 30;
+inline constexpr int PARAM_ID_FOOTPRINT_CLAMP = 31;
+inline constexpr int PARAM_ID_MAX_ADAPTIVE_PAIR_GRID = 32;
 
 struct AeUiParameterState
 {
@@ -81,6 +87,10 @@ struct AeUiParameterState
     float starburst_gain = 0.0f;
     float starburst_scale = 0.15f;
     int spectral_samples_index = 1;
+    float adaptive_sampling_strength = 1.0f;
+    float footprint_radius_bias = 1.0f;
+    float footprint_clamp = 1.15f;
+    int max_adaptive_pair_grid = 0;
     int view_mode_index = 1;
 };
 
@@ -123,6 +133,12 @@ int starburst_gain_param();
 int starburst_scale_param();
 int spectral_samples_param();
 int ghost_cleanup_mode_param();
+int advanced_ghosts_section_start_param();
+int adaptive_sampling_strength_param();
+int footprint_radius_bias_param();
+int footprint_clamp_param();
+int max_adaptive_pair_grid_param();
+int advanced_ghosts_section_end_param();
 int post_section_end_param();
 int flare_section_end_param();
 int view_mode_param();

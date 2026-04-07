@@ -377,6 +377,59 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_GHOST_CLEANUP_MODE);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_TOPICX("Advanced Ghosts",
+                  PF_ParamFlag_START_COLLAPSED,
+                  PARAM_ID_ADVANCED_GHOSTS_SECTION_START);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Adaptive Sampling",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         2.0f,
+                         defaults.adaptive_sampling_strength,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_ADAPTIVE_SAMPLING_STRENGTH);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Footprint Bias",
+                         0.1f,
+                         kManualFloatMax,
+                         0.25f,
+                         2.0f,
+                         defaults.footprint_radius_bias,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_FOOTPRINT_RADIUS_BIAS);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Footprint Clamp",
+                         0.1f,
+                         kManualFloatMax,
+                         0.5f,
+                         4.0f,
+                         defaults.footprint_clamp,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_FOOTPRINT_CLAMP);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Max Pair Grid",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.max_adaptive_pair_grid,
+                  PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_END_TOPIC(PARAM_ID_ADVANCED_GHOSTS_SECTION_END);
+
+    AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_POST_SECTION_END);
 
     AEFX_CLR_STRUCT(def);

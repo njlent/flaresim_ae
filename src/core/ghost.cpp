@@ -56,22 +56,32 @@ const char* ghost_render_backend_name(GhostRenderBackend backend)
 
 int select_ghost_pair_ray_grid(int base_ray_grid,
                                float estimated_extent_px,
-                               float distortion_score)
+                               float distortion_score,
+                               float adaptive_sampling_strength,
+                               int max_adaptive_pair_grid)
 {
     if (base_ray_grid <= 0) {
         return 0;
     }
 
+    const float strength = std::clamp(adaptive_sampling_strength, 0.0f, 2.0f);
     const int min_grid = std::max(4, base_ray_grid / 2);
-    const int max_grid = std::max(base_ray_grid, base_ray_grid * 2);
+    const int auto_max_grid = std::max(base_ray_grid, base_ray_grid * 2);
+    const int max_grid = max_adaptive_pair_grid > 0
+        ? std::max(base_ray_grid, max_adaptive_pair_grid)
+        : auto_max_grid;
     const float approx_valid_samples = std::max(0.78539816339f * base_ray_grid * base_ray_grid, 1.0f);
     const float linear_density = std::sqrt(approx_valid_samples);
     const float sample_spacing_px = estimated_extent_px / linear_density;
+    const float promote_spacing = std::max(1.5f, 3.5f - strength * 1.25f);
+    const float demote_spacing = std::max(0.75f, 1.25f + (1.0f - strength) * 0.4f);
+    const float promote_distortion = std::max(0.02f, 0.12f - strength * 0.04f);
+    const float demote_distortion = std::max(0.0f, 0.03f + (1.0f - strength) * 0.02f);
 
-    if (sample_spacing_px > 3.5f || distortion_score > 0.12f) {
+    if (strength > 0.0f && (sample_spacing_px > promote_spacing || distortion_score > promote_distortion)) {
         return max_grid;
     }
-    if (sample_spacing_px < 1.25f && distortion_score < 0.03f) {
+    if (strength < 1.75f && sample_spacing_px < demote_spacing && distortion_score < demote_distortion) {
         return min_grid;
     }
     return base_ray_grid;
@@ -184,20 +194,24 @@ static bool choose_probe_offset(float u,
 
 float select_ghost_footprint_radius(float fallback_radius_px,
                                     float footprint_area_px2,
-                                    float anisotropy)
+                                    float anisotropy,
+                                    float footprint_radius_bias,
+                                    float footprint_clamp)
 {
     const float fallback = std::clamp(fallback_radius_px, 1.25f, 16.0f);
     if (!(footprint_area_px2 > 0.0f) || !std::isfinite(footprint_area_px2)) {
         return fallback;
     }
 
-    float radius = std::sqrt(footprint_area_px2) * 0.75f;
+    const float bias = std::clamp(footprint_radius_bias, 0.25f, 2.0f);
+    const float clamp_scale = std::clamp(footprint_clamp, 0.5f, 4.0f);
+    float radius = std::sqrt(footprint_area_px2) * 0.75f * bias;
     if (std::isfinite(anisotropy) && anisotropy > 2.5f) {
         radius *= 0.85f;
     }
 
     radius = std::clamp(radius, 1.15f, 16.0f);
-    return std::clamp(std::min(radius, fallback * 1.15f), 1.15f, 16.0f);
+    return std::clamp(std::min(radius, fallback * clamp_scale), 1.15f, 16.0f);
 }
 
 static GhostSampleFootprint estimate_ghost_sample_footprint(const LensSystem& lens,
@@ -666,7 +680,9 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                           config);
         plan.ray_grid = select_ghost_pair_ray_grid(config.ray_grid,
                                                    plan.estimated_extent_px,
-                                                   plan.distortion_score);
+                                                   plan.distortion_score,
+                                                   config.adaptive_sampling_strength,
+                                                   config.max_adaptive_pair_grid);
 
         if (config.cleanup_mode != GhostCleanupMode::LegacyBlur) {
             const float approx_valid_samples =
@@ -942,7 +958,9 @@ void render_ghosts(const LensSystem &lens,
                     if (footprint.valid) {
                         local_radius_px = select_ghost_footprint_radius(pair_plan.splat_radius_px,
                                                                         footprint.area_px2,
-                                                                        footprint.anisotropy);
+                                                                        footprint.anisotropy,
+                                                                        config.footprint_radius_bias,
+                                                                        config.footprint_clamp);
                     }
                 }
 

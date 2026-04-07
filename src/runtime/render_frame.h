@@ -39,6 +39,10 @@ struct FrameRenderSettings
     int spectral_samples = 3;
     bool ghost_normalize = true;
     float max_area_boost = 100.0f;
+    float adaptive_sampling_strength = 1.0f;
+    float footprint_radius_bias = 1.0f;
+    float footprint_clamp = 1.15f;
+    int max_adaptive_pair_grid = 0;
     BloomConfig bloom {};
 };
 

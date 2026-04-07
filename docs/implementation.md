@@ -132,6 +132,11 @@ Ship an AE implementation in staged slices, with frequent commits.
 - CUDA ghost rendering now mirrors the same footprint-aware radius selection per sample
 - smoke coverage now exercises footprint-radius selection alongside adaptive pair planning
 
+### Slice 20
+- added a collapsed AE `Advanced Ghosts` topic for adaptive sampling strength, footprint bias, footprint clamp, and max adaptive pair grid
+- advanced ghost controls default to neutral auto-like behavior and only affect the sharp cleanup internals when adjusted
+- shared runtime ghost cache keys now include the advanced ghost controls so AE invalidation stays correct across expert tweaks
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

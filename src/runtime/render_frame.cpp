@@ -162,6 +162,10 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     hash_append_value(hash, settings.ghost_normalize);
     hash_append_value(hash, settings.max_area_boost);
     hash_append_value(hash, settings.ghost_cleanup_mode);
+    hash_append_value(hash, settings.adaptive_sampling_strength);
+    hash_append_value(hash, settings.footprint_radius_bias);
+    hash_append_value(hash, settings.footprint_clamp);
+    hash_append_value(hash, settings.max_adaptive_pair_grid);
     return hash;
 }
 
@@ -467,6 +471,10 @@ bool render_frame(
                 ghost.ghost_normalize = settings.ghost_normalize;
                 ghost.max_area_boost = settings.max_area_boost;
                 ghost.cleanup_mode = settings.ghost_cleanup_mode;
+                ghost.adaptive_sampling_strength = settings.adaptive_sampling_strength;
+                ghost.footprint_radius_bias = settings.footprint_radius_bias;
+                ghost.footprint_clamp = settings.footprint_clamp;
+                ghost.max_adaptive_pair_grid = settings.max_adaptive_pair_grid;
 
                 render_ghosts(
                     lens,

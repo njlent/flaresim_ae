@@ -500,20 +500,24 @@ __device__ __forceinline__ bool d_choose_probe_offset(float u,
 
 __device__ __forceinline__ float d_select_ghost_footprint_radius(float fallback_radius_px,
                                                                  float footprint_area_px2,
-                                                                 float anisotropy)
+                                                                 float anisotropy,
+                                                                 float footprint_radius_bias,
+                                                                 float footprint_clamp)
 {
     float fallback = fminf(fmaxf(fallback_radius_px, 1.25f), 16.0f);
     if (!(footprint_area_px2 > 0.0f) || !isfinite(footprint_area_px2)) {
         return fallback;
     }
 
-    float radius = sqrtf(footprint_area_px2) * 0.75f;
+    const float bias = fminf(fmaxf(footprint_radius_bias, 0.25f), 2.0f);
+    const float clamp_scale = fminf(fmaxf(footprint_clamp, 0.5f), 4.0f);
+    float radius = sqrtf(footprint_area_px2) * 0.75f * bias;
     if (isfinite(anisotropy) && anisotropy > 2.5f) {
         radius *= 0.85f;
     }
 
     radius = fminf(fmaxf(radius, 1.15f), 16.0f);
-    return fminf(fmaxf(fminf(radius, fallback * 1.15f), 1.15f), 16.0f);
+    return fminf(fmaxf(fminf(radius, fallback * clamp_scale), 1.15f), 16.0f);
 }
 
 __device__ __forceinline__ DFootprint d_estimate_ghost_sample_footprint(const Surface* surfaces,
@@ -718,6 +722,8 @@ __global__ void ghost_kernel(const Surface* surfaces,
                              float cell_size,
                              int aperture_blades,
                              float aperture_rotation_rad,
+                             float footprint_radius_bias,
+                             float footprint_clamp,
                              const GPUSpectralSampleDev* spectral_samples,
                              int num_spectral_samples)
 {
@@ -768,7 +774,9 @@ __global__ void ghost_kernel(const Surface* surfaces,
     if (footprint.valid) {
         splat_radius_px = d_select_ghost_footprint_radius(pair.splat_radius_px,
                                                           footprint.area_px2,
-                                                          footprint.anisotropy);
+                                                          footprint.anisotropy,
+                                                          footprint_radius_bias,
+                                                          footprint_clamp);
     }
 
     for (int sample_index = 0; sample_index < num_spectral_samples; ++sample_index) {
@@ -1171,6 +1179,8 @@ bool launch_ghost_cuda(const LensSystem& lens,
             2.0f / static_cast<float>(bucket_grid),
             config.aperture_blades,
             config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
+            config.footprint_radius_bias,
+            config.footprint_clamp,
             d_spectral_samples,
             static_cast<int>(spectral_samples.size()));
 

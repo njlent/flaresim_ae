@@ -62,6 +62,10 @@ struct GhostConfig
     bool ghost_normalize = true;   // enable per-pair area correction
     float max_area_boost = 100.0f; // clamp the correction factor
     GhostCleanupMode cleanup_mode = GhostCleanupMode::LegacyBlur;
+    float adaptive_sampling_strength = 1.0f; // 1.0 = auto baseline
+    float footprint_radius_bias = 1.0f;      // 1.0 = traced footprint radius as-is
+    float footprint_clamp = 1.15f;           // max multiplier over fallback radius
+    int max_adaptive_pair_grid = 0;          // 0 = auto (2x base grid)
 };
 
 // Enumerate all valid ghost bounce pairs for the lens system.
@@ -70,10 +74,14 @@ std::vector<GhostPair> enumerate_ghost_pairs(const LensSystem &lens);
 const char* ghost_render_backend_name(GhostRenderBackend backend);
 int select_ghost_pair_ray_grid(int base_ray_grid,
                                float estimated_extent_px,
-                               float distortion_score);
+                               float distortion_score,
+                               float adaptive_sampling_strength,
+                               int max_adaptive_pair_grid);
 float select_ghost_footprint_radius(float fallback_radius_px,
                                     float footprint_area_px2,
-                                    float anisotropy);
+                                    float anisotropy,
+                                    float footprint_radius_bias,
+                                    float footprint_clamp);
 std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                    float fov_h,
                                                    float fov_v,

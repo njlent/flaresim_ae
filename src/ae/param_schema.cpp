@@ -136,7 +136,13 @@ int starburst_gain_param() { return haze_blur_passes_param() + 1; }
 int starburst_scale_param() { return starburst_gain_param() + 1; }
 int spectral_samples_param() { return starburst_scale_param() + 1; }
 int ghost_cleanup_mode_param() { return spectral_samples_param() + 1; }
-int post_section_end_param() { return ghost_cleanup_mode_param() + 1; }
+int advanced_ghosts_section_start_param() { return ghost_cleanup_mode_param() + 1; }
+int adaptive_sampling_strength_param() { return advanced_ghosts_section_start_param() + 1; }
+int footprint_radius_bias_param() { return adaptive_sampling_strength_param() + 1; }
+int footprint_clamp_param() { return footprint_radius_bias_param() + 1; }
+int max_adaptive_pair_grid_param() { return footprint_clamp_param() + 1; }
+int advanced_ghosts_section_end_param() { return max_adaptive_pair_grid_param() + 1; }
+int post_section_end_param() { return advanced_ghosts_section_end_param() + 1; }
 int view_mode_param() { return post_section_end_param() + 1; }
 int mask_layer_param() { return view_mode_param() + 1; }
 int parameter_count() { return mask_layer_param() + 1; }
@@ -441,6 +447,10 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.ghost_blur_passes < 0 ||
         ui_state.haze_blur_passes < 0 ||
         ui_state.aperture_blades < 0 ||
+        ui_state.adaptive_sampling_strength < 0.0f ||
+        ui_state.footprint_radius_bias <= 0.0f ||
+        ui_state.footprint_clamp <= 0.0f ||
+        ui_state.max_adaptive_pair_grid < 0 ||
         ui_state.sensor_width_mm < 0.0f ||
         ui_state.sensor_height_mm < 0.0f ||
         ui_state.focal_length_mm <= 0.0f) {
@@ -509,6 +519,10 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.starburst_gain = ui_state.starburst_gain;
     out_state.starburst_scale = ui_state.starburst_scale;
     out_state.spectral_samples = spectral_samples;
+    out_state.adaptive_sampling_strength = ui_state.adaptive_sampling_strength;
+    out_state.footprint_radius_bias = ui_state.footprint_radius_bias;
+    out_state.footprint_clamp = ui_state.footprint_clamp;
+    out_state.max_adaptive_pair_grid = ui_state.max_adaptive_pair_grid;
 
     float preset_width = 0.0f;
     float preset_height = 0.0f;
