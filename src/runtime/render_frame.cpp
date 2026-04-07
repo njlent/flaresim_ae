@@ -99,6 +99,21 @@ std::uint64_t hash_input_image(const RgbImageView& input)
     return hash;
 }
 
+std::uint64_t hash_mask_image(const MonoImageView* mask)
+{
+    if (!mask || !mask->value || mask->width <= 0 || mask->height <= 0) {
+        return 0;
+    }
+
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, mask->width);
+    hash_append_value(hash, mask->height);
+
+    const std::size_t np = static_cast<std::size_t>(mask->width) * static_cast<std::size_t>(mask->height);
+    hash_append_bytes(hash, mask->value, np * sizeof(float));
+    return hash;
+}
+
 std::uint64_t hash_lens(const LensSystem& lens)
 {
     std::uint64_t hash = kFnvOffset;
@@ -143,6 +158,16 @@ std::uint64_t make_source_key(std::uint64_t scene_key, const FrameRenderSettings
     hash_append_value(hash, settings.focal_length_mm);
     hash_append_value(hash, settings.downsample);
     hash_append_value(hash, settings.max_sources);
+    return hash;
+}
+
+std::uint64_t make_source_key(std::uint64_t scene_key,
+                              const FrameRenderSettings& settings,
+                              const MonoImageView* detection_mask)
+{
+    std::uint64_t hash = make_source_key(scene_key, settings);
+    const std::uint64_t mask_hash = hash_mask_image(detection_mask);
+    hash_append_value(hash, mask_hash);
     return hash;
 }
 
@@ -359,10 +384,11 @@ bool render_frame(
     const LensSystem& lens,
     const RgbImageView& input,
     const FrameRenderSettings& settings,
-    FrameRenderOutputs& outputs)
+    FrameRenderOutputs& outputs,
+    const MonoImageView* detection_mask)
 {
     const FrameRenderPlan full_plan {};
-    return render_frame(lens, input, settings, outputs, full_plan, nullptr);
+    return render_frame(lens, input, settings, outputs, full_plan, nullptr, detection_mask);
 }
 
 bool render_frame(
@@ -371,7 +397,8 @@ bool render_frame(
     const FrameRenderSettings& settings,
     FrameRenderOutputs& outputs,
     const FrameRenderPlan& plan,
-    FrameRenderCache* cache)
+    FrameRenderCache* cache,
+    const MonoImageView* detection_mask)
 {
     if (!input.r || !input.g || !input.b || input.width <= 0 || input.height <= 0) {
         return false;
@@ -421,7 +448,13 @@ bool render_frame(
 
     std::uint64_t source_key = 0;
     if (run_source_stage) {
-        source_key = make_source_key(scene_key, settings);
+        const bool use_detection_mask = detection_mask &&
+                                        detection_mask->value &&
+                                        detection_mask->width == input.width &&
+                                        detection_mask->height == input.height;
+        const MonoImageView* active_detection_mask = use_detection_mask ? detection_mask : nullptr;
+
+        source_key = make_source_key(scene_key, settings, active_detection_mask);
         const bool source_cache_hit = cache && cache->has_sources && cache->source_key == source_key;
         if (source_cache_hit) {
             outputs.detected_sources = cache->detected_sources;
@@ -432,7 +465,8 @@ bool render_frame(
                 settings.threshold,
                 settings.downsample,
                 fov_h,
-                fov_v);
+                fov_v,
+                active_detection_mask);
 
             outputs.sources = outputs.detected_sources;
             limit_bright_pixels(outputs.sources, static_cast<std::size_t>(settings.max_sources));

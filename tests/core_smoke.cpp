@@ -63,6 +63,17 @@ void test_source_extract()
     const auto near_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f);
     assert(near_sources.size() == 1);
     assert(std::abs(near_sources[0].r - 0.98f) < 1.0e-6f);
+
+    std::vector<float> mask(16, 0.0f);
+    mask[5] = 1.0f;
+    const MonoImageView mask_view {mask.data(), 4, 4};
+    const auto masked_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, &mask_view);
+    assert(masked_sources.size() == 1);
+    assert(std::abs(masked_sources[0].r - 0.98f) < 1.0e-6f);
+
+    mask[5] = 0.0f;
+    const auto rejected_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, &mask_view);
+    assert(rejected_sources.empty());
 }
 
 void test_source_limit()
@@ -396,6 +407,56 @@ void test_sky_brightness()
     FrameRenderOutputs promoted_outputs;
     assert(render_frame(lens, promoted_input, settings, promoted_outputs));
     assert(!promoted_outputs.detected_sources.empty());
+}
+
+void test_detection_mask()
+{
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    std::vector<float> src_r(64, 0.0f);
+    std::vector<float> src_g(64, 0.0f);
+    std::vector<float> src_b(64, 0.0f);
+    src_r[9] = 20.0f;
+    src_g[9] = 20.0f;
+    src_b[9] = 20.0f;
+    src_r[54] = 16.0f;
+    src_g[54] = 16.0f;
+    src_b[54] = 16.0f;
+
+    const RgbImageView input {src_r.data(), src_g.data(), src_b.data(), 8, 8};
+
+    std::vector<float> mask(64, 0.0f);
+    mask[9] = 1.0f;
+    const MonoImageView detection_mask {mask.data(), 8, 8};
+
+    FrameRenderSettings settings {};
+    settings.fov_h_deg = 60.0f;
+    settings.threshold = 1.0f;
+    settings.downsample = 1;
+    settings.ray_grid = 4;
+    settings.max_sources = 0;
+    settings.flare_gain = 10.0f;
+
+    FrameRenderOutputs unmasked_outputs;
+    assert(render_frame(lens, input, settings, unmasked_outputs));
+    assert(unmasked_outputs.detected_sources.size() == 2);
+
+    FrameRenderOutputs masked_outputs;
+    assert(render_frame(lens, input, settings, masked_outputs, &detection_mask));
+    assert(masked_outputs.detected_sources.size() == 1);
+    assert(masked_outputs.sources.size() == 1);
+
+    float masked_peak = 0.0f;
+    for (float v : masked_outputs.flare_r) {
+        masked_peak = std::max(masked_peak, v);
+    }
+    assert(masked_peak > 0.0f);
+
+    const float masked_energy_at_unselected_highlight =
+        masked_outputs.flare_r[54] + masked_outputs.flare_g[54] + masked_outputs.flare_b[54];
+    assert(masked_energy_at_unselected_highlight > 0.0f);
 }
 
 void test_cuda_backend_api()
@@ -802,6 +863,51 @@ void test_frame_bridge()
     assert(max32 > 0.0f);
     assert(sum_flare32 > 0.0f);
 
+    std::fill(src32.begin(), src32.end(), pack_pixel32(FloatPixel {0.0f, 0.0f, 0.0f, 0.0f}));
+    src32[27] = pack_pixel32(FloatPixel {1.0f, 12.0f, 8.0f, 4.0f});
+    state.threshold = 0.25f;
+    state.downsample = 1;
+    state.flare_gain = 100.0f;
+    state.view = AeOutputView::FlareOnly;
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+
+    bool found_extended_flare_alpha = false;
+    for (size_t i = 0; i < out32.alpha.size(); ++i) {
+        if (i == 27) {
+            continue;
+        }
+        const float energy = std::max({out32.r[i], out32.g[i], out32.b[i], 0.0f});
+        if (energy > 0.0f) {
+            assert(out32.alpha[i] > 0.0f);
+            found_extended_flare_alpha = true;
+            break;
+        }
+    }
+    assert(found_extended_flare_alpha);
+
+    std::fill(src32.begin(), src32.end(), pack_pixel32(FloatPixel {1.0f, 0.0f, 0.0f, 0.0f}));
+    src32[9] = pack_pixel32(FloatPixel {1.0f, 10.0f, 10.0f, 10.0f});
+    src32[54] = pack_pixel32(FloatPixel {1.0f, 10.0f, 10.0f, 10.0f});
+    std::vector<AePixel32Like> mask32(64, pack_pixel32(FloatPixel {1.0f, 0.0f, 0.0f, 0.0f}));
+    mask32[9] = pack_pixel32(FloatPixel {1.0f, 1.0f, 0.0f, 0.0f});
+    state.view = AeOutputView::Sources;
+    state.flare_gain = 0.0f;
+    assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8, mask32.data()));
+    assert(unpack_image(dst32.data(), 8, 8, out32));
+
+    float source_preview_sum = 0.0f;
+    int source_preview_hits = 0;
+    for (float v : out32.r) {
+        source_preview_sum += v;
+        if (v > 0.0f) {
+            ++source_preview_hits;
+        }
+    }
+    assert(source_preview_sum > 0.0f);
+    assert(source_preview_hits > 0);
+    assert(source_preview_hits <= 9);
+
     std::fill(src32.begin(), src32.end(), pack_pixel32(FloatPixel {1.0f, 0.0f, 0.0f, 0.0f}));
     src32[27] = pack_pixel32(FloatPixel {1.0f, 0.98f, 0.98f, 0.98f});
 
@@ -1029,6 +1135,7 @@ int main()
     test_ghost_pair_planning();
     test_render_frame();
     test_sky_brightness();
+    test_detection_mask();
     test_cuda_backend_api();
     test_cuda_cell_rasterization_launch();
     test_ae_adapter_bits();

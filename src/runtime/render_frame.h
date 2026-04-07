@@ -145,7 +145,8 @@ bool render_frame(
     const LensSystem& lens,
     const RgbImageView& input,
     const FrameRenderSettings& settings,
-    FrameRenderOutputs& outputs
+    FrameRenderOutputs& outputs,
+    const MonoImageView* detection_mask = nullptr
 );
 
 bool render_frame(
@@ -154,5 +155,6 @@ bool render_frame(
     const FrameRenderSettings& settings,
     FrameRenderOutputs& outputs,
     const FrameRenderPlan& plan,
-    FrameRenderCache* cache
+    FrameRenderCache* cache,
+    const MonoImageView* detection_mask = nullptr
 );

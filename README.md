@@ -116,7 +116,7 @@ Guidance:
 | Setting | Values / range | Default | Notes |
 | --- | --- | --- | --- |
 | View | `Composite`, `Flare Only`, `Bloom Only`, `Sources`, `Diagnostics` | `Composite` | Debug/output selection inside After Effects. |
-| Mask Layer | AE layer selector | none | Present in the UI, but currently reserved; no documented render-path effect yet. |
+| Mask Layer | AE layer selector | none | Limits source detection to the chosen layer's alpha while flare/haze/starburst still render across the full frame. |
 
 
 ## License

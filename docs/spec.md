@@ -186,6 +186,8 @@ AE effect parameter model:
 
 Mask behavior:
 - sample chosen mask layer alpha
+- use mask alpha only during source extraction
+- keep ghost/haze/starburst rendering full-frame from the surviving sources
 
 ## User-Facing Feature Set
 ### MVP controls

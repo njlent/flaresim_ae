@@ -11,7 +11,8 @@ std::vector<BrightPixel> extract_bright_pixels(
     float threshold,
     int downsample,
     float fov_h,
-    float fov_v
+    float fov_v,
+    const MonoImageView* mask = nullptr
 );
 
 void limit_bright_pixels(
