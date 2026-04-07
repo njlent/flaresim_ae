@@ -67,7 +67,7 @@ Notes:
 | Setting | Values / range | Default | Notes |
 | --- | --- | --- | --- |
 | Adaptive Sampling | `Disabled`, `Enabled` | `Disabled` | Enables projected-cell reconstruction. Faster than brute-force grid increases, but more stylized/experimental. |
-| Flare Gain | slider `0`-`5000`; manual values allowed above slider max | `8000` | Global flare brightness multiplier. |
+| Flare Gain | slider `0`-`5000`; manual values allowed above slider max | `4000` | Global flare brightness multiplier. |
 | Sky Brightness | slider `0`-`4`; manual higher values allowed | `1` | Scales sub-threshold scene values before source extraction. |
 | Threshold | slider `0`-`64` | `8` | Bright-pixel cutoff for source detection. Lower = more sources/noise. |
 | Ray Grid | `1`-`2048` | `128` | Base ray density for ghost tracing. Main quality/perf lever. |
@@ -78,7 +78,7 @@ Notes:
 
 | Setting | Values / range | Default | Notes |
 | --- | --- | --- | --- |
-| Ghost Blur | slider `0`-`0.05` | `0.003` | Blur radius as a fraction of image diagonal. |
+| Ghost Blur | slider `0`-`0.05` | `0.0005` | Blur radius as a fraction of image diagonal. |
 | Ghost Blur Passes | `0`-`8` | `3` | Extra blur passes for the ghost layer. |
 | Haze Gain | slider `0`-`10` | `0` | Enables soft glow from extracted sources. `0` disables haze. |
 | Haze Radius | slider `0`-`0.5` | `0.15` | Haze blur radius as a fraction of image diagonal. |

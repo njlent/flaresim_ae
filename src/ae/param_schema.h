@@ -75,13 +75,13 @@ struct AeUiParameterState
     float focal_length_mm = 50.0f;
     int aperture_blades = 0;
     float aperture_rotation_deg = 0.0f;
-    float flare_gain = 8000.0f;
+    float flare_gain = 4000.0f;
     float sky_brightness = 1.0f;
     float threshold = 8.0f;
     int ray_grid = 128;
     int downsample = 2;
     int max_sources = 256;
-    float ghost_blur = 0.003f;
+    float ghost_blur = 0.0005f;
     int ghost_blur_passes = 3;
     int ghost_cleanup_mode_index = 2;
     float haze_gain = 0.0f;
