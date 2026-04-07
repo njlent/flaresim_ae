@@ -520,6 +520,23 @@ __device__ __forceinline__ float d_select_ghost_footprint_radius(float fallback_
     return fminf(fmaxf(fminf(radius, fallback * clamp_scale), 1.15f), 16.0f);
 }
 
+__device__ __forceinline__ float d_select_ghost_density_boost(float pair_area_boost,
+                                                              float reference_footprint_area_px2,
+                                                              float local_footprint_area_px2)
+{
+    const float pair_boost = fmaxf(pair_area_boost, 1.0f);
+    if (!(reference_footprint_area_px2 > 0.0f) ||
+        !(local_footprint_area_px2 > 0.0f) ||
+        !isfinite(reference_footprint_area_px2) ||
+        !isfinite(local_footprint_area_px2)) {
+        return pair_boost;
+    }
+
+    const float area_ratio = local_footprint_area_px2 / reference_footprint_area_px2;
+    const float local_scale = fminf(fmaxf(sqrtf(area_ratio), 0.5f), 2.5f);
+    return pair_boost * local_scale;
+}
+
 __device__ __forceinline__ DFootprint d_estimate_ghost_sample_footprint(const Surface* surfaces,
                                                                          int num_surfaces,
                                                                          float sensor_z,
@@ -613,6 +630,7 @@ struct GPUPair
     int surf_b;
     float area_boost;
     float splat_radius_px;
+    float reference_footprint_area_px2;
 };
 
 struct GPUSource
@@ -753,6 +771,7 @@ __global__ void ghost_kernel(const Surface* surfaces,
     ray.origin = dv(grid_sample.u * front_radius, grid_sample.v * front_radius, start_z);
     ray.dir = beam_dir;
     float splat_radius_px = pair.splat_radius_px;
+    float density_boost = pair.area_boost;
     const DFootprint footprint = d_estimate_ghost_sample_footprint(surfaces,
                                                                    num_surfaces,
                                                                    sensor_z,
@@ -772,6 +791,9 @@ __global__ void ghost_kernel(const Surface* surfaces,
                                                                    aperture_blades,
                                                                    aperture_rotation_rad);
     if (footprint.valid) {
+        density_boost = d_select_ghost_density_boost(pair.area_boost,
+                                                     pair.reference_footprint_area_px2,
+                                                     footprint.area_px2);
         splat_radius_px = d_select_ghost_footprint_radius(pair.splat_radius_px,
                                                           footprint.area_px2,
                                                           footprint.anisotropy,
@@ -794,7 +816,7 @@ __global__ void ghost_kernel(const Surface* surfaces,
             continue;
         }
 
-        const float contribution = result.weight * ray_weight * gain * pair.area_boost;
+        const float contribution = result.weight * ray_weight * gain * density_boost;
         if (contribution < 1e-12f) {
             continue;
         }
@@ -1118,6 +1140,7 @@ bool launch_ghost_cuda(const LensSystem& lens,
                 pair_plan.pair.surf_b,
                 pair_plan.area_boost,
                 pair_plan.splat_radius_px,
+                pair_plan.reference_footprint_area_px2,
             });
         }
 

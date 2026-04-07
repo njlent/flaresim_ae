@@ -130,6 +130,9 @@ void test_ghost_pair_planning()
            select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 1.0f, 1.15f));
     assert(select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 0.5f, 1.15f) <
            select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 1.0f, 1.15f));
+    assert(std::abs(select_ghost_density_boost(3.0f, 4.0f, 4.0f) - 3.0f) < 1.0e-6f);
+    assert(select_ghost_density_boost(3.0f, 4.0f, 16.0f) > 3.0f);
+    assert(select_ghost_density_boost(3.0f, 4.0f, 1.0f) < 3.0f);
 
     LensSystem lens;
     const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
@@ -156,6 +159,7 @@ void test_ghost_pair_planning()
         assert(plan.ray_grid <= config.ray_grid * 2);
         assert(plan.area_boost >= 1.0f);
         assert(plan.estimated_extent_px >= 1.0f);
+        assert(plan.reference_footprint_area_px2 > 0.0f);
         assert(plan.distortion_score >= 0.0f);
         assert(plan.distortion_score <= 1.0f);
         min_grid = std::min(min_grid, plan.ray_grid);

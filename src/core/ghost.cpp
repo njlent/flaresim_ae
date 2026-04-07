@@ -214,6 +214,26 @@ float select_ghost_footprint_radius(float fallback_radius_px,
     return std::clamp(std::min(radius, fallback * clamp_scale), 1.15f, 16.0f);
 }
 
+float select_ghost_density_boost(float pair_area_boost,
+                                 float reference_footprint_area_px2,
+                                 float local_footprint_area_px2)
+{
+    const float pair_boost = std::max(pair_area_boost, 1.0f);
+    if (!(reference_footprint_area_px2 > 0.0f) ||
+        !(local_footprint_area_px2 > 0.0f) ||
+        !std::isfinite(reference_footprint_area_px2) ||
+        !std::isfinite(local_footprint_area_px2)) {
+        return pair_boost;
+    }
+
+    // Blend pair-wide normalization with local Jacobian area. Larger projected
+    // footprints get a bit more compensation; compressed regions rely more on
+    // their naturally smaller deposition footprint for sharpness.
+    const float area_ratio = local_footprint_area_px2 / reference_footprint_area_px2;
+    const float local_scale = std::clamp(std::sqrt(area_ratio), 0.5f, 2.5f);
+    return pair_boost * local_scale;
+}
+
 static GhostSampleFootprint estimate_ghost_sample_footprint(const LensSystem& lens,
                                                             int bounce_a,
                                                             int bounce_b,
@@ -669,6 +689,7 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
         const float ghost_h_px = ghost_h_mm > 0.0f
             ? (ghost_h_mm / (2.0f * sensor_half_h)) * height
             : 1.0f;
+        const float ghost_area_px2 = std::max(ghost_w_px * ghost_h_px, 1.0f);
         plan.estimated_extent_px = std::max(std::max(ghost_w_px, ghost_h_px), 1.0f);
         plan.distortion_score = estimate_ghost_distortion(lens,
                                                           pair.surf_a,
@@ -687,8 +708,11 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
         if (config.cleanup_mode != GhostCleanupMode::LegacyBlur) {
             const float approx_valid_samples =
                 std::max(0.78539816339f * plan.ray_grid * plan.ray_grid, 1.0f);
+            plan.reference_footprint_area_px2 = ghost_area_px2 / approx_valid_samples;
             const float spacing_px = plan.estimated_extent_px / std::sqrt(approx_valid_samples);
             plan.splat_radius_px = std::clamp(spacing_px * 1.2f, 1.25f, 12.0f);
+        } else {
+            plan.reference_footprint_area_px2 = 1.0f;
         }
 
         plans.push_back(plan);
@@ -940,6 +964,7 @@ void render_ghosts(const LensSystem &lens,
 
                 GhostSampleFootprint footprint;
                 float local_radius_px = pair_plan.splat_radius_px;
+                float local_density_boost = pair_plan.area_boost;
                 if (config.cleanup_mode != GhostCleanupMode::LegacyBlur) {
                     footprint = estimate_ghost_sample_footprint(lens,
                                                                 a,
@@ -956,6 +981,9 @@ void render_ghosts(const LensSystem &lens,
                                                                 height,
                                                                 config);
                     if (footprint.valid) {
+                        local_density_boost = select_ghost_density_boost(pair_plan.area_boost,
+                                                                         pair_plan.reference_footprint_area_px2,
+                                                                         footprint.area_px2);
                         local_radius_px = select_ghost_footprint_radius(pair_plan.splat_radius_px,
                                                                         footprint.area_px2,
                                                                         footprint.anisotropy,
@@ -982,7 +1010,7 @@ void render_ghosts(const LensSystem &lens,
                     // Source intensity for this channel
                     float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g
                                                                 : src.b;
-                    float contribution = src_i * res.weight * ray_weight * config.gain * area_boost;
+                    float contribution = src_i * res.weight * ray_weight * config.gain * local_density_boost;
 
                     if (contribution < 1e-12f)
                         continue;
@@ -1067,12 +1095,13 @@ void render_ghosts(const LensSystem &lens,
     // Print per-pair diagnostics (after parallel section completes)
     for (size_t pi = 0; pi < active_pair_plans.size(); ++pi)
     {
-        printf("  [%zu/%zu] Ghost pair (%d, %d) [grid %d, area ×%.1f, extent %.1f px, dist %.3f]  %.1f s  "
+        printf("  [%zu/%zu] Ghost pair (%d, %d) [grid %d, area ×%.1f, ref %.2f px2, extent %.1f px, dist %.3f]  %.1f s  "
                "(%lld/%lld rays, %.1f%%)\n",
                pi + 1, active_pair_plans.size(),
                active_pair_plans[pi].pair.surf_a, active_pair_plans[pi].pair.surf_b,
                active_pair_plans[pi].ray_grid,
                active_pair_plans[pi].area_boost,
+               active_pair_plans[pi].reference_footprint_area_px2,
                active_pair_plans[pi].estimated_extent_px,
                active_pair_plans[pi].distortion_score,
                pair_time[pi],

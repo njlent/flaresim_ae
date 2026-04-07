@@ -137,6 +137,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - advanced ghost controls default to neutral auto-like behavior and only affect the sharp cleanup internals when adjusted
 - shared runtime ghost cache keys now include the advanced ghost controls so AE invalidation stays correct across expert tweaks
 
+### Slice 21
+- added Jacobian-aware local density compensation on top of the footprint-aware splat path
+- `SharpAdaptive` now scales per-sample ghost contribution against a per-pair reference footprint area instead of relying only on one pair-wide area boost
+- CUDA ghost rendering now mirrors the same local density compensation term so preview/final paths stay aligned
+- smoke coverage now exercises the density compensation helper and verifies planned reference footprint areas
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`

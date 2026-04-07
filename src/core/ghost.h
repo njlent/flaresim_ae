@@ -34,6 +34,7 @@ struct GhostPairPlan
     float area_boost = 1.0f;
     float splat_radius_px = 1.0f;
     float estimated_extent_px = 1.0f;
+    float reference_footprint_area_px2 = 1.0f;
     float distortion_score = 0.0f;
     int ray_grid = 0;
 };
@@ -82,6 +83,9 @@ float select_ghost_footprint_radius(float fallback_radius_px,
                                     float anisotropy,
                                     float footprint_radius_bias,
                                     float footprint_clamp);
+float select_ghost_density_boost(float pair_area_boost,
+                                 float reference_footprint_area_px2,
+                                 float local_footprint_area_px2);
 std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                    float fov_h,
                                                    float fov_v,
