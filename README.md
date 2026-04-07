@@ -22,10 +22,6 @@ A CUDA-accelerated Aftereffects plugin for physically-based lens flare simulatio
 > [!IMPORTANT]
 > This is mostly for personal exploration and NOT production tested or stable.
 
-<p align="center" width="100%">
-<video src="docs/01_flaresim-hri_0001_AOV_komp.mp4" width="80%" controls></video>
-</p>
-
 ## Supported versions: 
 
 AfterEffects 25.5 Windows + CUDA first.
