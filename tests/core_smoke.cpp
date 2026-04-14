@@ -929,6 +929,42 @@ void test_frame_bridge()
     state.bloom.octaves = 1;
     state.bloom.chromatic = false;
 
+    {
+        constexpr int bgra_width = 2;
+        constexpr int bgra_height = 2;
+        constexpr int bgra_row_floats = 12;
+        std::vector<float> bgra_input(bgra_row_floats * bgra_height, 0.0f);
+        std::vector<float> bgra_output(bgra_row_floats * bgra_height, -1.0f);
+        float* hot_pixel = bgra_input.data() + 4;
+        hot_pixel[0] = 4.0f;
+        hot_pixel[1] = 8.0f;
+        hot_pixel[2] = 12.0f;
+        hot_pixel[3] = 1.0f;
+
+        assert(render_frame_to_bgra128_host_buffer(asset_root,
+                                                   state,
+                                                   bgra_input.data(),
+                                                   bgra_output.data(),
+                                                   bgra_width,
+                                                   bgra_height,
+                                                   bgra_row_floats,
+                                                   bgra_row_floats));
+
+        float bgra_energy = 0.0f;
+        for (int y = 0; y < bgra_height; ++y) {
+            const float* row = bgra_output.data() + (y * bgra_row_floats);
+            for (int x = 0; x < bgra_width; ++x) {
+                const float* pixel = row + (x * 4);
+                bgra_energy += pixel[0] + pixel[1] + pixel[2];
+                assert(pixel[3] >= 0.0f);
+            }
+            for (int i = bgra_width * 4; i < bgra_row_floats; ++i) {
+                assert(row[i] == -1.0f);
+            }
+        }
+        assert(bgra_energy > 0.0f);
+    }
+
     assert(render_frame_to_pixels(asset_root, state, src8.data(), dst8.data(), 8, 8));
     assert(render_frame_to_pixels(asset_root, state, src16.data(), dst16.data(), 8, 8));
     assert(render_frame_to_pixels(asset_root, state, src32.data(), dst32.data(), 8, 8));

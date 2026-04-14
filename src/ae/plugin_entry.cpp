@@ -46,10 +46,16 @@ FLARESIM_AE_EXPORT PF_Err EffectMain(
             return PluginHandleSequenceFlatten(in_data, out_data, params, output);
         case PF_Cmd_SEQUENCE_SETDOWN:
             return PluginHandleSequenceSetdown(in_data, out_data, params, output);
+        case PF_Cmd_GPU_DEVICE_SETUP:
+            return PluginHandleGpuDeviceSetup(in_data, out_data, extra);
+        case PF_Cmd_GPU_DEVICE_SETDOWN:
+            return PluginHandleGpuDeviceSetdown(in_data, out_data, extra);
         case PF_Cmd_SMART_PRE_RENDER:
             return PluginHandleSmartPreRender(in_data, out_data, extra);
         case PF_Cmd_SMART_RENDER:
             return PluginHandleSmartRender(in_data, out_data, extra);
+        case PF_Cmd_SMART_RENDER_GPU:
+            return PluginHandleSmartRenderGPU(in_data, out_data, extra);
         case PF_Cmd_RENDER:
             return PluginHandleLegacyRender(in_data, out_data, params, output);
         default:

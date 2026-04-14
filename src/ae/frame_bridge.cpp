@@ -170,6 +170,32 @@ bool unpack_image_impl(const PixelT* pixels, int width, int height, FloatImageBu
     return true;
 }
 
+bool unpack_bgra128_image_impl(const float* pixels,
+                               int width,
+                               int height,
+                               int row_floats,
+                               FloatImageBuffer& out_image)
+{
+    if (!pixels || row_floats < width * 4 || !allocate_image(width, height, out_image)) {
+        return false;
+    }
+
+    for (int y = 0; y < height; ++y) {
+        const float* row = pixels + (static_cast<std::size_t>(y) * static_cast<std::size_t>(row_floats));
+        for (int x = 0; x < width; ++x) {
+            const float* src = row + (static_cast<std::size_t>(x) * 4u);
+            const std::size_t i =
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+            out_image.b[i] = src[0];
+            out_image.g[i] = src[1];
+            out_image.r[i] = src[2];
+            out_image.alpha[i] = src[3];
+        }
+    }
+
+    return true;
+}
+
 template <typename PixelT, typename PackFn>
 bool pack_image_impl(const FloatImageBuffer& image, PixelT* out_pixels, PackFn pack_pixel)
 {
@@ -186,6 +212,30 @@ bool pack_image_impl(const FloatImageBuffer& image, PixelT* out_pixels, PackFn p
             image.b[i],
         });
     }
+    return true;
+}
+
+bool pack_bgra128_image_impl(const FloatImageBuffer& image,
+                             float* out_pixels,
+                             int row_floats)
+{
+    if (!out_pixels || row_floats < image.width * 4 || !validate_image(image)) {
+        return false;
+    }
+
+    for (int y = 0; y < image.height; ++y) {
+        float* row = out_pixels + (static_cast<std::size_t>(y) * static_cast<std::size_t>(row_floats));
+        for (int x = 0; x < image.width; ++x) {
+            const std::size_t i =
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) + static_cast<std::size_t>(x);
+            float* dst = row + (static_cast<std::size_t>(x) * 4u);
+            dst[0] = image.b[i];
+            dst[1] = image.g[i];
+            dst[2] = image.r[i];
+            dst[3] = image.alpha[i];
+        }
+    }
+
     return true;
 }
 
@@ -358,4 +408,49 @@ bool render_frame_to_pixels(
 {
     return render_frame_to_pixels_impl(
         asset_root, state, input_pixels, output_pixels, width, height, mask_pixels);
+}
+
+bool render_frame_to_bgra128_host_buffer(
+    const std::string& asset_root,
+    const AeParameterState& state,
+    const float* input_pixels,
+    float* output_pixels,
+    int width,
+    int height,
+    int input_row_floats,
+    int output_row_floats,
+    const float* mask_pixels,
+    int mask_row_floats)
+{
+    ThreadRenderContext& context = thread_render_context();
+
+    if (!unpack_bgra128_image_impl(input_pixels,
+                                   width,
+                                   height,
+                                   input_row_floats,
+                                   context.input_image)) {
+        return false;
+    }
+
+    const FloatImageBuffer* detection_mask = nullptr;
+    if (mask_pixels) {
+        if (!unpack_bgra128_image_impl(mask_pixels,
+                                       width,
+                                       height,
+                                       mask_row_floats > 0 ? mask_row_floats : input_row_floats,
+                                       context.mask_image)) {
+            return false;
+        }
+        detection_mask = &context.mask_image;
+    }
+
+    if (!render_frame_to_float_image(asset_root,
+                                     state,
+                                     context.input_image,
+                                     context.output_image,
+                                     detection_mask)) {
+        return false;
+    }
+
+    return pack_bgra128_image_impl(context.output_image, output_pixels, output_row_floats);
 }

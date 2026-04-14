@@ -7,6 +7,7 @@
 - `PluginDataEntryFunction2` now registers effect metadata for host discovery
 - Smart Render and legacy render now drive the shared frame bridge
 - Smart Render now carries resolved render state from pre-render into render, avoiding duplicate AE param checkouts per frame
+- CUDA-capable AE builds now advertise `PF_OutFlag2_SUPPORTS_GPU_RENDER_F32`, opt into `PF_Cmd_SMART_RENDER_GPU`, and register `PF_PixelFormat_GPU_BGRA128`
 - CUDA ghost rendering now keeps uploaded setup buckets and pinned output staging resident per render thread, and replays stable launch patterns through CUDA Graphs
 - AE param set now includes top-level Camera, Aperture, Flare Settings, and Post-processing sections
 - output `View` popup is wired through the shared runtime/compositor
@@ -24,6 +25,7 @@
 - `PF_OutFlag2_SUPPORTS_SMART_RENDER`
 - `PF_OutFlag2_FLOAT_COLOR_AWARE`
 - `PF_OutFlag2_SUPPORTS_THREADED_RENDERING`
+- `PF_OutFlag2_SUPPORTS_GPU_RENDER_F32` for CUDA/F32 hosts
 - 8/16/32-bpc support through one float runtime
 - PiPL effect metadata + stable match name
 
@@ -32,6 +34,7 @@ Bit-depth policy in code:
 - 16-bpc pack/unpack helpers clamp only at final 16-bit conversion
 - 32-bpc helpers preserve values above `1.0`
 - `src/ae/frame_bridge.*` now runs one float render/composite path for all three host depths
+- `src/ae/frame_bridge.*` also packs/unpacks AE GPU `BGRA128` host staging buffers for the Smart Render GPU bridge
 - bridge preserves input alpha and only changes RGB payload
 - bundled lens resolution no longer has to start from the repo root; `src/ae/asset_root.*` can discover the asset root by walking upward from an anchor path
 - param ids, popup ordering, and popup-index -> runtime-state mapping now live in `src/ae/param_schema.*`
@@ -39,6 +42,7 @@ Bit-depth policy in code:
 
 ## Build result
 - local SDK build currently emits `build-ae/src/ae/Debug/FlareSimAE.aex`
+- release SDK build emits `build-ae/src/ae/Release/FlareSimAE.aex`
 - binary now includes `.rsrc` data from generated PiPL wiring
 - export table still exposes `EffectMain`, as expected for an AE effect
 
@@ -54,5 +58,5 @@ Bit-depth policy in code:
 
 ## Remaining SDK tasks
 - tighten Smart PreRender state handling beyond current minimal checkout/result-rect flow
-- GPU Smart Render path wiring on Windows
+- replace current GPU Smart Render host-staging bridge with a true zero-copy GPU compositor path
 - file/import UI for external lenses

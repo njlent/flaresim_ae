@@ -3,17 +3,11 @@
 #include "AEFX_SuiteHelper.h"
 #include "AE_EffectCBSuites.h"
 
-#include "asset_root.h"
 #include "builtin_lenses.h"
 #include "frame_bridge.h"
+#include "ghost_cuda.h"
 #include "param_schema.h"
-
-#ifdef AE_OS_WIN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <Windows.h>
-#endif
+#include "render_shared.h"
 
 #include <algorithm>
 #include <cstring>
@@ -21,24 +15,6 @@
 #include <vector>
 
 namespace {
-
-constexpr A_long kSmartInputCheckoutId = 1;
-constexpr A_long kSmartMaskCheckoutId = 2;
-
-struct SmartRenderLayerRects
-{
-    PF_LRect input_rect {};
-    PF_LRect mask_rect {};
-    PF_Boolean has_mask = FALSE;
-    PF_Boolean has_state = FALSE;
-    AeParameterState state {};
-};
-
-void delete_smart_render_layer_rects(void* data)
-{
-    auto* rects = reinterpret_cast<SmartRenderLayerRects*>(data);
-    delete rects;
-}
 
 bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_state)
 {
@@ -107,35 +83,6 @@ void union_rects(const RectT& src, RectT& dst)
     dst.top = std::min(dst.top, src.top);
     dst.right = std::max(dst.right, src.right);
     dst.bottom = std::max(dst.bottom, src.bottom);
-}
-
-bool resolve_asset_root(std::string& out_asset_root)
-{
-    out_asset_root.clear();
-
-#ifdef FLARESIM_REPO_ROOT
-    if (is_flaresim_asset_root(FLARESIM_REPO_ROOT)) {
-        out_asset_root = FLARESIM_REPO_ROOT;
-        return true;
-    }
-#endif
-
-#ifdef AE_OS_WIN
-    HMODULE module = nullptr;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCSTR>(&PluginHandleSmartRender),
-                           &module)) {
-        char module_path[MAX_PATH] {};
-        const DWORD module_path_len = GetModuleFileNameA(module, module_path, MAX_PATH);
-        if (module_path_len > 0 &&
-            find_flaresim_asset_root(std::string(module_path, module_path_len), out_asset_root)) {
-            return true;
-        }
-    }
-#endif
-
-    return false;
 }
 
 template <typename HostPixelT, typename BridgePixelT>
@@ -293,7 +240,7 @@ PF_Err render_checked_out_worlds(PF_InData* in_data,
     }
 
     std::string asset_root;
-    if (!resolve_asset_root(asset_root)) {
+    if (!resolve_plugin_asset_root(reinterpret_cast<const void*>(&PluginHandleSmartRender), asset_root)) {
         return PF_COPY(input_world, output_world, nullptr, nullptr);
     }
 
@@ -1012,7 +959,7 @@ PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
     union_rects(input_result.result_rect, render_extra->output->result_rect);
     union_rects(input_result.max_result_rect, render_extra->output->max_result_rect);
 
-    auto* rects = new SmartRenderLayerRects {};
+    auto* rects = new SmartRenderContextData {};
     rects->input_rect = input_result.result_rect;
     if (mask_err == PF_Err_NONE) {
         rects->mask_rect = mask_result.result_rect;
@@ -1020,8 +967,13 @@ PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
     }
     rects->state = state;
     rects->has_state = TRUE;
+    if (cuda_ghost_renderer_compiled() &&
+        render_extra->input->what_gpu == PF_GPU_Framework_CUDA &&
+        render_extra->input->bitdepth == 32) {
+        render_extra->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+    }
     render_extra->output->pre_render_data = rects;
-    render_extra->output->delete_pre_render_data_func = delete_smart_render_layer_rects;
+    render_extra->output->delete_pre_render_data_func = delete_smart_render_context_data;
     return PF_Err_NONE;
 }
 
@@ -1035,7 +987,7 @@ PF_Err PluginHandleSmartRender(PF_InData* in_data, PF_OutData* out_data, void* e
     PF_Err err = PF_Err_NONE;
     PF_Err err2 = PF_Err_NONE;
     const auto* rects =
-        reinterpret_cast<const SmartRenderLayerRects*>(render_extra->input->pre_render_data);
+        reinterpret_cast<const SmartRenderContextData*>(render_extra->input->pre_render_data);
     const PF_LRect* mask_rect = (rects && rects->has_mask) ? &rects->mask_rect : nullptr;
 
     AeParameterState state {};

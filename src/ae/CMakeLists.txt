@@ -57,8 +57,10 @@ if(FLARESIM_AE_ENABLE_AE_PLUGIN)
     add_library(flaresim_ae_plugin MODULE
         "${FLARESIM_AE_PIPL_RC}"
         plugin_entry.cpp
+        plugin_gpu_render.cpp
         plugin_global_setup.cpp
         plugin_params.cpp
+        render_shared.cpp
         plugin_sequence.cpp
         plugin_smart_render.cpp
     )
