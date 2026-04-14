@@ -30,6 +30,8 @@ struct SmartRenderLayerRects
     PF_LRect input_rect {};
     PF_LRect mask_rect {};
     PF_Boolean has_mask = FALSE;
+    PF_Boolean has_state = FALSE;
+    AeParameterState state {};
 };
 
 void delete_smart_render_layer_rects(void* data)
@@ -136,36 +138,52 @@ bool resolve_asset_root(std::string& out_asset_root)
     return false;
 }
 
-template <typename PixelT>
-void copy_world_to_linear(const PF_EffectWorld& world, std::vector<PixelT>& out_pixels)
+template <typename HostPixelT, typename BridgePixelT>
+void copy_world_to_bridge_pixels(const PF_EffectWorld& world, std::vector<BridgePixelT>& out_pixels)
 {
+    static_assert(sizeof(HostPixelT) == sizeof(BridgePixelT));
     const int width = world.width;
     const int height = world.height;
-
     out_pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
 
     const char* row = reinterpret_cast<const char*>(world.data);
     for (int y = 0; y < height; ++y) {
-        const auto* src = reinterpret_cast<const PixelT*>(row);
+        const auto* src = reinterpret_cast<const HostPixelT*>(row);
         auto* dst = out_pixels.data() + (static_cast<size_t>(y) * static_cast<size_t>(width));
-        std::copy_n(src, width, dst);
+        std::memcpy(dst, src, static_cast<size_t>(width) * sizeof(BridgePixelT));
         row += world.rowbytes;
     }
 }
 
-template <typename PixelT>
-void copy_linear_to_world(const std::vector<PixelT>& pixels, PF_EffectWorld& world)
+template <typename HostPixelT, typename BridgePixelT>
+void copy_bridge_pixels_to_world(const std::vector<BridgePixelT>& pixels, PF_EffectWorld& world)
 {
+    static_assert(sizeof(HostPixelT) == sizeof(BridgePixelT));
     const int width = world.width;
     const int height = world.height;
 
     char* row = reinterpret_cast<char*>(world.data);
     for (int y = 0; y < height; ++y) {
         const auto* src = pixels.data() + (static_cast<size_t>(y) * static_cast<size_t>(width));
-        auto* dst = reinterpret_cast<PixelT*>(row);
-        std::copy_n(src, width, dst);
+        auto* dst = reinterpret_cast<HostPixelT*>(row);
+        std::memcpy(dst, src, static_cast<size_t>(width) * sizeof(BridgePixelT));
         row += world.rowbytes;
     }
+}
+
+template <typename PixelT>
+struct ThreadPixelWorldBuffers
+{
+    std::vector<PixelT> input;
+    std::vector<PixelT> output;
+    std::vector<PixelT> mask;
+};
+
+template <typename PixelT>
+ThreadPixelWorldBuffers<PixelT>& thread_pixel_world_buffers()
+{
+    static thread_local ThreadPixelWorldBuffers<PixelT> buffers;
+    return buffers;
 }
 
 template <typename HostPixelT, typename BridgePixelT>
@@ -235,42 +253,30 @@ bool render_world_pixels(const std::string& asset_root,
         return false;
     }
 
-    std::vector<HostPixelT> host_input;
-    copy_world_to_linear(input_world, host_input);
-
-    std::vector<BridgePixelT> bridge_input(host_input.size());
-    std::memcpy(bridge_input.data(),
-                host_input.data(),
-                bridge_input.size() * sizeof(BridgePixelT));
+    auto& buffers = thread_pixel_world_buffers<BridgePixelT>();
+    copy_world_to_bridge_pixels<HostPixelT, BridgePixelT>(input_world, buffers.input);
 
     const BridgePixelT* bridge_mask_pixels = nullptr;
-    std::vector<BridgePixelT> bridge_mask;
     if (mask_world &&
         mask_world->data &&
         expand_mask_world_to_bridge_pixels<HostPixelT, BridgePixelT>(
-            *mask_world, input_world.width, input_world.height, mask_rect, bridge_mask)) {
-        bridge_mask_pixels = bridge_mask.data();
+            *mask_world, input_world.width, input_world.height, mask_rect, buffers.mask)) {
+        bridge_mask_pixels = buffers.mask.data();
     }
 
-    std::vector<BridgePixelT> bridge_output(
-        static_cast<size_t>(input_world.width) * static_cast<size_t>(input_world.height));
+    buffers.output.resize(static_cast<size_t>(input_world.width) * static_cast<size_t>(input_world.height));
 
     if (!render_frame_to_pixels(asset_root,
                                 state,
-                                bridge_input.data(),
-                                bridge_output.data(),
+                                buffers.input.data(),
+                                buffers.output.data(),
                                 input_world.width,
                                 input_world.height,
                                 bridge_mask_pixels)) {
         return false;
     }
 
-    std::vector<HostPixelT> host_output(bridge_output.size());
-    std::memcpy(host_output.data(),
-                bridge_output.data(),
-                host_output.size() * sizeof(HostPixelT));
-
-    copy_linear_to_world(host_output, output_world);
+    copy_bridge_pixels_to_world<HostPixelT, BridgePixelT>(buffers.output, output_world);
     return true;
 }
 
@@ -1012,6 +1018,8 @@ PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
         rects->mask_rect = mask_result.result_rect;
         rects->has_mask = TRUE;
     }
+    rects->state = state;
+    rects->has_state = TRUE;
     render_extra->output->pre_render_data = rects;
     render_extra->output->delete_pre_render_data_func = delete_smart_render_layer_rects;
     return PF_Err_NONE;
@@ -1031,7 +1039,11 @@ PF_Err PluginHandleSmartRender(PF_InData* in_data, PF_OutData* out_data, void* e
     const PF_LRect* mask_rect = (rects && rects->has_mask) ? &rects->mask_rect : nullptr;
 
     AeParameterState state {};
-    ERR(build_render_state_from_checked_out_params(in_data, state));
+    if (rects && rects->has_state) {
+        state = rects->state;
+    } else {
+        ERR(build_render_state_from_checked_out_params(in_data, state));
+    }
 
     PF_EffectWorld* input_world = nullptr;
     PF_EffectWorld* mask_world = nullptr;

@@ -6,6 +6,7 @@
 - PiPL/resource generation is wired through the AE SDK PiPL tool
 - `PluginDataEntryFunction2` now registers effect metadata for host discovery
 - Smart Render and legacy render now drive the shared frame bridge
+- Smart Render now carries resolved render state from pre-render into render, avoiding duplicate AE param checkouts per frame
 - AE param set now includes top-level Camera, Aperture, Flare Settings, and Post-processing sections
 - output `View` popup is wired through the shared runtime/compositor
 - shared runtime/core are buildable and tested locally without the Adobe SDK
@@ -21,6 +22,7 @@
 - `PF_OutFlag_DEEP_COLOR_AWARE`
 - `PF_OutFlag2_SUPPORTS_SMART_RENDER`
 - `PF_OutFlag2_FLOAT_COLOR_AWARE`
+- `PF_OutFlag2_SUPPORTS_THREADED_RENDERING`
 - 8/16/32-bpc support through one float runtime
 - PiPL effect metadata + stable match name
 
@@ -51,5 +53,5 @@ Bit-depth policy in code:
 
 ## Remaining SDK tasks
 - tighten Smart PreRender state handling beyond current minimal checkout/result-rect flow
+- GPU Smart Render path wiring on Windows
 - file/import UI for external lenses
-- GPU render path wiring on Windows

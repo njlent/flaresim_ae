@@ -16,9 +16,20 @@ struct ThreadRenderContext
     std::string asset_root;
     std::string lens_path;
     fs::file_time_type lens_mtime {};
+    FloatImageBuffer input_image;
+    FloatImageBuffer mask_image;
+    FloatImageBuffer output_image;
+    FrameRenderOutputs outputs;
+    std::vector<float> detection_mask_values;
     bool lens_loaded = false;
     bool lens_mtime_valid = false;
 };
+
+ThreadRenderContext& thread_render_context()
+{
+    static thread_local ThreadRenderContext context;
+    return context;
+}
 
 bool resolve_cached_lens(const std::string& asset_root,
                          const AeLensSelection& selection,
@@ -187,26 +198,29 @@ bool render_frame_to_pixels_impl(const std::string& asset_root,
                                  int height,
                                  const PixelT* mask_pixels)
 {
-    FloatImageBuffer input;
-    if (!unpack_image_impl(input_pixels, width, height, input)) {
+    ThreadRenderContext& context = thread_render_context();
+
+    if (!unpack_image_impl(input_pixels, width, height, context.input_image)) {
         return false;
     }
 
-    FloatImageBuffer mask;
     const FloatImageBuffer* detection_mask = nullptr;
     if (mask_pixels) {
-        if (!unpack_image_impl(mask_pixels, width, height, mask)) {
+        if (!unpack_image_impl(mask_pixels, width, height, context.mask_image)) {
             return false;
         }
-        detection_mask = &mask;
+        detection_mask = &context.mask_image;
     }
 
-    FloatImageBuffer output;
-    if (!render_frame_to_float_image(asset_root, state, input, output, detection_mask)) {
+    if (!render_frame_to_float_image(asset_root,
+                                     state,
+                                     context.input_image,
+                                     context.output_image,
+                                     detection_mask)) {
         return false;
     }
 
-    return pack_image(output, output_pixels);
+    return pack_image(context.output_image, output_pixels);
 }
 
 } // namespace
@@ -252,7 +266,7 @@ bool render_frame_to_float_image(
         return false;
     }
 
-    thread_local ThreadRenderContext context;
+    ThreadRenderContext& context = thread_render_context();
 
     const LensSystem* lens = nullptr;
     if (!resolve_cached_lens(asset_root, state.lens, context, lens) || !lens) {
@@ -271,24 +285,26 @@ bool render_frame_to_float_image(
     const bool use_detection_mask = detection_mask && validate_image(*detection_mask) &&
                                     detection_mask->width == input.width &&
                                     detection_mask->height == input.height;
-    std::vector<float> detection_mask_values;
+    context.detection_mask_values.clear();
     if (use_detection_mask) {
-        build_detection_mask_values(*detection_mask, detection_mask_values);
+        build_detection_mask_values(*detection_mask, context.detection_mask_values);
     }
     const MonoImageView detection_mask_view = {
-        detection_mask_values.data(),
+        context.detection_mask_values.data(),
         input.width,
         input.height,
     };
 
-    FrameRenderOutputs outputs;
+    FrameRenderOutputs& outputs = context.outputs;
     if (!render_frame(*lens,
                       input_view,
                       settings,
                       outputs,
                       plan,
                       &context.cache,
-                      use_detection_mask && !detection_mask_values.empty() ? &detection_mask_view : nullptr)) {
+                      use_detection_mask && !context.detection_mask_values.empty()
+                          ? &detection_mask_view
+                          : nullptr)) {
         return false;
     }
 
