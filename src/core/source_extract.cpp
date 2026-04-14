@@ -119,3 +119,80 @@ void limit_bright_pixels(
 
     pixels.resize(max_sources);
 }
+
+void cluster_bright_pixels(
+    std::vector<BrightPixel>& pixels,
+    int radius_px,
+    int image_width,
+    float tan_half_fov_h)
+{
+    if (radius_px <= 0 || image_width <= 0 || tan_half_fov_h <= 0.0f || pixels.size() < 2) {
+        return;
+    }
+
+    const float angle_per_px = 2.0f * tan_half_fov_h / static_cast<float>(image_width);
+    const float threshold = static_cast<float>(radius_px) * angle_per_px;
+    const float threshold_sq = threshold * threshold;
+
+    auto luma = [](const BrightPixel& pixel) {
+        return 0.2126f * pixel.r + 0.7152f * pixel.g + 0.0722f * pixel.b;
+    };
+
+    std::sort(pixels.begin(),
+              pixels.end(),
+              [&](const BrightPixel& a, const BrightPixel& b) {
+                  return luma(a) > luma(b);
+              });
+
+    const int count = static_cast<int>(pixels.size());
+    std::vector<bool> consumed(static_cast<std::size_t>(count), false);
+    std::vector<BrightPixel> clustered;
+    clustered.reserve(pixels.size());
+
+    for (int i = 0; i < count; ++i) {
+        if (consumed[static_cast<std::size_t>(i)]) {
+            continue;
+        }
+
+        const BrightPixel& seed = pixels[static_cast<std::size_t>(i)];
+        const float seed_luma = luma(seed);
+        float weighted_angle_x = seed.angle_x * seed_luma;
+        float weighted_angle_y = seed.angle_y * seed_luma;
+        float sum_luma = seed_luma;
+        float sum_r = seed.r;
+        float sum_g = seed.g;
+        float sum_b = seed.b;
+
+        for (int j = i + 1; j < count; ++j) {
+            if (consumed[static_cast<std::size_t>(j)]) {
+                continue;
+            }
+
+            const BrightPixel& candidate = pixels[static_cast<std::size_t>(j)];
+            const float delta_x = seed.angle_x - candidate.angle_x;
+            const float delta_y = seed.angle_y - candidate.angle_y;
+            if (delta_x * delta_x + delta_y * delta_y > threshold_sq) {
+                continue;
+            }
+
+            const float candidate_luma = luma(candidate);
+            weighted_angle_x += candidate.angle_x * candidate_luma;
+            weighted_angle_y += candidate.angle_y * candidate_luma;
+            sum_luma += candidate_luma;
+            sum_r += candidate.r;
+            sum_g += candidate.g;
+            sum_b += candidate.b;
+            consumed[static_cast<std::size_t>(j)] = true;
+        }
+
+        BrightPixel merged {};
+        merged.angle_x = sum_luma > 0.0f ? weighted_angle_x / sum_luma : seed.angle_x;
+        merged.angle_y = sum_luma > 0.0f ? weighted_angle_y / sum_luma : seed.angle_y;
+        merged.r = sum_r;
+        merged.g = sum_g;
+        merged.b = sum_b;
+        clustered.push_back(merged);
+    }
+
+    pixels = std::move(clustered);
+}

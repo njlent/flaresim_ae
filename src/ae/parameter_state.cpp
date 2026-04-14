@@ -15,6 +15,7 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.downsample = state.downsample;
     settings.ray_grid = state.ray_grid;
     settings.max_sources = state.max_sources;
+    settings.cluster_radius_px = state.cluster_radius_px;
     settings.aperture_blades = state.aperture_blades;
     settings.aperture_rotation_deg = state.aperture_rotation_deg;
     settings.min_ghost = state.min_ghost;
@@ -36,6 +37,8 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.footprint_clamp = state.footprint_clamp;
     settings.max_adaptive_pair_grid = state.max_adaptive_pair_grid;
     settings.projected_cells_mode = state.projected_cells_mode;
+    settings.pupil_jitter_mode = state.pupil_jitter_mode;
+    settings.pupil_jitter_seed = state.pupil_jitter_seed;
     settings.cell_coverage_bias = state.cell_coverage_bias;
     settings.cell_edge_inset = state.cell_edge_inset;
     settings.bloom = state.bloom;

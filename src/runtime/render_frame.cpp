@@ -158,6 +158,7 @@ std::uint64_t make_source_key(std::uint64_t scene_key, const FrameRenderSettings
     hash_append_value(hash, settings.focal_length_mm);
     hash_append_value(hash, settings.downsample);
     hash_append_value(hash, settings.max_sources);
+    hash_append_value(hash, settings.cluster_radius_px);
     return hash;
 }
 
@@ -192,6 +193,8 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     hash_append_value(hash, settings.footprint_clamp);
     hash_append_value(hash, settings.max_adaptive_pair_grid);
     hash_append_value(hash, settings.projected_cells_mode);
+    hash_append_value(hash, settings.pupil_jitter_mode);
+    hash_append_value(hash, settings.pupil_jitter_seed);
     hash_append_value(hash, settings.cell_coverage_bias);
     hash_append_value(hash, settings.cell_edge_inset);
     return hash;
@@ -220,6 +223,8 @@ std::uint64_t make_ghost_setup_key(std::uint64_t lens_key,
     hash_append_value(hash, settings.adaptive_sampling_strength);
     hash_append_value(hash, settings.max_adaptive_pair_grid);
     hash_append_value(hash, settings.projected_cells_mode);
+    hash_append_value(hash, settings.pupil_jitter_mode);
+    hash_append_value(hash, settings.pupil_jitter_seed);
     hash_append_value(hash, settings.cell_edge_inset);
     return hash;
 }
@@ -500,6 +505,10 @@ bool render_frame(
                 active_detection_mask);
 
             outputs.sources = outputs.detected_sources;
+            cluster_bright_pixels(outputs.sources,
+                                  settings.cluster_radius_px,
+                                  input.width,
+                                  std::tan(fov_h * 0.5f));
             limit_bright_pixels(outputs.sources, static_cast<std::size_t>(settings.max_sources));
             outputs.stats.recomputed_sources = true;
 
@@ -544,6 +553,8 @@ bool render_frame(
                 ghost.footprint_clamp = settings.footprint_clamp;
                 ghost.max_adaptive_pair_grid = settings.max_adaptive_pair_grid;
                 ghost.projected_cells_mode = settings.projected_cells_mode;
+                ghost.pupil_jitter = settings.pupil_jitter_mode;
+                ghost.pupil_jitter_seed = settings.pupil_jitter_seed;
                 ghost.cell_coverage_bias = settings.cell_coverage_bias;
                 ghost.cell_edge_inset = settings.cell_edge_inset;
 
@@ -640,8 +651,10 @@ bool render_frame(
             outputs.haze_g.assign(np, 0.0f);
             outputs.haze_b.assign(np, 0.0f);
 
-            if (!outputs.sources.empty() && settings.haze_gain > 0.0f) {
-                rasterize_sources(outputs.sources,
+            if (!outputs.detected_sources.empty() && settings.haze_gain > 0.0f) {
+                std::vector<BrightPixel> haze_sources = outputs.detected_sources;
+                limit_bright_pixels(haze_sources, static_cast<std::size_t>(settings.max_sources));
+                rasterize_sources(haze_sources,
                                   settings,
                                   input.width,
                                   input.height,

@@ -59,6 +59,9 @@ inline constexpr int PARAM_ID_MAX_ADAPTIVE_PAIR_GRID = 32;
 inline constexpr int PARAM_ID_PROJECTED_CELLS_MODE = 33;
 inline constexpr int PARAM_ID_CELL_COVERAGE_BIAS = 34;
 inline constexpr int PARAM_ID_CELL_EDGE_INSET = 35;
+inline constexpr int PARAM_ID_CLUSTER_RADIUS = 36;
+inline constexpr int PARAM_ID_PUPIL_JITTER_MODE = 37;
+inline constexpr int PARAM_ID_PUPIL_JITTER_SEED = 38;
 
 struct AeUiParameterState
 {
@@ -81,6 +84,7 @@ struct AeUiParameterState
     int ray_grid = 128;
     int downsample = 2;
     int max_sources = 256;
+    int cluster_radius_px = 0;
     float ghost_blur = 0.003f;
     int ghost_blur_passes = 3;
     int ghost_cleanup_mode_index = 2;
@@ -94,6 +98,8 @@ struct AeUiParameterState
     float footprint_radius_bias = 1.0f;
     float footprint_clamp = 1.15f;
     int max_adaptive_pair_grid = 0;
+    int pupil_jitter_mode_index = 1;
+    int pupil_jitter_seed = 0;
     int projected_cells_mode_index = 1;
     float cell_coverage_bias = 1.0f;
     float cell_edge_inset = 0.1f;
@@ -129,6 +135,7 @@ int threshold_param();
 int ray_grid_param();
 int downsample_param();
 int max_sources_param();
+int cluster_radius_param();
 int post_section_start_param();
 int ghost_blur_param();
 int ghost_blur_passes_param();
@@ -144,6 +151,8 @@ int adaptive_sampling_strength_param();
 int footprint_radius_bias_param();
 int footprint_clamp_param();
 int max_adaptive_pair_grid_param();
+int pupil_jitter_mode_param();
+int pupil_jitter_seed_param();
 int projected_cells_mode_param();
 int cell_coverage_bias_param();
 int cell_edge_inset_param();
@@ -169,6 +178,7 @@ std::string build_lens_popup_string_for_manufacturer(int manufacturer_index);
 std::string build_sensor_preset_popup_string();
 std::string build_spectral_samples_popup_string();
 std::string build_ghost_cleanup_mode_popup_string();
+std::string build_pupil_jitter_mode_popup_string();
 std::string build_projected_cells_mode_popup_string();
 std::string build_output_view_popup_string();
 
@@ -188,6 +198,10 @@ bool spectral_samples_from_popup(int popup_index, int& out_spectral_samples);
 int ghost_cleanup_mode_popup_count();
 int ghost_cleanup_mode_popup_index(GhostCleanupMode mode);
 bool ghost_cleanup_mode_from_popup(int popup_index, GhostCleanupMode& out_mode);
+
+int pupil_jitter_mode_popup_count();
+int pupil_jitter_mode_popup_index(PupilJitterMode mode);
+bool pupil_jitter_mode_from_popup(int popup_index, PupilJitterMode& out_mode);
 
 int projected_cells_mode_popup_count();
 int projected_cells_mode_popup_index(ProjectedCellsMode mode);

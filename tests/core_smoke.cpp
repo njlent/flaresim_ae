@@ -74,6 +74,20 @@ void test_source_extract()
     mask[5] = 0.0f;
     const auto rejected_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, &mask_view);
     assert(rejected_sources.empty());
+
+    std::vector<BrightPixel> clustered_sources = {
+        {.angle_x = 0.0f, .angle_y = 0.0f, .r = 4.0f, .g = 4.0f, .b = 4.0f},
+        {.angle_x = 0.005f, .angle_y = 0.002f, .r = 2.0f, .g = 2.0f, .b = 2.0f},
+        {.angle_x = 0.25f, .angle_y = 0.1f, .r = 1.0f, .g = 1.0f, .b = 1.0f},
+    };
+    cluster_bright_pixels(clustered_sources,
+                          10,
+                          1920,
+                          std::tan(60.0f * 0.5f * 3.14159265358979323846f / 180.0f));
+    assert(clustered_sources.size() == 2);
+    assert(clustered_sources[0].r > 5.9f);
+    assert(clustered_sources[0].angle_x > 0.0f);
+    assert(clustered_sources[0].angle_x < 0.005f);
 }
 
 void test_source_limit()
@@ -214,6 +228,51 @@ void test_ghost_pair_planning()
     for (const GhostPairPlan& plan : force_plans) {
         assert(plan.use_cell_rasterization);
     }
+
+    GhostConfig jitter_off = config;
+    jitter_off.pupil_jitter = PupilJitterMode::Off;
+    GhostRenderSetup off_setup;
+    assert(build_ghost_render_setup(lens,
+                                    60.0f * 3.14159265358979323846f / 180.0f,
+                                    40.0f * 3.14159265358979323846f / 180.0f,
+                                    1920,
+                                    1080,
+                                    jitter_off,
+                                    off_setup));
+
+    GhostConfig jitter_stratified = jitter_off;
+    jitter_stratified.pupil_jitter = PupilJitterMode::Stratified;
+    jitter_stratified.pupil_jitter_seed = 7;
+    GhostRenderSetup stratified_setup;
+    assert(build_ghost_render_setup(lens,
+                                    60.0f * 3.14159265358979323846f / 180.0f,
+                                    40.0f * 3.14159265358979323846f / 180.0f,
+                                    1920,
+                                    1080,
+                                    jitter_stratified,
+                                    stratified_setup));
+
+    GhostConfig jitter_halton = jitter_off;
+    jitter_halton.pupil_jitter = PupilJitterMode::Halton;
+    GhostRenderSetup halton_setup;
+    assert(build_ghost_render_setup(lens,
+                                    60.0f * 3.14159265358979323846f / 180.0f,
+                                    40.0f * 3.14159265358979323846f / 180.0f,
+                                    1920,
+                                    1080,
+                                    jitter_halton,
+                                    halton_setup));
+
+    const auto& off_samples = off_setup.grid_buckets.front().samples;
+    const auto& stratified_samples = stratified_setup.grid_buckets.front().samples;
+    const auto& halton_samples = halton_setup.grid_buckets.front().samples;
+    assert(!off_samples.empty());
+    assert(!stratified_samples.empty());
+    assert(!halton_samples.empty());
+    assert(std::abs(off_samples.front().u - stratified_samples.front().u) > 1.0e-4f ||
+           std::abs(off_samples.front().v - stratified_samples.front().v) > 1.0e-4f);
+    assert(std::abs(off_samples.front().u - halton_samples.front().u) > 1.0e-4f ||
+           std::abs(off_samples.front().v - halton_samples.front().v) > 1.0e-4f);
 }
 
 void test_render_frame()
@@ -548,6 +607,7 @@ void test_ae_adapter_bits()
     state.downsample = 2;
     state.ray_grid = 8;
     state.max_sources = 123;
+    state.cluster_radius_px = 12;
     state.aperture_blades = 7;
     state.aperture_rotation_deg = 15.0f;
     state.flare_gain = 250.0f;
@@ -566,6 +626,8 @@ void test_ae_adapter_bits()
     state.footprint_clamp = 1.4f;
     state.max_adaptive_pair_grid = 48;
     state.projected_cells_mode = ProjectedCellsMode::Off;
+    state.pupil_jitter_mode = PupilJitterMode::Halton;
+    state.pupil_jitter_seed = 42;
     state.cell_coverage_bias = 1.2f;
     state.cell_edge_inset = 0.15f;
     state.bloom.strength = 0.75f;
@@ -583,6 +645,7 @@ void test_ae_adapter_bits()
     assert(settings.downsample == 2);
     assert(settings.ray_grid == 8);
     assert(settings.max_sources == 123);
+    assert(settings.cluster_radius_px == 12);
     assert(settings.aperture_blades == 7);
     assert(std::abs(settings.aperture_rotation_deg - 15.0f) < 1e-6f);
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
@@ -601,6 +664,8 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.footprint_clamp - 1.4f) < 1e-6f);
     assert(settings.max_adaptive_pair_grid == 48);
     assert(settings.projected_cells_mode == ProjectedCellsMode::Off);
+    assert(settings.pupil_jitter_mode == PupilJitterMode::Halton);
+    assert(settings.pupil_jitter_seed == 42);
     assert(std::abs(settings.cell_coverage_bias - 1.2f) < 1e-6f);
     assert(std::abs(settings.cell_edge_inset - 0.15f) < 1e-6f);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
@@ -1013,6 +1078,8 @@ void test_param_schema()
     assert(projected_cells_mode_param() + 1 == flare_gain_param());
     assert(flare_gain_param() + 1 == sky_brightness_param());
     assert(sky_brightness_param() + 1 == threshold_param());
+    assert(max_sources_param() + 1 == cluster_radius_param());
+    assert(cluster_radius_param() + 1 == flare_section_end_param());
     assert(flare_section_end_param() + 1 == post_section_start_param());
     assert(spectral_samples_param() + 1 == ghost_cleanup_mode_param());
     assert(ghost_cleanup_mode_param() + 1 == advanced_ghosts_section_start_param());
@@ -1020,7 +1087,9 @@ void test_param_schema()
     assert(adaptive_sampling_strength_param() + 1 == footprint_radius_bias_param());
     assert(footprint_radius_bias_param() + 1 == footprint_clamp_param());
     assert(footprint_clamp_param() + 1 == max_adaptive_pair_grid_param());
-    assert(max_adaptive_pair_grid_param() + 1 == cell_coverage_bias_param());
+    assert(max_adaptive_pair_grid_param() + 1 == pupil_jitter_mode_param());
+    assert(pupil_jitter_mode_param() + 1 == pupil_jitter_seed_param());
+    assert(pupil_jitter_seed_param() + 1 == cell_coverage_bias_param());
     assert(cell_coverage_bias_param() + 1 == cell_edge_inset_param());
     assert(cell_edge_inset_param() + 1 == advanced_ghosts_section_end_param());
     assert(advanced_ghosts_section_end_param() + 1 == post_section_end_param());
@@ -1039,6 +1108,9 @@ void test_param_schema()
     assert(PARAM_ID_PROJECTED_CELLS_MODE == 33);
     assert(PARAM_ID_CELL_COVERAGE_BIAS == 34);
     assert(PARAM_ID_CELL_EDGE_INSET == 35);
+    assert(PARAM_ID_CLUSTER_RADIUS == 36);
+    assert(PARAM_ID_PUPIL_JITTER_MODE == 37);
+    assert(PARAM_ID_PUPIL_JITTER_SEED == 38);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -1046,6 +1118,7 @@ void test_param_schema()
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_popup = build_spectral_samples_popup_string();
     const std::string cleanup_popup = build_ghost_cleanup_mode_popup_string();
+    const std::string jitter_popup = build_pupil_jitter_mode_popup_string();
     const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
     assert(legacy_lens_popup.find("Double Gauss") != std::string::npos);
@@ -1054,6 +1127,7 @@ void test_param_schema()
     assert(sensor_preset_popup.find("Full Frame") != std::string::npos);
     assert(spectral_popup.find("11") != std::string::npos);
     assert(cleanup_popup.find("Sharp Adaptive") != std::string::npos);
+    assert(jitter_popup.find("Halton") != std::string::npos);
     assert(projected_cells_popup.find("Disabled") != std::string::npos);
     assert(projected_cells_popup.find("Enabled") != std::string::npos);
     assert(view_popup.find("Flare Only") != std::string::npos);
@@ -1080,6 +1154,7 @@ void test_param_schema()
     ui.ray_grid = 8;
     ui.downsample = 2;
     ui.max_sources = 222;
+    ui.cluster_radius_px = 18;
     ui.ghost_blur = 0.02f;
     ui.ghost_blur_passes = 2;
     ui.ghost_cleanup_mode_index = ghost_cleanup_mode_popup_index(GhostCleanupMode::SharpAdaptive);
@@ -1093,6 +1168,8 @@ void test_param_schema()
     ui.footprint_radius_bias = 0.85f;
     ui.footprint_clamp = 1.8f;
     ui.max_adaptive_pair_grid = 40;
+    ui.pupil_jitter_mode_index = pupil_jitter_mode_popup_index(PupilJitterMode::Halton);
+    ui.pupil_jitter_seed = 55;
     ui.projected_cells_mode_index = projected_cells_mode_popup_index(ProjectedCellsMode::Off);
     ui.cell_coverage_bias = 1.35f;
     ui.cell_edge_inset = 0.2f;
@@ -1117,6 +1194,7 @@ void test_param_schema()
     assert(state.ray_grid == 8);
     assert(state.downsample == 2);
     assert(state.max_sources == 222);
+    assert(state.cluster_radius_px == 18);
     assert(std::abs(state.ghost_blur - 0.02f) < 1e-6f);
     assert(state.ghost_blur_passes == 2);
     assert(state.ghost_cleanup_mode == GhostCleanupMode::SharpAdaptive);
@@ -1131,6 +1209,8 @@ void test_param_schema()
     assert(std::abs(state.footprint_clamp - 1.8f) < 1e-6f);
     assert(state.max_adaptive_pair_grid == 40);
     assert(state.projected_cells_mode == ProjectedCellsMode::Off);
+    assert(state.pupil_jitter_mode == PupilJitterMode::Halton);
+    assert(state.pupil_jitter_seed == 55);
     assert(std::abs(state.cell_coverage_bias - 1.35f) < 1e-6f);
     assert(std::abs(state.cell_edge_inset - 0.2f) < 1e-6f);
 

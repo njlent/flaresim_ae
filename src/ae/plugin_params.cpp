@@ -24,6 +24,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_samples_popup = build_spectral_samples_popup_string();
     const std::string ghost_cleanup_popup = build_ghost_cleanup_mode_popup_string();
+    const std::string pupil_jitter_popup = build_pupil_jitter_mode_popup_string();
     const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
 
@@ -283,6 +284,15 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_MAX_SOURCES);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Cluster Radius",
+                  0,
+                  kManualIntMax,
+                  0,
+                  256,
+                  defaults.cluster_radius_px,
+                  PARAM_ID_CLUSTER_RADIUS);
+
+    AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_FLARE_SECTION_END);
 
     AEFX_CLR_STRUCT(def);
@@ -434,6 +444,23 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   512,
                   defaults.max_adaptive_pair_grid,
                   PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Pupil Jitter",
+                  static_cast<A_short>(pupil_jitter_mode_popup_count()),
+                  static_cast<A_short>(defaults.pupil_jitter_mode_index),
+                  pupil_jitter_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_PUPIL_JITTER_MODE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Jitter Seed",
+                  0,
+                  kManualIntMax,
+                  0,
+                  1000000,
+                  defaults.pupil_jitter_seed,
+                  PARAM_ID_PUPIL_JITTER_SEED);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Cell Coverage",

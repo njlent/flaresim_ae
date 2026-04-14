@@ -20,9 +20,9 @@
 #include <algorithm>
 #include <vector>
 #include <chrono>
-#include <random>
 #include <atomic>
 #include <array>
+#include <cstdint>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -615,18 +615,63 @@ static float estimate_ghost_spread(const LensSystem &lens,
 
 static std::vector<GridSample> build_grid_samples(int ray_grid,
                                                   int aperture_blades,
-                                                  float aperture_rotation_deg)
+                                                  float aperture_rotation_deg,
+                                                  PupilJitterMode jitter_mode,
+                                                  int jitter_seed)
 {
     std::vector<GridSample> grid_samples;
     grid_samples.reserve(ray_grid * ray_grid);
 
-    for (int gy = 0; gy < ray_grid; ++gy) {
-        for (int gx = 0; gx < ray_grid; ++gx) {
-            const float u = ((gx + 0.5f) / ray_grid) * 2.0f - 1.0f;
-            const float v = ((gy + 0.5f) / ray_grid) * 2.0f - 1.0f;
-            if (is_valid_pupil_sample(u, v, aperture_blades, aperture_rotation_deg)) {
-                grid_samples.push_back({u, v});
-            }
+    auto wang_hash = [](std::uint32_t value) {
+        value = (value ^ 61u) ^ (value >> 16u);
+        value *= 9u;
+        value ^= value >> 4u;
+        value *= 0x27d4eb2du;
+        value ^= value >> 15u;
+        return value;
+    };
+    auto halton2 = [](std::uint32_t value) {
+        value = (value << 16u) | (value >> 16u);
+        value = ((value & 0x00ff00ffu) << 8u) | ((value & 0xff00ff00u) >> 8u);
+        value = ((value & 0x0f0f0f0fu) << 4u) | ((value & 0xf0f0f0f0u) >> 4u);
+        value = ((value & 0x33333333u) << 2u) | ((value & 0xccccccccu) >> 2u);
+        value = ((value & 0x55555555u) << 1u) | ((value & 0xaaaaaaaau) >> 1u);
+        return static_cast<float>(value) * (1.0f / 4294967296.0f);
+    };
+    auto halton3 = [](std::uint32_t value) {
+        float result = 0.0f;
+        float factor = 1.0f / 3.0f;
+        while (value > 0) {
+            result += static_cast<float>(value % 3u) * factor;
+            value /= 3u;
+            factor /= 3.0f;
+        }
+        return result;
+    };
+
+    const std::uint32_t seed_offset = static_cast<std::uint32_t>(std::max(jitter_seed, 0)) * 1000003u;
+    const int candidate_count = ray_grid * ray_grid;
+    for (int k = 0; k < candidate_count; ++k) {
+        const int gx = k % ray_grid;
+        const int gy = k / ray_grid;
+        float u = 0.0f;
+        float v = 0.0f;
+        if (jitter_mode == PupilJitterMode::Halton) {
+            u = halton2(static_cast<std::uint32_t>(k)) * 2.0f - 1.0f;
+            v = halton3(static_cast<std::uint32_t>(k)) * 2.0f - 1.0f;
+        } else {
+            const float ju = jitter_mode == PupilJitterMode::Stratified
+                ? static_cast<float>(wang_hash(static_cast<std::uint32_t>(k) + seed_offset)) * (1.0f / 4294967296.0f)
+                : 0.5f;
+            const float jv = jitter_mode == PupilJitterMode::Stratified
+                ? static_cast<float>(wang_hash(static_cast<std::uint32_t>(k + candidate_count) + seed_offset)) * (1.0f / 4294967296.0f)
+                : 0.5f;
+            u = ((gx + ju) / ray_grid) * 2.0f - 1.0f;
+            v = ((gy + jv) / ray_grid) * 2.0f - 1.0f;
+        }
+
+        if (is_valid_pupil_sample(u, v, aperture_blades, aperture_rotation_deg)) {
+            grid_samples.push_back({u, v});
         }
     }
 
@@ -677,7 +722,9 @@ static GhostGridBucket build_grid_bucket(int ray_grid, const GhostConfig& config
     bucket.ray_grid = ray_grid;
     bucket.samples = build_grid_samples(ray_grid,
                                         config.aperture_blades,
-                                        config.aperture_rotation_deg);
+                                        config.aperture_rotation_deg,
+                                        config.pupil_jitter,
+                                        config.pupil_jitter_seed);
     bucket.cells = build_grid_cells(ray_grid,
                                     config.aperture_blades,
                                     config.aperture_rotation_deg,
@@ -1338,11 +1385,6 @@ void render_ghosts(const LensSystem &lens,
                 continue;
             }
 
-            // Per-source RNG for stratified jitter (seeded by source index
-            // and ghost pair to get different patterns per pair)
-            std::mt19937 rng((unsigned)(si * 7919 + a * 131 + b * 1031));
-            std::uniform_real_distribution<float> jitter(0.0f, 1.0f);
-
             // ---- Pass 1: trace all rays and collect hits ----
             hit_buf.clear(); // reuse capacity, no realloc
 
@@ -1354,12 +1396,8 @@ void render_ghosts(const LensSystem &lens,
 
             for (int gi = 0; gi < valid_grid_count; ++gi)
             {
-                // Stratified: jitter within cell, using pre-computed base (u,v)
-                float u = pair_grid_samples[gi].u + (jitter(rng) - 0.5f) * cell_size;
-                float v = pair_grid_samples[gi].v + (jitter(rng) - 0.5f) * cell_size;
-                if (!is_valid_pupil_sample(u, v, config.aperture_blades, config.aperture_rotation_deg)) {
-                    continue;
-                }
+                const float u = pair_grid_samples[gi].u;
+                const float v = pair_grid_samples[gi].v;
 
                 Ray ray;
                 ray.origin = Vec3f(u * front_R, v * front_R, start_z);

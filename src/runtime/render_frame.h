@@ -23,6 +23,7 @@ struct FrameRenderSettings
     int downsample = 2;
     int ray_grid = 128;
     int max_sources = 256;
+    int cluster_radius_px = 0;
     int aperture_blades = 0;
     float aperture_rotation_deg = 0.0f;
     float min_ghost = 1e-7f;
@@ -44,6 +45,8 @@ struct FrameRenderSettings
     float footprint_clamp = 1.15f;
     int max_adaptive_pair_grid = 0;
     ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Off;
+    PupilJitterMode pupil_jitter_mode = PupilJitterMode::Off;
+    int pupil_jitter_seed = 0;
     float cell_coverage_bias = 1.0f;
     float cell_edge_inset = 0.1f;
     BloomConfig bloom {};

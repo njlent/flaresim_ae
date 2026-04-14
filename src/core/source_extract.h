@@ -19,3 +19,10 @@ void limit_bright_pixels(
     std::vector<BrightPixel>& pixels,
     std::size_t max_sources
 );
+
+void cluster_bright_pixels(
+    std::vector<BrightPixel>& pixels,
+    int radius_px,
+    int image_width,
+    float tan_half_fov_h
+);

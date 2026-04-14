@@ -51,6 +51,18 @@ constexpr GhostCleanupModeDescriptor kGhostCleanupModes[] = {
     {GhostCleanupMode::SharpAdaptivePlusBlur, "Sharp + Blur"},
 };
 
+struct PupilJitterModeDescriptor
+{
+    PupilJitterMode mode;
+    std::string_view label;
+};
+
+constexpr PupilJitterModeDescriptor kPupilJitterModes[] = {
+    {PupilJitterMode::Off, "Off"},
+    {PupilJitterMode::Stratified, "Stratified"},
+    {PupilJitterMode::Halton, "Halton"},
+};
+
 struct ProjectedCellsModeDescriptor
 {
     ProjectedCellsMode mode;
@@ -137,7 +149,8 @@ int threshold_param() { return sky_brightness_param() + 1; }
 int ray_grid_param() { return threshold_param() + 1; }
 int downsample_param() { return ray_grid_param() + 1; }
 int max_sources_param() { return downsample_param() + 1; }
-int flare_section_end_param() { return max_sources_param() + 1; }
+int cluster_radius_param() { return max_sources_param() + 1; }
+int flare_section_end_param() { return cluster_radius_param() + 1; }
 int post_section_start_param() { return flare_section_end_param() + 1; }
 int ghost_blur_param() { return post_section_start_param() + 1; }
 int ghost_blur_passes_param() { return ghost_blur_param() + 1; }
@@ -153,7 +166,9 @@ int adaptive_sampling_strength_param() { return advanced_ghosts_section_start_pa
 int footprint_radius_bias_param() { return adaptive_sampling_strength_param() + 1; }
 int footprint_clamp_param() { return footprint_radius_bias_param() + 1; }
 int max_adaptive_pair_grid_param() { return footprint_clamp_param() + 1; }
-int cell_coverage_bias_param() { return max_adaptive_pair_grid_param() + 1; }
+int pupil_jitter_mode_param() { return max_adaptive_pair_grid_param() + 1; }
+int pupil_jitter_seed_param() { return pupil_jitter_mode_param() + 1; }
+int cell_coverage_bias_param() { return pupil_jitter_seed_param() + 1; }
 int cell_edge_inset_param() { return cell_coverage_bias_param() + 1; }
 int advanced_ghosts_section_end_param() { return cell_edge_inset_param() + 1; }
 int post_section_end_param() { return advanced_ghosts_section_end_param() + 1; }
@@ -268,6 +283,15 @@ std::string build_ghost_cleanup_mode_popup_string()
         labels[i] = kGhostCleanupModes[i].label.data();
     }
     return build_popup_string_from_labels(labels, std::size(kGhostCleanupModes));
+}
+
+std::string build_pupil_jitter_mode_popup_string()
+{
+    const char* labels[std::size(kPupilJitterModes)] {};
+    for (std::size_t i = 0; i < std::size(kPupilJitterModes); ++i) {
+        labels[i] = kPupilJitterModes[i].label.data();
+    }
+    return build_popup_string_from_labels(labels, std::size(kPupilJitterModes));
 }
 
 std::string build_projected_cells_mode_popup_string()
@@ -437,6 +461,31 @@ bool ghost_cleanup_mode_from_popup(int popup_index, GhostCleanupMode& out_mode)
     return true;
 }
 
+int pupil_jitter_mode_popup_count()
+{
+    return static_cast<int>(std::size(kPupilJitterModes));
+}
+
+int pupil_jitter_mode_popup_index(PupilJitterMode mode)
+{
+    for (std::size_t i = 0; i < std::size(kPupilJitterModes); ++i) {
+        if (kPupilJitterModes[i].mode == mode) {
+            return static_cast<int>(i) + 1;
+        }
+    }
+    return 1;
+}
+
+bool pupil_jitter_mode_from_popup(int popup_index, PupilJitterMode& out_mode)
+{
+    if (popup_index < 1 || popup_index > static_cast<int>(std::size(kPupilJitterModes))) {
+        return false;
+    }
+
+    out_mode = kPupilJitterModes[popup_index - 1].mode;
+    return true;
+}
+
 int projected_cells_mode_popup_count()
 {
     return static_cast<int>(std::size(kProjectedCellsModes));
@@ -494,6 +543,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     if (ui_state.ray_grid < 1 ||
         ui_state.downsample < 1 ||
         ui_state.max_sources < 0 ||
+        ui_state.cluster_radius_px < 0 ||
         ui_state.ghost_blur_passes < 0 ||
         ui_state.haze_blur_passes < 0 ||
         ui_state.aperture_blades < 0 ||
@@ -501,6 +551,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.footprint_radius_bias <= 0.0f ||
         ui_state.footprint_clamp <= 0.0f ||
         ui_state.max_adaptive_pair_grid < 0 ||
+        ui_state.pupil_jitter_seed < 0 ||
         ui_state.cell_coverage_bias <= 0.0f ||
         ui_state.cell_edge_inset < 0.0f ||
         ui_state.sensor_width_mm < 0.0f ||
@@ -550,6 +601,11 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         return false;
     }
 
+    PupilJitterMode pupil_jitter_mode = PupilJitterMode::Off;
+    if (!pupil_jitter_mode_from_popup(ui_state.pupil_jitter_mode_index, pupil_jitter_mode)) {
+        return false;
+    }
+
     out_state.view = view;
     out_state.use_sensor_size = ui_state.use_sensor_size;
     out_state.sensor_preset_index = ui_state.sensor_preset_index;
@@ -567,6 +623,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.ray_grid = ui_state.ray_grid;
     out_state.downsample = ui_state.downsample;
     out_state.max_sources = ui_state.max_sources;
+    out_state.cluster_radius_px = ui_state.cluster_radius_px;
     out_state.ghost_blur = ui_state.ghost_blur;
     out_state.ghost_blur_passes = ui_state.ghost_blur_passes;
     out_state.ghost_cleanup_mode = ghost_cleanup_mode;
@@ -581,6 +638,8 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.footprint_clamp = ui_state.footprint_clamp;
     out_state.max_adaptive_pair_grid = ui_state.max_adaptive_pair_grid;
     out_state.projected_cells_mode = projected_cells_mode;
+    out_state.pupil_jitter_mode = pupil_jitter_mode;
+    out_state.pupil_jitter_seed = ui_state.pupil_jitter_seed;
     out_state.cell_coverage_bias = ui_state.cell_coverage_bias;
     out_state.cell_edge_inset = ui_state.cell_edge_inset;
 
