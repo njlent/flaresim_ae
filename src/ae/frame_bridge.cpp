@@ -3,7 +3,61 @@
 #include "lens_resolution.h"
 #include "output_view.h"
 
+#include <filesystem>
+
 namespace {
+
+namespace fs = std::filesystem;
+
+struct ThreadRenderContext
+{
+    FrameRenderCache cache;
+    LensSystem lens;
+    std::string asset_root;
+    std::string lens_path;
+    fs::file_time_type lens_mtime {};
+    bool lens_loaded = false;
+    bool lens_mtime_valid = false;
+};
+
+bool resolve_cached_lens(const std::string& asset_root,
+                         const AeLensSelection& selection,
+                         ThreadRenderContext& context,
+                         const LensSystem*& out_lens)
+{
+    std::string lens_path;
+    if (!resolve_lens_path(selection, asset_root, lens_path)) {
+        return false;
+    }
+
+    std::error_code ec;
+    const fs::file_time_type current_mtime = fs::last_write_time(fs::path(lens_path), ec);
+    const bool mtime_valid = !ec;
+
+    bool need_reload = !context.lens_loaded ||
+                       context.asset_root != asset_root ||
+                       context.lens_path != lens_path ||
+                       context.lens_mtime_valid != mtime_valid;
+    if (!need_reload && mtime_valid) {
+        need_reload = context.lens_mtime != current_mtime;
+    }
+
+    if (need_reload) {
+        if (!load_selected_lens(selection, asset_root, context.lens, &lens_path)) {
+            return false;
+        }
+        context.asset_root = asset_root;
+        context.lens_path = std::move(lens_path);
+        context.lens_loaded = true;
+        context.lens_mtime_valid = mtime_valid;
+        if (mtime_valid) {
+            context.lens_mtime = current_mtime;
+        }
+    }
+
+    out_lens = &context.lens;
+    return true;
+}
 
 bool allocate_image(int width, int height, FloatImageBuffer& image)
 {
@@ -198,8 +252,10 @@ bool render_frame_to_float_image(
         return false;
     }
 
-    LensSystem lens;
-    if (!load_selected_lens(state.lens, asset_root, lens)) {
+    thread_local ThreadRenderContext context;
+
+    const LensSystem* lens = nullptr;
+    if (!resolve_cached_lens(asset_root, state.lens, context, lens) || !lens) {
         return false;
     }
 
@@ -225,14 +281,13 @@ bool render_frame_to_float_image(
         input.height,
     };
 
-    thread_local FrameRenderCache cache;
     FrameRenderOutputs outputs;
-    if (!render_frame(lens,
+    if (!render_frame(*lens,
                       input_view,
                       settings,
                       outputs,
                       plan,
-                      &cache,
+                      &context.cache,
                       use_detection_mask && !detection_mask_values.empty() ? &detection_mask_view : nullptr)) {
         return false;
     }

@@ -21,6 +21,9 @@ struct GpuBufferCache
     void* d_grid = nullptr;
     std::size_t grid_bytes = 0;
 
+    void* d_spec = nullptr;
+    std::size_t spec_bytes = 0;
+
     float* d_out_r = nullptr;
     float* d_out_g = nullptr;
     float* d_out_b = nullptr;
