@@ -91,17 +91,8 @@ int select_ghost_pair_ray_grid(int base_ray_grid,
 // Bilinear splat: distribute a contribution to 4 neighbouring pixels.
 // ---------------------------------------------------------------------------
 
-struct GridSample
-{
-    float u, v;
-};
-
-struct GridCell
-{
-    float u0, v0;
-    float u1, v1;
-    float uc, vc;
-};
+using GridSample = GhostGridSample;
+using GridCell = GhostGridCell;
 
 struct PixelPoint
 {
@@ -680,6 +671,30 @@ static std::vector<GridCell> build_grid_cells(int ray_grid,
     return cells;
 }
 
+static GhostGridBucket build_grid_bucket(int ray_grid, const GhostConfig& config)
+{
+    GhostGridBucket bucket;
+    bucket.ray_grid = ray_grid;
+    bucket.samples = build_grid_samples(ray_grid,
+                                        config.aperture_blades,
+                                        config.aperture_rotation_deg);
+    bucket.cells = build_grid_cells(ray_grid,
+                                    config.aperture_blades,
+                                    config.aperture_rotation_deg,
+                                    config.cell_edge_inset);
+    return bucket;
+}
+
+static const GhostGridBucket* find_grid_bucket(const GhostRenderSetup& setup, int ray_grid)
+{
+    const auto it = std::find_if(setup.grid_buckets.begin(),
+                                 setup.grid_buckets.end(),
+                                 [&](const GhostGridBucket& bucket) {
+                                     return bucket.ray_grid == ray_grid;
+                                 });
+    return it != setup.grid_buckets.end() ? &(*it) : nullptr;
+}
+
 static float estimate_ghost_distortion(const LensSystem& lens,
                                        int bounce_a,
                                        int bounce_b,
@@ -965,6 +980,47 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
     return plans;
 }
 
+bool build_ghost_render_setup(const LensSystem& lens,
+                              float fov_h,
+                              float fov_v,
+                              int width,
+                              int height,
+                              const GhostConfig& config,
+                              GhostRenderSetup& out_setup)
+{
+    out_setup = {};
+    if (width <= 0 || height <= 0 || lens.num_surfaces() <= 0 || config.ray_grid <= 0) {
+        return false;
+    }
+
+    out_setup.active_pair_plans = plan_active_ghost_pairs(lens, fov_h, fov_v, width, height, config);
+    out_setup.min_pair_grid = config.ray_grid;
+    out_setup.max_pair_grid = config.ray_grid;
+
+    std::vector<int> unique_grids;
+    unique_grids.reserve(out_setup.active_pair_plans.size() + 1);
+    unique_grids.push_back(config.ray_grid);
+
+    for (const GhostPairPlan& pair_plan : out_setup.active_pair_plans) {
+        if (std::find(unique_grids.begin(), unique_grids.end(), pair_plan.ray_grid) == unique_grids.end()) {
+            unique_grids.push_back(pair_plan.ray_grid);
+        }
+        out_setup.min_pair_grid = std::min(out_setup.min_pair_grid, pair_plan.ray_grid);
+        out_setup.max_pair_grid = std::max(out_setup.max_pair_grid, pair_plan.ray_grid);
+    }
+
+    out_setup.grid_buckets.reserve(unique_grids.size());
+    for (int ray_grid : unique_grids) {
+        GhostGridBucket bucket = build_grid_bucket(ray_grid, config);
+        out_setup.max_valid_grid_count = std::max(out_setup.max_valid_grid_count,
+                                                  static_cast<int>(bucket.samples.size()));
+        out_setup.grid_buckets.push_back(std::move(bucket));
+    }
+
+    const GhostGridBucket* base_bucket = find_grid_bucket(out_setup, config.ray_grid);
+    return base_bucket && !base_bucket->samples.empty();
+}
+
 // ---------------------------------------------------------------------------
 // Render all ghost reflections.
 // ---------------------------------------------------------------------------
@@ -975,6 +1031,7 @@ void render_ghosts(const LensSystem &lens,
                    float *out_r, float *out_g, float *out_b,
                    int width, int height,
                    const GhostConfig &config,
+                   const GhostRenderSetup* setup,
                    GhostRenderBackend* out_backend)
 {
     if (out_backend) {
@@ -994,52 +1051,27 @@ void render_ghosts(const LensSystem &lens,
     int N = config.ray_grid;
     size_t num_px = (size_t)width * height;
 
-    const auto active_pair_plans = plan_active_ghost_pairs(lens, fov_h, fov_v, width, height, config);
-
-    std::vector<std::pair<int, std::vector<GridSample>>> grid_sample_cache;
-    grid_sample_cache.emplace_back(config.ray_grid,
-                                   build_grid_samples(config.ray_grid,
-                                                      config.aperture_blades,
-                                                      config.aperture_rotation_deg));
-    std::vector<std::pair<int, std::vector<GridCell>>> grid_cell_cache;
-    grid_cell_cache.emplace_back(config.ray_grid,
-                                 build_grid_cells(config.ray_grid,
-                                                  config.aperture_blades,
-                                                  config.aperture_rotation_deg,
-                                                  config.cell_edge_inset));
-    int max_valid_grid_count = static_cast<int>(grid_sample_cache.front().second.size());
-    int min_pair_grid = config.ray_grid;
-    int max_pair_grid = config.ray_grid;
-    for (const GhostPairPlan& pair_plan : active_pair_plans) {
-        const auto existing = std::find_if(grid_sample_cache.begin(),
-                                           grid_sample_cache.end(),
-                                           [&](const auto& entry) {
-                                               return entry.first == pair_plan.ray_grid;
-                                           });
-        if (existing == grid_sample_cache.end()) {
-            grid_sample_cache.emplace_back(pair_plan.ray_grid,
-                                           build_grid_samples(pair_plan.ray_grid,
-                                                              config.aperture_blades,
-                                                              config.aperture_rotation_deg));
-            grid_cell_cache.emplace_back(pair_plan.ray_grid,
-                                         build_grid_cells(pair_plan.ray_grid,
-                                                          config.aperture_blades,
-                                                          config.aperture_rotation_deg,
-                                                          config.cell_edge_inset));
-            max_valid_grid_count = std::max(max_valid_grid_count,
-                                            static_cast<int>(grid_sample_cache.back().second.size()));
-        }
-        min_pair_grid = std::min(min_pair_grid, pair_plan.ray_grid);
-        max_pair_grid = std::max(max_pair_grid, pair_plan.ray_grid);
+    GhostRenderSetup local_setup;
+    if (!setup) {
+        build_ghost_render_setup(lens, fov_h, fov_v, width, height, config, local_setup);
+        setup = &local_setup;
     }
 
-    if (grid_sample_cache.front().second.empty()) {
+    const GhostGridBucket* base_bucket = find_grid_bucket(*setup, config.ray_grid);
+    if (!base_bucket || base_bucket->samples.empty()) {
         fprintf(stderr, "WARNING: no valid entrance pupil samples\n");
         return;
     }
 
+    const auto& active_pair_plans = setup->active_pair_plans;
+    const int max_valid_grid_count = std::max(setup->max_valid_grid_count,
+                                              static_cast<int>(base_bucket->samples.size()));
+    const int min_pair_grid = setup->min_pair_grid;
+    const int max_pair_grid = setup->max_pair_grid;
+
+
     printf("Entrance pupil: %.2f mm radius, base %d×%d grid → %zu rays/source\n",
-           front_R, N, N, grid_sample_cache.front().second.size());
+           front_R, N, N, base_bucket->samples.size());
     printf("Bright sources: %zu\n", sources.size());
     printf("Sensor: %.2f × %.2f mm (at z = %.2f mm)\n",
            sensor_half_w * 2, sensor_half_h * 2, lens.sensor_z);
@@ -1063,7 +1095,7 @@ void render_ghosts(const LensSystem &lens,
         std::string cuda_error;
 
         if (launch_ghost_cuda(lens,
-                              active_pair_plans,
+                              *setup,
                               sources,
                               sensor_half_w,
                               sensor_half_h,
@@ -1151,21 +1183,12 @@ void render_ghosts(const LensSystem &lens,
         int a = pair_plan.pair.surf_a;
         int b = pair_plan.pair.surf_b;
         const float area_boost = pair_plan.area_boost;
-        const auto grid_it = std::find_if(grid_sample_cache.begin(),
-                                          grid_sample_cache.end(),
-                                          [&](const auto& entry) {
-                                              return entry.first == pair_plan.ray_grid;
-                                          });
-        const auto cell_it = std::find_if(grid_cell_cache.begin(),
-                                          grid_cell_cache.end(),
-                                          [&](const auto& entry) {
-                                              return entry.first == pair_plan.ray_grid;
-                                          });
-        if (grid_it == grid_sample_cache.end() || grid_it->second.empty()) {
+        const GhostGridBucket* pair_bucket = find_grid_bucket(*setup, pair_plan.ray_grid);
+        if (!pair_bucket || pair_bucket->samples.empty()) {
             continue;
         }
-        const auto& pair_grid_samples = grid_it->second;
-        const auto& pair_grid_cells = (cell_it != grid_cell_cache.end()) ? cell_it->second : grid_cell_cache.front().second;
+        const auto& pair_grid_samples = pair_bucket->samples;
+        const auto& pair_grid_cells = !pair_bucket->cells.empty() ? pair_bucket->cells : base_bucket->cells;
         const int valid_grid_count = static_cast<int>(pair_grid_samples.size());
         const float ray_weight = 1.0f / valid_grid_count;
         const float cell_size = 2.0f / pair_plan.ray_grid;

@@ -43,7 +43,7 @@ bool cuda_ghost_renderer_available(std::string* reason = nullptr);
 
 bool launch_ghost_cuda(
     const LensSystem& lens,
-    const std::vector<GhostPairPlan>& active_pair_plans,
+    const GhostRenderSetup& setup,
     const std::vector<BrightPixel>& sources,
     float sensor_half_w,
     float sensor_half_h,

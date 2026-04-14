@@ -47,6 +47,38 @@ struct GhostPairPlan
     bool use_cell_rasterization = false;
 };
 
+struct GhostGridSample
+{
+    float u = 0.0f;
+    float v = 0.0f;
+};
+
+struct GhostGridCell
+{
+    float u0 = 0.0f;
+    float v0 = 0.0f;
+    float u1 = 0.0f;
+    float v1 = 0.0f;
+    float uc = 0.0f;
+    float vc = 0.0f;
+};
+
+struct GhostGridBucket
+{
+    int ray_grid = 0;
+    std::vector<GhostGridSample> samples;
+    std::vector<GhostGridCell> cells;
+};
+
+struct GhostRenderSetup
+{
+    std::vector<GhostPairPlan> active_pair_plans;
+    std::vector<GhostGridBucket> grid_buckets;
+    int max_valid_grid_count = 0;
+    int min_pair_grid = 0;
+    int max_pair_grid = 0;
+};
+
 // A bright pixel extracted from the input image.
 struct BrightPixel
 {
@@ -105,6 +137,13 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                    int width,
                                                    int height,
                                                    const GhostConfig& config);
+bool build_ghost_render_setup(const LensSystem& lens,
+                              float fov_h,
+                              float fov_v,
+                              int width,
+                              int height,
+                              const GhostConfig& config,
+                              GhostRenderSetup& out_setup);
 
 // Render all ghost reflections onto the output flare image.
 //
@@ -120,4 +159,5 @@ void render_ghosts(const LensSystem &lens,
                    float *out_r, float *out_g, float *out_b,
                    int width, int height,
                    const GhostConfig &config,
+                   const GhostRenderSetup* setup = nullptr,
                    GhostRenderBackend* out_backend = nullptr);

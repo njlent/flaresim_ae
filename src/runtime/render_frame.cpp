@@ -197,6 +197,33 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     return hash;
 }
 
+std::uint64_t make_ghost_setup_key(std::uint64_t lens_key,
+                                   float fov_h,
+                                   float fov_v,
+                                   int width,
+                                   int height,
+                                   const FrameRenderSettings& settings)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, lens_key);
+    hash_append_value(hash, fov_h);
+    hash_append_value(hash, fov_v);
+    hash_append_value(hash, width);
+    hash_append_value(hash, height);
+    hash_append_value(hash, settings.ray_grid);
+    hash_append_value(hash, settings.min_ghost);
+    hash_append_value(hash, settings.aperture_blades);
+    hash_append_value(hash, settings.aperture_rotation_deg);
+    hash_append_value(hash, settings.ghost_normalize);
+    hash_append_value(hash, settings.max_area_boost);
+    hash_append_value(hash, settings.ghost_cleanup_mode);
+    hash_append_value(hash, settings.adaptive_sampling_strength);
+    hash_append_value(hash, settings.max_adaptive_pair_grid);
+    hash_append_value(hash, settings.projected_cells_mode);
+    hash_append_value(hash, settings.cell_edge_inset);
+    return hash;
+}
+
 std::uint64_t make_bloom_key(std::uint64_t scene_key, const FrameRenderSettings& settings)
 {
     std::uint64_t hash = kFnvOffset;
@@ -322,6 +349,10 @@ void FrameRenderCache::clear()
     has_sources = false;
     detected_sources.clear();
     sources.clear();
+
+    ghost_setup_key = 0;
+    has_ghost_setup = false;
+    ghost_setup = {};
 
     ghost_key = 0;
     has_ghosts = false;
@@ -516,6 +547,40 @@ bool render_frame(
                 ghost.cell_coverage_bias = settings.cell_coverage_bias;
                 ghost.cell_edge_inset = settings.cell_edge_inset;
 
+                const std::uint64_t ghost_setup_key = make_ghost_setup_key(
+                    lens_key,
+                    fov_h,
+                    fov_v,
+                    input.width,
+                    input.height,
+                    settings);
+
+                GhostRenderSetup local_ghost_setup;
+                const bool ghost_setup_cache_hit =
+                    cache && cache->has_ghost_setup && cache->ghost_setup_key == ghost_setup_key;
+                const GhostRenderSetup* ghost_setup = nullptr;
+                if (ghost_setup_cache_hit) {
+                    ghost_setup = &cache->ghost_setup;
+                } else {
+                    build_ghost_render_setup(lens,
+                                             fov_h,
+                                             fov_v,
+                                             input.width,
+                                             input.height,
+                                             ghost,
+                                             local_ghost_setup);
+                    outputs.stats.recomputed_ghost_setup = true;
+
+                    if (cache) {
+                        cache->ghost_setup_key = ghost_setup_key;
+                        cache->has_ghost_setup = true;
+                        cache->ghost_setup = std::move(local_ghost_setup);
+                        ghost_setup = &cache->ghost_setup;
+                    } else {
+                        ghost_setup = &local_ghost_setup;
+                    }
+                }
+
                 render_ghosts(
                     lens,
                     outputs.sources,
@@ -527,6 +592,7 @@ bool render_frame(
                     input.width,
                     input.height,
                     ghost,
+                    ghost_setup,
                     &outputs.ghost_backend);
             }
 

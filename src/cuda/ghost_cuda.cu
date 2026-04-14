@@ -662,6 +662,9 @@ struct GPUCell
     float vc;
 };
 
+static_assert(sizeof(GPUSample) == sizeof(GhostGridSample));
+static_assert(sizeof(GPUCell) == sizeof(GhostGridCell));
+
 struct DPixelPoint
 {
     float x;
@@ -1113,9 +1116,9 @@ void report_cuda_error(cudaError_t error, const char* site, std::string* out_err
     }
 }
 
-std::vector<GPUSample> build_gpu_grid_samples(int ray_grid,
-                                              int aperture_blades,
-                                              float aperture_rotation_deg)
+[[maybe_unused]] std::vector<GPUSample> build_gpu_grid_samples(int ray_grid,
+                                                               int aperture_blades,
+                                                               float aperture_rotation_deg)
 {
     std::vector<GPUSample> grid_samples;
     grid_samples.reserve(static_cast<std::size_t>(ray_grid) * static_cast<std::size_t>(ray_grid));
@@ -1154,10 +1157,10 @@ std::vector<GPUSample> build_gpu_grid_samples(int ray_grid,
     return grid_samples;
 }
 
-std::vector<GPUCell> build_gpu_grid_cells(int ray_grid,
-                                          int aperture_blades,
-                                          float aperture_rotation_deg,
-                                          float cell_edge_inset)
+[[maybe_unused]] std::vector<GPUCell> build_gpu_grid_cells(int ray_grid,
+                                                           int aperture_blades,
+                                                           float aperture_rotation_deg,
+                                                           float cell_edge_inset)
 {
     std::vector<GPUCell> grid_cells;
     grid_cells.reserve(static_cast<std::size_t>(ray_grid) * static_cast<std::size_t>(ray_grid));
@@ -1271,7 +1274,7 @@ bool cuda_ghost_renderer_available(std::string* reason)
 }
 
 bool launch_ghost_cuda(const LensSystem& lens,
-                       const std::vector<GhostPairPlan>& active_pair_plans,
+                       const GhostRenderSetup& setup,
                        const std::vector<BrightPixel>& sources,
                        float sensor_half_w,
                        float sensor_half_h,
@@ -1291,6 +1294,7 @@ bool launch_ghost_cuda(const LensSystem& lens,
         return false;
     }
 
+    const auto& active_pair_plans = setup.active_pair_plans;
     if (active_pair_plans.empty() || sources.empty()) {
         return true;
     }
@@ -1452,16 +1456,9 @@ bool launch_ghost_cuda(const LensSystem& lens,
                          spectral_samples.size() * sizeof(GPUSpectralSampleDev),
                          cudaMemcpyHostToDevice));
 
-    std::vector<int> bucket_grids;
-    for (const GhostPairPlan& pair_plan : active_pair_plans) {
-        if (std::find(bucket_grids.begin(), bucket_grids.end(), pair_plan.ray_grid) == bucket_grids.end()) {
-            bucket_grids.push_back(pair_plan.ray_grid);
-        }
-    }
-    std::sort(bucket_grids.begin(), bucket_grids.end());
-
     bool launched_kernel = false;
-    for (int bucket_grid : bucket_grids) {
+    for (const GhostGridBucket& bucket : setup.grid_buckets) {
+        const int bucket_grid = bucket.ray_grid;
         std::vector<GPUPair> gpu_splat_pairs;
         std::vector<GPUPair> gpu_cell_pairs;
         gpu_splat_pairs.reserve(active_pair_plans.size());
@@ -1485,15 +1482,12 @@ bool launch_ghost_cuda(const LensSystem& lens,
         }
 
         if (!gpu_splat_pairs.empty()) {
-            std::vector<GPUSample> grid_samples = build_gpu_grid_samples(bucket_grid,
-                                                                         config.aperture_blades,
-                                                                         config.aperture_rotation_deg);
-            const int num_grid_samples = static_cast<int>(grid_samples.size());
+            const int num_grid_samples = static_cast<int>(bucket.samples.size());
             if (num_grid_samples > 0) {
                 if (!ensure_buffer(cache.d_pairs, cache.pairs_bytes, gpu_splat_pairs.size() * sizeof(GPUPair), "d_pairs")) {
                     return false;
                 }
-                if (!ensure_buffer(cache.d_grid, cache.grid_bytes, grid_samples.size() * sizeof(GPUSample), "d_grid")) {
+                if (!ensure_buffer(cache.d_grid, cache.grid_bytes, bucket.samples.size() * sizeof(GhostGridSample), "d_grid")) {
                     return false;
                 }
 
@@ -1502,8 +1496,8 @@ bool launch_ghost_cuda(const LensSystem& lens,
                                      gpu_splat_pairs.size() * sizeof(GPUPair),
                                      cudaMemcpyHostToDevice));
                 GPU_CHECK(cudaMemcpy(cache.d_grid,
-                                     grid_samples.data(),
-                                     grid_samples.size() * sizeof(GPUSample),
+                                     bucket.samples.data(),
+                                     bucket.samples.size() * sizeof(GhostGridSample),
                                      cudaMemcpyHostToDevice));
 
                 const dim3 block(kBlockSize, 1, 1);
@@ -1549,16 +1543,12 @@ bool launch_ghost_cuda(const LensSystem& lens,
         }
 
         if (!gpu_cell_pairs.empty()) {
-            std::vector<GPUCell> grid_cells = build_gpu_grid_cells(bucket_grid,
-                                                                   config.aperture_blades,
-                                                                   config.aperture_rotation_deg,
-                                                                    config.cell_edge_inset);
-            const int num_grid_cells = static_cast<int>(grid_cells.size());
+            const int num_grid_cells = static_cast<int>(bucket.cells.size());
             if (num_grid_cells > 0) {
                 if (!ensure_buffer(cache.d_pairs, cache.pairs_bytes, gpu_cell_pairs.size() * sizeof(GPUPair), "d_pairs")) {
                     return false;
                 }
-                if (!ensure_buffer(cache.d_grid, cache.grid_bytes, grid_cells.size() * sizeof(GPUCell), "d_grid")) {
+                if (!ensure_buffer(cache.d_grid, cache.grid_bytes, bucket.cells.size() * sizeof(GhostGridCell), "d_grid")) {
                     return false;
                 }
 
@@ -1567,8 +1557,8 @@ bool launch_ghost_cuda(const LensSystem& lens,
                                      gpu_cell_pairs.size() * sizeof(GPUPair),
                                      cudaMemcpyHostToDevice));
                 GPU_CHECK(cudaMemcpy(cache.d_grid,
-                                     grid_cells.data(),
-                                     grid_cells.size() * sizeof(GPUCell),
+                                     bucket.cells.data(),
+                                     bucket.cells.size() * sizeof(GhostGridCell),
                                      cudaMemcpyHostToDevice));
 
                 const dim3 block(kBlockSize, 1, 1);

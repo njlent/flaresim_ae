@@ -495,10 +495,11 @@ void test_cuda_cell_rasterization_launch()
 
     const float fov_h = 60.0f * 3.14159265358979323846f / 180.0f;
     const float fov_v = 40.0f * 3.14159265358979323846f / 180.0f;
-    auto plans = plan_active_ghost_pairs(lens, fov_h, fov_v, 1920, 1080, config);
-    assert(!plans.empty());
-    plans.resize(1);
-    plans[0].use_cell_rasterization = true;
+    GhostRenderSetup setup;
+    assert(build_ghost_render_setup(lens, fov_h, fov_v, 1920, 1080, config, setup));
+    assert(!setup.active_pair_plans.empty());
+    setup.active_pair_plans.resize(1);
+    setup.active_pair_plans[0].use_cell_rasterization = true;
 
     const float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
     const float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
@@ -511,7 +512,7 @@ void test_cuda_cell_rasterization_launch()
     GpuBufferCache cache;
     std::string error;
     assert(launch_ghost_cuda(lens,
-                             plans,
+                             setup,
                              sources,
                              sensor_half_w,
                              sensor_half_h,
@@ -730,10 +731,13 @@ void test_render_plan_cache()
     assert(render_frame(lens, input, settings, first_outputs, composite_plan, &cache));
     assert(first_outputs.stats.recomputed_scene);
     assert(first_outputs.stats.recomputed_sources);
+    assert(first_outputs.stats.recomputed_ghost_setup);
     assert(first_outputs.stats.recomputed_ghosts);
     assert(first_outputs.stats.recomputed_bloom);
     assert(first_outputs.stats.recomputed_haze);
     assert(first_outputs.stats.recomputed_starburst);
+    assert(cache.has_ghost_setup);
+    assert(!cache.ghost_setup.active_pair_plans.empty());
 
     float first_peak = 0.0f;
     for (float v : first_outputs.flare_r) {
@@ -749,6 +753,7 @@ void test_render_plan_cache()
     assert(render_frame(lens, input, blurred_settings, blurred_outputs, composite_plan, &cache));
     assert(!blurred_outputs.stats.recomputed_scene);
     assert(!blurred_outputs.stats.recomputed_sources);
+    assert(!blurred_outputs.stats.recomputed_ghost_setup);
     assert(!blurred_outputs.stats.recomputed_ghosts);
     assert(!blurred_outputs.stats.recomputed_bloom);
     assert(!blurred_outputs.stats.recomputed_haze);
@@ -760,6 +765,22 @@ void test_render_plan_cache()
     }
     assert(blurred_peak > 0.0f);
     assert(blurred_peak <= first_peak);
+
+    std::vector<float> shifted_r(64, 0.0f);
+    std::vector<float> shifted_g(64, 0.0f);
+    std::vector<float> shifted_b(64, 0.0f);
+    shifted_r[18] = 9.0f;
+    shifted_g[18] = 7.0f;
+    shifted_b[18] = 5.0f;
+    const RgbImageView shifted_input {shifted_r.data(), shifted_g.data(), shifted_b.data(), 8, 8};
+
+    FrameRenderOutputs shifted_outputs;
+    assert(render_frame(lens, shifted_input, settings, shifted_outputs, composite_plan, &cache));
+    assert(shifted_outputs.stats.recomputed_scene);
+    assert(shifted_outputs.stats.recomputed_sources);
+    assert(!shifted_outputs.stats.recomputed_ghost_setup);
+    assert(shifted_outputs.stats.recomputed_ghosts);
+    assert(!shifted_outputs.flare_r.empty());
 
     FrameRenderOutputs source_outputs;
     assert(render_frame(lens, input, settings, source_outputs, sources_plan, nullptr));

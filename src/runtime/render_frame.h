@@ -63,6 +63,7 @@ struct FrameRenderStats
 {
     bool recomputed_scene = false;
     bool recomputed_sources = false;
+    bool recomputed_ghost_setup = false;
     bool recomputed_ghosts = false;
     bool recomputed_bloom = false;
     bool recomputed_haze = false;
@@ -106,6 +107,10 @@ struct FrameRenderCache
     bool has_sources = false;
     std::vector<BrightPixel> detected_sources;
     std::vector<BrightPixel> sources;
+
+    std::uint64_t ghost_setup_key = 0;
+    bool has_ghost_setup = false;
+    GhostRenderSetup ghost_setup;
 
     std::uint64_t ghost_key = 0;
     bool has_ghosts = false;
