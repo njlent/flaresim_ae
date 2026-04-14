@@ -63,10 +63,13 @@ struct GpuBufferCache
     std::size_t host_out_floats = 0;
 
     void* stream = nullptr;
+    void* graph = nullptr;
+    void* graph_exec = nullptr;
 
     std::uint64_t lens_key = 0;
     std::uint64_t spec_key = 0;
     std::uint64_t setup_key = 0;
+    std::uint64_t graph_key = 0;
 
     std::vector<GpuLaunchBucketCache> launch_buckets;
 

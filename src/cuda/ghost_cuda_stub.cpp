@@ -6,6 +6,7 @@ void GpuBufferCache::release()
     lens_key = 0;
     spec_key = 0;
     setup_key = 0;
+    graph_key = 0;
 }
 
 bool cuda_ghost_renderer_compiled()

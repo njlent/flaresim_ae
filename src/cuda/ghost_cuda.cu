@@ -1362,6 +1362,12 @@ void GpuBufferCache::release()
     }
     launch_buckets.clear();
 
+    if (graph_exec) {
+        cudaGraphExecDestroy(static_cast<cudaGraphExec_t>(graph_exec));
+    }
+    if (graph) {
+        cudaGraphDestroy(static_cast<cudaGraph_t>(graph));
+    }
     if (stream) {
         cudaStreamDestroy(static_cast<cudaStream_t>(stream));
     }
@@ -1394,6 +1400,8 @@ void GpuBufferCache::release()
     h_out_g = nullptr;
     h_out_b = nullptr;
     stream = nullptr;
+    graph = nullptr;
+    graph_exec = nullptr;
 
     surfs_bytes = 0;
     pairs_bytes = 0;
@@ -1407,6 +1415,7 @@ void GpuBufferCache::release()
     lens_key = 0;
     spec_key = 0;
     setup_key = 0;
+    graph_key = 0;
 }
 
 bool cuda_ghost_renderer_compiled()
@@ -1763,114 +1772,225 @@ bool launch_ghost_cuda(const LensSystem& lens,
             sources[i].b,
         };
     }
-    GPU_CHECK(cudaMemcpyAsync(cache.d_src,
-                              cache.h_src,
-                              sources.size() * sizeof(GPUSource),
-                              cudaMemcpyHostToDevice,
-                              stream));
+    std::uint64_t graph_key = kFnvOffset;
+    hash_append_value(graph_key, lens_key);
+    hash_append_value(graph_key, spec_key);
+    hash_append_value(graph_key, setup_key);
+    hash_append_value(graph_key, sources.size());
+    hash_append_value(graph_key, width);
+    hash_append_value(graph_key, height);
+    hash_append_value(graph_key, sensor_half_w);
+    hash_append_value(graph_key, sensor_half_h);
+    hash_append_value(graph_key, config.gain);
+    hash_append_value(graph_key, config.aperture_blades);
+    hash_append_value(graph_key, config.aperture_rotation_deg);
+    hash_append_value(graph_key, config.footprint_radius_bias);
+    hash_append_value(graph_key, config.footprint_clamp);
+    hash_append_value(graph_key, config.cell_edge_inset);
+    hash_append_value(graph_key, config.cell_coverage_bias);
 
-    GPU_CHECK(cudaMemsetAsync(cache.d_out_r, 0, num_pixels * sizeof(float), stream));
-    GPU_CHECK(cudaMemsetAsync(cache.d_out_g, 0, num_pixels * sizeof(float), stream));
-    GPU_CHECK(cudaMemsetAsync(cache.d_out_b, 0, num_pixels * sizeof(float), stream));
+    auto enqueue_render_commands = [&](cudaStream_t target_stream) -> bool {
+        const cudaError_t src_copy_error = cudaMemcpyAsync(cache.d_src,
+                                                           cache.h_src,
+                                                           sources.size() * sizeof(GPUSource),
+                                                           cudaMemcpyHostToDevice,
+                                                           target_stream);
+        if (src_copy_error != cudaSuccess) {
+            report_cuda_error(src_copy_error, "cudaMemcpyAsync(d_src)", out_error);
+            return false;
+        }
 
-    for (const GpuLaunchBucketCache& bucket : cache.launch_buckets) {
-        if (bucket.splat_pair_count > 0 && bucket.splat_grid_count > 0) {
-            const dim3 block(kBlockSize, 1, 1);
-            const dim3 grid(static_cast<unsigned>(bucket.splat_pair_count * sources.size()),
-                            static_cast<unsigned>((bucket.splat_grid_count + kBlockSize - 1) / kBlockSize),
-                            1);
+        const cudaError_t memset_r_error =
+            cudaMemsetAsync(cache.d_out_r, 0, num_pixels * sizeof(float), target_stream);
+        if (memset_r_error != cudaSuccess) {
+            report_cuda_error(memset_r_error, "cudaMemsetAsync(d_out_r)", out_error);
+            return false;
+        }
+        const cudaError_t memset_g_error =
+            cudaMemsetAsync(cache.d_out_g, 0, num_pixels * sizeof(float), target_stream);
+        if (memset_g_error != cudaSuccess) {
+            report_cuda_error(memset_g_error, "cudaMemsetAsync(d_out_g)", out_error);
+            return false;
+        }
+        const cudaError_t memset_b_error =
+            cudaMemsetAsync(cache.d_out_b, 0, num_pixels * sizeof(float), target_stream);
+        if (memset_b_error != cudaSuccess) {
+            report_cuda_error(memset_b_error, "cudaMemsetAsync(d_out_b)", out_error);
+            return false;
+        }
 
-            ghost_kernel<<<grid, block, 0, stream>>>(
-                static_cast<Surface*>(cache.d_surfs),
-                num_surfaces,
-                lens.sensor_z,
-                static_cast<GPUPair*>(bucket.d_splat_pairs),
-                static_cast<int>(sources.size()),
-                static_cast<GPUSource*>(cache.d_src),
-                static_cast<GPUSample*>(bucket.d_splat_grid),
-                bucket.splat_grid_count,
-                lens.surfaces[0].semi_aperture,
-                lens.surfaces[0].z - 20.0f,
-                sensor_half_w,
-                sensor_half_h,
-                width,
-                height,
-                cache.d_out_r,
-                cache.d_out_g,
-                cache.d_out_b,
-                config.gain,
-                1.0f / static_cast<float>(bucket.splat_grid_count),
-                2.0f / static_cast<float>(bucket.ray_grid),
-                config.aperture_blades,
-                config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
-                config.footprint_radius_bias,
-                config.footprint_clamp,
-                static_cast<GPUSpectralSampleDev*>(cache.d_spec),
-                spectral_count);
+        for (const GpuLaunchBucketCache& bucket : cache.launch_buckets) {
+            if (bucket.splat_pair_count > 0 && bucket.splat_grid_count > 0) {
+                const dim3 block(kBlockSize, 1, 1);
+                const dim3 grid(static_cast<unsigned>(bucket.splat_pair_count * sources.size()),
+                                static_cast<unsigned>((bucket.splat_grid_count + kBlockSize - 1) / kBlockSize),
+                                1);
 
-            const cudaError_t error = cudaGetLastError();
-            if (error != cudaSuccess) {
-                report_cuda_error(error, "ghost_kernel", out_error);
-                return false;
+                ghost_kernel<<<grid, block, 0, target_stream>>>(
+                    static_cast<Surface*>(cache.d_surfs),
+                    num_surfaces,
+                    lens.sensor_z,
+                    static_cast<GPUPair*>(bucket.d_splat_pairs),
+                    static_cast<int>(sources.size()),
+                    static_cast<GPUSource*>(cache.d_src),
+                    static_cast<GPUSample*>(bucket.d_splat_grid),
+                    bucket.splat_grid_count,
+                    lens.surfaces[0].semi_aperture,
+                    lens.surfaces[0].z - 20.0f,
+                    sensor_half_w,
+                    sensor_half_h,
+                    width,
+                    height,
+                    cache.d_out_r,
+                    cache.d_out_g,
+                    cache.d_out_b,
+                    config.gain,
+                    1.0f / static_cast<float>(bucket.splat_grid_count),
+                    2.0f / static_cast<float>(bucket.ray_grid),
+                    config.aperture_blades,
+                    config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
+                    config.footprint_radius_bias,
+                    config.footprint_clamp,
+                    static_cast<GPUSpectralSampleDev*>(cache.d_spec),
+                    spectral_count);
+
+                const cudaError_t kernel_error = cudaGetLastError();
+                if (kernel_error != cudaSuccess) {
+                    report_cuda_error(kernel_error, "ghost_kernel", out_error);
+                    return false;
+                }
+            }
+
+            if (bucket.cell_pair_count > 0 && bucket.cell_grid_count > 0) {
+                const dim3 block(kBlockSize, 1, 1);
+                const dim3 grid(static_cast<unsigned>(bucket.cell_pair_count * sources.size()),
+                                static_cast<unsigned>((bucket.cell_grid_count + kBlockSize - 1) / kBlockSize),
+                                1);
+
+                ghost_cell_kernel<<<grid, block, 0, target_stream>>>(
+                    static_cast<Surface*>(cache.d_surfs),
+                    num_surfaces,
+                    lens.sensor_z,
+                    static_cast<GPUPair*>(bucket.d_cell_pairs),
+                    static_cast<int>(sources.size()),
+                    static_cast<GPUSource*>(cache.d_src),
+                    static_cast<GPUCell*>(bucket.d_cell_grid),
+                    bucket.cell_grid_count,
+                    lens.surfaces[0].semi_aperture,
+                    lens.surfaces[0].z - 20.0f,
+                    sensor_half_w,
+                    sensor_half_h,
+                    width,
+                    height,
+                    cache.d_out_r,
+                    cache.d_out_g,
+                    cache.d_out_b,
+                    config.gain,
+                    1.0f / static_cast<float>(bucket.cell_grid_count),
+                    config.aperture_blades,
+                    config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
+                    config.cell_edge_inset,
+                    config.cell_coverage_bias,
+                    static_cast<GPUSpectralSampleDev*>(cache.d_spec),
+                    spectral_count);
+
+                const cudaError_t kernel_error = cudaGetLastError();
+                if (kernel_error != cudaSuccess) {
+                    report_cuda_error(kernel_error, "ghost_cell_kernel", out_error);
+                    return false;
+                }
             }
         }
 
-        if (bucket.cell_pair_count > 0 && bucket.cell_grid_count > 0) {
-            const dim3 block(kBlockSize, 1, 1);
-            const dim3 grid(static_cast<unsigned>(bucket.cell_pair_count * sources.size()),
-                            static_cast<unsigned>((bucket.cell_grid_count + kBlockSize - 1) / kBlockSize),
-                            1);
+        const cudaError_t out_r_error = cudaMemcpyAsync(cache.h_out_r,
+                                                        cache.d_out_r,
+                                                        num_pixels * sizeof(float),
+                                                        cudaMemcpyDeviceToHost,
+                                                        target_stream);
+        if (out_r_error != cudaSuccess) {
+            report_cuda_error(out_r_error, "cudaMemcpyAsync(h_out_r)", out_error);
+            return false;
+        }
+        const cudaError_t out_g_error = cudaMemcpyAsync(cache.h_out_g,
+                                                        cache.d_out_g,
+                                                        num_pixels * sizeof(float),
+                                                        cudaMemcpyDeviceToHost,
+                                                        target_stream);
+        if (out_g_error != cudaSuccess) {
+            report_cuda_error(out_g_error, "cudaMemcpyAsync(h_out_g)", out_error);
+            return false;
+        }
+        const cudaError_t out_b_error = cudaMemcpyAsync(cache.h_out_b,
+                                                        cache.d_out_b,
+                                                        num_pixels * sizeof(float),
+                                                        cudaMemcpyDeviceToHost,
+                                                        target_stream);
+        if (out_b_error != cudaSuccess) {
+            report_cuda_error(out_b_error, "cudaMemcpyAsync(h_out_b)", out_error);
+            return false;
+        }
 
-            ghost_cell_kernel<<<grid, block, 0, stream>>>(
-                static_cast<Surface*>(cache.d_surfs),
-                num_surfaces,
-                lens.sensor_z,
-                static_cast<GPUPair*>(bucket.d_cell_pairs),
-                static_cast<int>(sources.size()),
-                static_cast<GPUSource*>(cache.d_src),
-                static_cast<GPUCell*>(bucket.d_cell_grid),
-                bucket.cell_grid_count,
-                lens.surfaces[0].semi_aperture,
-                lens.surfaces[0].z - 20.0f,
-                sensor_half_w,
-                sensor_half_h,
-                width,
-                height,
-                cache.d_out_r,
-                cache.d_out_g,
-                cache.d_out_b,
-                config.gain,
-                1.0f / static_cast<float>(bucket.cell_grid_count),
-                config.aperture_blades,
-                config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
-                config.cell_edge_inset,
-                config.cell_coverage_bias,
-                static_cast<GPUSpectralSampleDev*>(cache.d_spec),
-                spectral_count);
+        return true;
+    };
 
-            const cudaError_t error = cudaGetLastError();
-            if (error != cudaSuccess) {
-                report_cuda_error(error, "ghost_cell_kernel", out_error);
+    auto destroy_graph_cache = [&]() {
+        if (cache.graph_exec) {
+            cudaGraphExecDestroy(static_cast<cudaGraphExec_t>(cache.graph_exec));
+            cache.graph_exec = nullptr;
+        }
+        if (cache.graph) {
+            cudaGraphDestroy(static_cast<cudaGraph_t>(cache.graph));
+            cache.graph = nullptr;
+        }
+        cache.graph_key = 0;
+    };
+
+    if (cache.graph_key != graph_key || !cache.graph_exec) {
+        destroy_graph_cache();
+        GPU_CHECK(cudaStreamSynchronize(stream));
+
+        if (cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal) == cudaSuccess) {
+            if (!enqueue_render_commands(stream)) {
+                cudaGraph_t aborted_graph = nullptr;
+                cudaStreamEndCapture(stream, &aborted_graph);
+                if (aborted_graph) {
+                    cudaGraphDestroy(aborted_graph);
+                }
+                destroy_graph_cache();
                 return false;
             }
+
+            cudaGraph_t captured_graph = nullptr;
+            const cudaError_t end_capture_error = cudaStreamEndCapture(stream, &captured_graph);
+            if (end_capture_error == cudaSuccess && captured_graph) {
+                cudaGraphExec_t graph_exec = nullptr;
+                const cudaError_t instantiate_error =
+                    cudaGraphInstantiate(&graph_exec, captured_graph, nullptr, nullptr, 0);
+                if (instantiate_error == cudaSuccess) {
+                    cache.graph = captured_graph;
+                    cache.graph_exec = graph_exec;
+                    cache.graph_key = graph_key;
+                } else {
+                    cudaGraphDestroy(captured_graph);
+                    destroy_graph_cache();
+                }
+            } else {
+                if (captured_graph) {
+                    cudaGraphDestroy(captured_graph);
+                }
+                destroy_graph_cache();
+            }
+        } else {
+            destroy_graph_cache();
         }
     }
 
-    GPU_CHECK(cudaMemcpyAsync(cache.h_out_r,
-                              cache.d_out_r,
-                              num_pixels * sizeof(float),
-                              cudaMemcpyDeviceToHost,
-                              stream));
-    GPU_CHECK(cudaMemcpyAsync(cache.h_out_g,
-                              cache.d_out_g,
-                              num_pixels * sizeof(float),
-                              cudaMemcpyDeviceToHost,
-                              stream));
-    GPU_CHECK(cudaMemcpyAsync(cache.h_out_b,
-                              cache.d_out_b,
-                              num_pixels * sizeof(float),
-                              cudaMemcpyDeviceToHost,
-                              stream));
+    if (cache.graph_exec && cache.graph_key == graph_key) {
+        GPU_CHECK(cudaGraphLaunch(static_cast<cudaGraphExec_t>(cache.graph_exec), stream));
+    } else if (!enqueue_render_commands(stream)) {
+        return false;
+    }
+
     GPU_CHECK(cudaStreamSynchronize(stream));
 
     std::memcpy(out_r, cache.h_out_r, num_pixels * sizeof(float));
