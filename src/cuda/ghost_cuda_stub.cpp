@@ -42,3 +42,22 @@ bool launch_ghost_cuda(
     }
     return false;
 }
+
+bool launch_ghost_cuda_device(
+    const LensSystem&,
+    const GhostRenderSetup&,
+    const BrightPixel*,
+    int,
+    float,
+    float,
+    int,
+    int,
+    const GhostConfig&,
+    GpuBufferCache&,
+    std::string* out_error)
+{
+    if (out_error) {
+        *out_error = "FlareSim was built without CUDA support.";
+    }
+    return false;
+}

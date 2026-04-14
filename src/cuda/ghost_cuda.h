@@ -100,3 +100,17 @@ bool launch_ghost_cuda(
     GpuBufferCache& cache,
     std::string* out_error = nullptr
 );
+
+bool launch_ghost_cuda_device(
+    const LensSystem& lens,
+    const GhostRenderSetup& setup,
+    const BrightPixel* device_sources,
+    int source_count,
+    float sensor_half_w,
+    float sensor_half_h,
+    int width,
+    int height,
+    const GhostConfig& config,
+    GpuBufferCache& cache,
+    std::string* out_error = nullptr
+);

@@ -19,6 +19,13 @@
 #include <string>
 #include <vector>
 
+#if __has_include(<cuda_runtime.h>)
+#include <cuda_runtime.h>
+#define FLARESIM_TEST_HAS_CUDA_RUNTIME 1
+#else
+#define FLARESIM_TEST_HAS_CUDA_RUNTIME 0
+#endif
+
 namespace {
 
 std::string repo_path(const char* rel)
@@ -1119,6 +1126,103 @@ void test_frame_bridge()
     assert(source_hits <= 9);
 }
 
+void test_frame_bridge_cuda_device()
+{
+    if (!cuda_ghost_renderer_compiled()) {
+        return;
+    }
+
+    std::string reason;
+    if (!cuda_ghost_renderer_available(&reason)) {
+        return;
+    }
+
+#if !FLARESIM_TEST_HAS_CUDA_RUNTIME
+    return;
+#else
+    std::string asset_root;
+    assert(find_flaresim_asset_root(FLARESIM_REPO_ROOT, asset_root));
+
+    constexpr int width = 8;
+    constexpr int height = 8;
+    constexpr int row_floats = 40;
+    std::vector<float> input(row_floats * height, 0.0f);
+    std::vector<float> expected(row_floats * height, -7.0f);
+    std::vector<float> actual(row_floats * height, -7.0f);
+    float* hot = input.data() + row_floats * 3 + 4 * 4;
+    hot[0] = 4.0f;
+    hot[1] = 8.0f;
+    hot[2] = 12.0f;
+    hot[3] = 1.0f;
+
+    AeParameterState state {};
+    state.threshold = 0.25f;
+    state.downsample = 1;
+    state.ray_grid = 4;
+    state.flare_gain = 100.0f;
+    state.sky_brightness = 0.5f;
+    state.haze_gain = 0.1f;
+    state.haze_radius = 0.05f;
+    state.haze_blur_passes = 1;
+    state.starburst_gain = 0.1f;
+    state.starburst_scale = 0.08f;
+    state.bloom.threshold = 0.25f;
+    state.bloom.strength = 0.2f;
+    state.bloom.radius = 0.08f;
+    state.bloom.passes = 1;
+    state.bloom.octaves = 1;
+    state.bloom.chromatic = false;
+    state.view = AeOutputView::Composite;
+
+    assert(render_frame_to_bgra128_host_buffer(
+        asset_root, state, input.data(), expected.data(), width, height, row_floats, row_floats));
+
+    float* d_input = nullptr;
+    float* d_output = nullptr;
+    assert(cudaMalloc(&d_input, input.size() * sizeof(float)) == cudaSuccess);
+    assert(cudaMalloc(&d_output, actual.size() * sizeof(float)) == cudaSuccess);
+    assert(cudaMemcpy(d_input,
+                      input.data(),
+                      input.size() * sizeof(float),
+                      cudaMemcpyHostToDevice) == cudaSuccess);
+    assert(cudaMemcpy(d_output,
+                      actual.data(),
+                      actual.size() * sizeof(float),
+                      cudaMemcpyHostToDevice) == cudaSuccess);
+
+    const bool ok = render_frame_to_bgra128_device_buffer(
+        asset_root, state, d_input, d_output, width, height, row_floats, row_floats);
+    assert(ok);
+
+    assert(cudaMemcpy(actual.data(),
+                      d_output,
+                      actual.size() * sizeof(float),
+                      cudaMemcpyDeviceToHost) == cudaSuccess);
+    cudaFree(d_input);
+    cudaFree(d_output);
+
+    for (int y = 0; y < height; ++y) {
+        const int used = width * 4;
+        for (int i = used; i < row_floats; ++i) {
+            assert(actual[y * row_floats + i] == -7.0f);
+        }
+    }
+
+    float expected_energy = 0.0f;
+    float actual_energy = 0.0f;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width * 4; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y) * row_floats + static_cast<std::size_t>(x);
+            expected_energy += std::abs(expected[i]);
+            actual_energy += std::abs(actual[i]);
+        }
+    }
+    assert(expected_energy > 0.0f);
+    assert(actual_energy > 0.0f);
+    assert(std::abs(expected_energy - actual_energy) / expected_energy < 0.25f);
+#endif
+}
+
 void test_param_schema()
 {
     assert(parameter_count() > 100);
@@ -1296,6 +1400,7 @@ int main()
     test_render_plan_cache();
     test_pixel_convert();
     test_frame_bridge();
+    test_frame_bridge_cuda_device();
     test_param_schema();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;

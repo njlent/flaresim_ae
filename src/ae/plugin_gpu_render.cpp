@@ -9,9 +9,7 @@
 #include "ghost_cuda.h"
 #include "render_shared.h"
 
-#include <cstring>
 #include <string>
-#include <vector>
 
 #if __has_include(<cuda_runtime.h>)
 #include <cuda_runtime.h>
@@ -22,75 +20,7 @@
 
 namespace {
 
-struct GpuSmartRenderScratch
-{
-    std::vector<float> input;
-    std::vector<float> output;
-    std::vector<float> mask;
-};
-
-GpuSmartRenderScratch& gpu_smart_render_scratch()
-{
-    static thread_local GpuSmartRenderScratch scratch;
-    return scratch;
-}
-
 #if FLARESIM_AE_HAS_CUDA_SMART_RENDER
-bool resize_gpu_row_buffer(std::vector<float>& buffer, const PF_EffectWorld& world)
-{
-    if (world.rowbytes <= 0 || world.height <= 0) {
-        return false;
-    }
-
-    const std::size_t row_floats =
-        static_cast<std::size_t>(world.rowbytes) / sizeof(float);
-    buffer.resize(row_floats * static_cast<std::size_t>(world.height));
-    return true;
-}
-
-bool copy_gpu_world_to_host_buffer(const PF_EffectWorld& world,
-                                   const void* device_pixels,
-                                   std::vector<float>& out_pixels)
-{
-    if (!device_pixels || !resize_gpu_row_buffer(out_pixels, world)) {
-        return false;
-    }
-
-    const cudaError_t error = cudaMemcpy2D(out_pixels.data(),
-                                           static_cast<std::size_t>(world.rowbytes),
-                                           device_pixels,
-                                           static_cast<std::size_t>(world.rowbytes),
-                                           static_cast<std::size_t>(world.width) * 4u * sizeof(float),
-                                           static_cast<std::size_t>(world.height),
-                                           cudaMemcpyDeviceToHost);
-    return error == cudaSuccess;
-}
-
-bool copy_host_buffer_to_gpu_world(const std::vector<float>& pixels,
-                                   PF_EffectWorld& world,
-                                   void* device_pixels)
-{
-    if (!device_pixels || world.rowbytes <= 0 || world.height <= 0) {
-        return false;
-    }
-
-    const std::size_t required_floats =
-        (static_cast<std::size_t>(world.rowbytes) / sizeof(float)) *
-        static_cast<std::size_t>(world.height);
-    if (pixels.size() < required_floats) {
-        return false;
-    }
-
-    const cudaError_t error = cudaMemcpy2D(device_pixels,
-                                           static_cast<std::size_t>(world.rowbytes),
-                                           pixels.data(),
-                                           static_cast<std::size_t>(world.rowbytes),
-                                           static_cast<std::size_t>(world.width) * 4u * sizeof(float),
-                                           static_cast<std::size_t>(world.height),
-                                           cudaMemcpyHostToDevice);
-    return error == cudaSuccess;
-}
-
 bool copy_gpu_world_to_gpu_world(const PF_EffectWorld& src_world,
                                  const void* src_pixels,
                                  PF_EffectWorld& dst_world,
@@ -181,37 +111,19 @@ PF_Err render_checked_out_gpu_worlds(PF_InData* in_data,
         }
     }
 
-    auto& scratch = gpu_smart_render_scratch();
-    if (!copy_gpu_world_to_host_buffer(*input_world, input_device_pixels, scratch.input)) {
-        return PF_Err_INTERNAL_STRUCT_DAMAGED;
-    }
-
-    if (mask_world &&
-        (!copy_gpu_world_to_host_buffer(*mask_world, mask_device_pixels, scratch.mask))) {
-        mask_world = nullptr;
-        mask_device_pixels = nullptr;
-    }
-
-    if (!resize_gpu_row_buffer(scratch.output, *output_world)) {
-        return PF_Err_INTERNAL_STRUCT_DAMAGED;
-    }
-
-    const bool rendered = render_frame_to_bgra128_host_buffer(
+    const bool rendered = render_frame_to_bgra128_device_buffer(
         asset_root,
         state,
-        scratch.input.data(),
-        scratch.output.data(),
+        static_cast<const float*>(input_device_pixels),
+        static_cast<float*>(output_device_pixels),
         input_world->width,
         input_world->height,
         input_world->rowbytes / static_cast<int>(sizeof(float)),
         output_world->rowbytes / static_cast<int>(sizeof(float)),
-        mask_world ? scratch.mask.data() : nullptr,
+        mask_world ? static_cast<const float*>(mask_device_pixels) : nullptr,
         mask_world ? (mask_world->rowbytes / static_cast<int>(sizeof(float))) : 0);
 
     if (rendered) {
-        if (!copy_host_buffer_to_gpu_world(scratch.output, *output_world, output_device_pixels)) {
-            return PF_Err_INTERNAL_STRUCT_DAMAGED;
-        }
         return PF_Err_NONE;
     }
 

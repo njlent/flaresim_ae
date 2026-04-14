@@ -12,6 +12,7 @@ namespace fs = std::filesystem;
 struct ThreadRenderContext
 {
     FrameRenderCache cache;
+    GpuFrameRenderCache gpu_cache;
     LensSystem lens;
     std::string asset_root;
     std::string lens_path;
@@ -453,4 +454,47 @@ bool render_frame_to_bgra128_host_buffer(
     }
 
     return pack_bgra128_image_impl(context.output_image, output_pixels, output_row_floats);
+}
+
+bool render_frame_to_bgra128_device_buffer(
+    const std::string& asset_root,
+    const AeParameterState& state,
+    const float* input_pixels,
+    float* output_pixels,
+    int width,
+    int height,
+    int input_row_floats,
+    int output_row_floats,
+    const float* mask_pixels,
+    int mask_row_floats)
+{
+    if (!input_pixels || !output_pixels || width <= 0 || height <= 0 || asset_root.empty()) {
+        return false;
+    }
+
+    ThreadRenderContext& context = thread_render_context();
+    const LensSystem* lens = nullptr;
+    if (!resolve_cached_lens(asset_root, state.lens, context, lens) || !lens) {
+        return false;
+    }
+
+    GhostRenderBackend backend = GhostRenderBackend::CPU;
+    std::string render_error;
+    const bool ok = render_frame_cuda_bgra128(
+        *lens,
+        build_frame_render_settings(state),
+        state.view,
+        input_pixels,
+        output_pixels,
+        width,
+        height,
+        input_row_floats,
+        output_row_floats,
+        mask_pixels,
+        mask_row_floats,
+        context.gpu_cache,
+        &backend,
+        &render_error);
+    (void)backend;
+    return ok;
 }

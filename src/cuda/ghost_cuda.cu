@@ -648,6 +648,17 @@ struct GPUSource
     float b;
 };
 
+__global__ void pack_sources_kernel(const BrightPixel* src, GPUSource* dst, int count)
+{
+    const int i = static_cast<int>(blockIdx.x) * blockDim.x + static_cast<int>(threadIdx.x);
+    if (i >= count) {
+        return;
+    }
+
+    const BrightPixel source = src[i];
+    dst[i] = {source.angle_x, source.angle_y, source.r, source.g, source.b};
+}
+
 struct GPUSample
 {
     float u;
@@ -900,6 +911,9 @@ __global__ void ghost_kernel(const Surface* surfaces,
     }
 
     const GPUSource& source = sources[source_index];
+    if (!(source.r > 0.0f || source.g > 0.0f || source.b > 0.0f)) {
+        return;
+    }
     const GPUSample& grid_sample = grid_samples[grid_index];
     if (!d_is_valid_pupil_sample(grid_sample.u, grid_sample.v, aperture_blades, aperture_rotation_rad)) {
         return;
@@ -1017,6 +1031,9 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
     }
 
     const GPUSource& source = sources[source_index];
+    if (!(source.r > 0.0f || source.g > 0.0f || source.b > 0.0f)) {
+        return;
+    }
     const GPUCell& cell = grid_cells[cell_index];
     const DVec3 beam_dir = dv_normalize(dv(tanf(source.angle_x), tanf(source.angle_y), 1.0f));
     const float inset = fminf(fmaxf(cell_edge_inset, 0.0f), 0.45f);
@@ -1448,21 +1465,24 @@ bool cuda_ghost_renderer_available(std::string* reason)
     return false;
 }
 
-bool launch_ghost_cuda(const LensSystem& lens,
-                       const GhostRenderSetup& setup,
-                       const std::vector<BrightPixel>& sources,
-                       float sensor_half_w,
-                       float sensor_half_h,
-                       float* out_r,
-                       float* out_g,
-                       float* out_b,
-                       int width,
-                       int height,
-                       const GhostConfig& config,
-                       GpuBufferCache& cache,
-                       std::string* out_error)
+bool launch_ghost_cuda_impl(const LensSystem& lens,
+                            const GhostRenderSetup& setup,
+                            const std::vector<BrightPixel>* host_sources,
+                            const BrightPixel* device_sources,
+                            int source_count,
+                            float sensor_half_w,
+                            float sensor_half_h,
+                            float* out_r,
+                            float* out_g,
+                            float* out_b,
+                            int width,
+                            int height,
+                            const GhostConfig& config,
+                            GpuBufferCache& cache,
+                            bool copy_to_host,
+                            std::string* out_error)
 {
-    if (!out_r || !out_g || !out_b || width <= 0 || height <= 0) {
+    if ((copy_to_host && (!out_r || !out_g || !out_b)) || width <= 0 || height <= 0) {
         if (out_error) {
             *out_error = "Invalid output buffers for CUDA ghost render.";
         }
@@ -1470,8 +1490,14 @@ bool launch_ghost_cuda(const LensSystem& lens,
     }
 
     const auto& active_pair_plans = setup.active_pair_plans;
-    if (active_pair_plans.empty() || sources.empty()) {
+    if (active_pair_plans.empty() || source_count <= 0) {
         return true;
+    }
+    if (!host_sources && !device_sources) {
+        if (out_error) {
+            *out_error = "Invalid CUDA source buffer.";
+        }
+        return false;
     }
 
     if (!cuda_ghost_renderer_available(out_error)) {
@@ -1543,7 +1569,10 @@ bool launch_ghost_cuda(const LensSystem& lens,
                               "d_surfs")) {
         return false;
     }
-    if (!ensure_device_buffer(cache.d_src, cache.src_bytes, sources.size() * sizeof(GPUSource), "d_src")) {
+    if (!ensure_device_buffer(cache.d_src,
+                              cache.src_bytes,
+                              static_cast<std::size_t>(source_count) * sizeof(GPUSource),
+                              "d_src")) {
         return false;
     }
 
@@ -1577,11 +1606,13 @@ bool launch_ghost_cuda(const LensSystem& lens,
         cache.out_floats = num_pixels;
     }
 
-    if (!ensure_host_buffer(cache.h_src,
-                            cache.h_src_bytes,
-                            sources.size() * sizeof(GPUSource),
-                            "h_src")) {
-        return false;
+    if (host_sources) {
+        if (!ensure_host_buffer(cache.h_src,
+                                cache.h_src_bytes,
+                                static_cast<std::size_t>(source_count) * sizeof(GPUSource),
+                                "h_src")) {
+            return false;
+        }
     }
     if (!ensure_host_buffer(cache.h_spec,
                             cache.h_spec_bytes,
@@ -1591,33 +1622,35 @@ bool launch_ghost_cuda(const LensSystem& lens,
         return false;
     }
 
-    const std::size_t host_output_bytes = num_pixels * sizeof(float);
-    if (host_output_bytes > cache.host_out_floats) {
-        cudaFreeHost(cache.h_out_r);
-        cudaFreeHost(cache.h_out_g);
-        cudaFreeHost(cache.h_out_b);
-        cache.h_out_r = nullptr;
-        cache.h_out_g = nullptr;
-        cache.h_out_b = nullptr;
-        cache.host_out_floats = 0;
+    if (copy_to_host) {
+        const std::size_t host_output_bytes = num_pixels * sizeof(float);
+        if (host_output_bytes > cache.host_out_floats) {
+            cudaFreeHost(cache.h_out_r);
+            cudaFreeHost(cache.h_out_g);
+            cudaFreeHost(cache.h_out_b);
+            cache.h_out_r = nullptr;
+            cache.h_out_g = nullptr;
+            cache.h_out_b = nullptr;
+            cache.host_out_floats = 0;
 
-        cudaError_t error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_r), host_output_bytes);
-        if (error != cudaSuccess) {
-            report_cuda_error(error, "h_out_r", out_error);
-            return false;
-        }
-        error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_g), host_output_bytes);
-        if (error != cudaSuccess) {
-            report_cuda_error(error, "h_out_g", out_error);
-            return false;
-        }
-        error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_b), host_output_bytes);
-        if (error != cudaSuccess) {
-            report_cuda_error(error, "h_out_b", out_error);
-            return false;
-        }
+            cudaError_t error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_r), host_output_bytes);
+            if (error != cudaSuccess) {
+                report_cuda_error(error, "h_out_r", out_error);
+                return false;
+            }
+            error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_g), host_output_bytes);
+            if (error != cudaSuccess) {
+                report_cuda_error(error, "h_out_g", out_error);
+                return false;
+            }
+            error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_b), host_output_bytes);
+            if (error != cudaSuccess) {
+                report_cuda_error(error, "h_out_b", out_error);
+                return false;
+            }
 
-        cache.host_out_floats = host_output_bytes;
+            cache.host_out_floats = host_output_bytes;
+        }
     }
 
 #define GPU_CHECK(call)                                                                 \
@@ -1762,21 +1795,23 @@ bool launch_ghost_cuda(const LensSystem& lens,
         cache.setup_key = setup_key;
     }
 
-    auto* host_sources = static_cast<GPUSource*>(cache.h_src);
-    for (std::size_t i = 0; i < sources.size(); ++i) {
-        host_sources[i] = {
-            sources[i].angle_x,
-            sources[i].angle_y,
-            sources[i].r,
-            sources[i].g,
-            sources[i].b,
-        };
+    if (host_sources) {
+        auto* packed_sources = static_cast<GPUSource*>(cache.h_src);
+        for (int i = 0; i < source_count; ++i) {
+            packed_sources[i] = {
+                (*host_sources)[static_cast<std::size_t>(i)].angle_x,
+                (*host_sources)[static_cast<std::size_t>(i)].angle_y,
+                (*host_sources)[static_cast<std::size_t>(i)].r,
+                (*host_sources)[static_cast<std::size_t>(i)].g,
+                (*host_sources)[static_cast<std::size_t>(i)].b,
+            };
+        }
     }
     std::uint64_t graph_key = kFnvOffset;
     hash_append_value(graph_key, lens_key);
     hash_append_value(graph_key, spec_key);
     hash_append_value(graph_key, setup_key);
-    hash_append_value(graph_key, sources.size());
+    hash_append_value(graph_key, source_count);
     hash_append_value(graph_key, width);
     hash_append_value(graph_key, height);
     hash_append_value(graph_key, sensor_half_w);
@@ -1790,14 +1825,27 @@ bool launch_ghost_cuda(const LensSystem& lens,
     hash_append_value(graph_key, config.cell_coverage_bias);
 
     auto enqueue_render_commands = [&](cudaStream_t target_stream) -> bool {
-        const cudaError_t src_copy_error = cudaMemcpyAsync(cache.d_src,
-                                                           cache.h_src,
-                                                           sources.size() * sizeof(GPUSource),
-                                                           cudaMemcpyHostToDevice,
-                                                           target_stream);
-        if (src_copy_error != cudaSuccess) {
-            report_cuda_error(src_copy_error, "cudaMemcpyAsync(d_src)", out_error);
-            return false;
+        if (host_sources) {
+            const cudaError_t src_copy_error = cudaMemcpyAsync(cache.d_src,
+                                                               cache.h_src,
+                                                               static_cast<std::size_t>(source_count) * sizeof(GPUSource),
+                                                               cudaMemcpyHostToDevice,
+                                                               target_stream);
+            if (src_copy_error != cudaSuccess) {
+                report_cuda_error(src_copy_error, "cudaMemcpyAsync(d_src)", out_error);
+                return false;
+            }
+        } else {
+            const int pack_grid = (source_count + kBlockSize - 1) / kBlockSize;
+            pack_sources_kernel<<<pack_grid, kBlockSize, 0, target_stream>>>(
+                device_sources,
+                static_cast<GPUSource*>(cache.d_src),
+                source_count);
+            const cudaError_t pack_error = cudaGetLastError();
+            if (pack_error != cudaSuccess) {
+                report_cuda_error(pack_error, "pack_sources_kernel", out_error);
+                return false;
+            }
         }
 
         const cudaError_t memset_r_error =
@@ -1822,7 +1870,7 @@ bool launch_ghost_cuda(const LensSystem& lens,
         for (const GpuLaunchBucketCache& bucket : cache.launch_buckets) {
             if (bucket.splat_pair_count > 0 && bucket.splat_grid_count > 0) {
                 const dim3 block(kBlockSize, 1, 1);
-                const dim3 grid(static_cast<unsigned>(bucket.splat_pair_count * sources.size()),
+                const dim3 grid(static_cast<unsigned>(bucket.splat_pair_count * source_count),
                                 static_cast<unsigned>((bucket.splat_grid_count + kBlockSize - 1) / kBlockSize),
                                 1);
 
@@ -1831,7 +1879,7 @@ bool launch_ghost_cuda(const LensSystem& lens,
                     num_surfaces,
                     lens.sensor_z,
                     static_cast<GPUPair*>(bucket.d_splat_pairs),
-                    static_cast<int>(sources.size()),
+                    source_count,
                     static_cast<GPUSource*>(cache.d_src),
                     static_cast<GPUSample*>(bucket.d_splat_grid),
                     bucket.splat_grid_count,
@@ -1863,7 +1911,7 @@ bool launch_ghost_cuda(const LensSystem& lens,
 
             if (bucket.cell_pair_count > 0 && bucket.cell_grid_count > 0) {
                 const dim3 block(kBlockSize, 1, 1);
-                const dim3 grid(static_cast<unsigned>(bucket.cell_pair_count * sources.size()),
+                const dim3 grid(static_cast<unsigned>(bucket.cell_pair_count * source_count),
                                 static_cast<unsigned>((bucket.cell_grid_count + kBlockSize - 1) / kBlockSize),
                                 1);
 
@@ -1872,7 +1920,7 @@ bool launch_ghost_cuda(const LensSystem& lens,
                     num_surfaces,
                     lens.sensor_z,
                     static_cast<GPUPair*>(bucket.d_cell_pairs),
-                    static_cast<int>(sources.size()),
+                    source_count,
                     static_cast<GPUSource*>(cache.d_src),
                     static_cast<GPUCell*>(bucket.d_cell_grid),
                     bucket.cell_grid_count,
@@ -1902,32 +1950,34 @@ bool launch_ghost_cuda(const LensSystem& lens,
             }
         }
 
-        const cudaError_t out_r_error = cudaMemcpyAsync(cache.h_out_r,
-                                                        cache.d_out_r,
-                                                        num_pixels * sizeof(float),
-                                                        cudaMemcpyDeviceToHost,
-                                                        target_stream);
-        if (out_r_error != cudaSuccess) {
-            report_cuda_error(out_r_error, "cudaMemcpyAsync(h_out_r)", out_error);
-            return false;
-        }
-        const cudaError_t out_g_error = cudaMemcpyAsync(cache.h_out_g,
-                                                        cache.d_out_g,
-                                                        num_pixels * sizeof(float),
-                                                        cudaMemcpyDeviceToHost,
-                                                        target_stream);
-        if (out_g_error != cudaSuccess) {
-            report_cuda_error(out_g_error, "cudaMemcpyAsync(h_out_g)", out_error);
-            return false;
-        }
-        const cudaError_t out_b_error = cudaMemcpyAsync(cache.h_out_b,
-                                                        cache.d_out_b,
-                                                        num_pixels * sizeof(float),
-                                                        cudaMemcpyDeviceToHost,
-                                                        target_stream);
-        if (out_b_error != cudaSuccess) {
-            report_cuda_error(out_b_error, "cudaMemcpyAsync(h_out_b)", out_error);
-            return false;
+        if (copy_to_host) {
+            const cudaError_t out_r_error = cudaMemcpyAsync(cache.h_out_r,
+                                                            cache.d_out_r,
+                                                            num_pixels * sizeof(float),
+                                                            cudaMemcpyDeviceToHost,
+                                                            target_stream);
+            if (out_r_error != cudaSuccess) {
+                report_cuda_error(out_r_error, "cudaMemcpyAsync(h_out_r)", out_error);
+                return false;
+            }
+            const cudaError_t out_g_error = cudaMemcpyAsync(cache.h_out_g,
+                                                            cache.d_out_g,
+                                                            num_pixels * sizeof(float),
+                                                            cudaMemcpyDeviceToHost,
+                                                            target_stream);
+            if (out_g_error != cudaSuccess) {
+                report_cuda_error(out_g_error, "cudaMemcpyAsync(h_out_g)", out_error);
+                return false;
+            }
+            const cudaError_t out_b_error = cudaMemcpyAsync(cache.h_out_b,
+                                                            cache.d_out_b,
+                                                            num_pixels * sizeof(float),
+                                                            cudaMemcpyDeviceToHost,
+                                                            target_stream);
+            if (out_b_error != cudaSuccess) {
+                report_cuda_error(out_b_error, "cudaMemcpyAsync(h_out_b)", out_error);
+                return false;
+            }
         }
 
         return true;
@@ -1993,11 +2043,75 @@ bool launch_ghost_cuda(const LensSystem& lens,
 
     GPU_CHECK(cudaStreamSynchronize(stream));
 
-    std::memcpy(out_r, cache.h_out_r, num_pixels * sizeof(float));
-    std::memcpy(out_g, cache.h_out_g, num_pixels * sizeof(float));
-    std::memcpy(out_b, cache.h_out_b, num_pixels * sizeof(float));
+    if (copy_to_host) {
+        std::memcpy(out_r, cache.h_out_r, num_pixels * sizeof(float));
+        std::memcpy(out_g, cache.h_out_g, num_pixels * sizeof(float));
+        std::memcpy(out_b, cache.h_out_b, num_pixels * sizeof(float));
+    }
 
 #undef GPU_CHECK
 
     return true;
+}
+
+bool launch_ghost_cuda(const LensSystem& lens,
+                       const GhostRenderSetup& setup,
+                       const std::vector<BrightPixel>& sources,
+                       float sensor_half_w,
+                       float sensor_half_h,
+                       float* out_r,
+                       float* out_g,
+                       float* out_b,
+                       int width,
+                       int height,
+                       const GhostConfig& config,
+                       GpuBufferCache& cache,
+                       std::string* out_error)
+{
+    return launch_ghost_cuda_impl(lens,
+                                  setup,
+                                  &sources,
+                                  nullptr,
+                                  static_cast<int>(sources.size()),
+                                  sensor_half_w,
+                                  sensor_half_h,
+                                  out_r,
+                                  out_g,
+                                  out_b,
+                                  width,
+                                  height,
+                                  config,
+                                  cache,
+                                  true,
+                                  out_error);
+}
+
+bool launch_ghost_cuda_device(const LensSystem& lens,
+                              const GhostRenderSetup& setup,
+                              const BrightPixel* device_sources,
+                              int source_count,
+                              float sensor_half_w,
+                              float sensor_half_h,
+                              int width,
+                              int height,
+                              const GhostConfig& config,
+                              GpuBufferCache& cache,
+                              std::string* out_error)
+{
+    return launch_ghost_cuda_impl(lens,
+                                  setup,
+                                  nullptr,
+                                  device_sources,
+                                  source_count,
+                                  sensor_half_w,
+                                  sensor_half_h,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  width,
+                                  height,
+                                  config,
+                                  cache,
+                                  false,
+                                  out_error);
 }

@@ -34,9 +34,9 @@ Bit-depth policy in code:
 - 16-bpc pack/unpack helpers clamp only at final 16-bit conversion
 - 32-bpc helpers preserve values above `1.0`
 - `src/ae/frame_bridge.*` now runs one float render/composite path for all three host depths
-- `src/ae/frame_bridge.*` also packs/unpacks AE GPU `BGRA128` host staging buffers for the Smart Render GPU bridge
-- bridge preserves input alpha and only changes RGB payload
-- bundled lens resolution no longer has to start from the repo root; `src/ae/asset_root.*` can discover the asset root by walking upward from an anchor path
+- `src/ae/frame_bridge.*` now has both a host-staged `BGRA128` bridge and a device-resident CUDA `BGRA128` bridge for AE Smart Render GPU
+  - bridge preserves input alpha and only changes RGB payload
+  - bundled lens resolution no longer has to start from the repo root; `src/ae/asset_root.*` can discover the asset root by walking upward from an anchor path
 - param ids, popup ordering, and popup-index -> runtime-state mapping now live in `src/ae/param_schema.*`
 - plugin target also gets `FLARESIM_REPO_ROOT` as a fallback asset-root anchor during local builds
 
@@ -58,5 +58,4 @@ Bit-depth policy in code:
 
 ## Remaining SDK tasks
 - tighten Smart PreRender state handling beyond current minimal checkout/result-rect flow
-- replace current GPU Smart Render host-staging bridge with a true zero-copy GPU compositor path
 - file/import UI for external lenses

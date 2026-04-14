@@ -13,8 +13,14 @@ set(FLARESIM_AE_SDK_SENTINEL "Examples/Headers/AEConfig.h")
 set(FLARESIM_AE_SDK_INNER_DIRNAME "ae25.6_61.64bit.AfterEffectsSDK")
 set(FLARESIM_AE_SDK_CANONICAL_ROOT "E:/projects/ae/SDK/AfterEffectsSDK_25.6_61_win")
 
-set(FLARESIM_CUDA_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/ghost_cuda.cu")
-set(FLARESIM_CUDA_STUB_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/ghost_cuda_stub.cpp")
+set(FLARESIM_CUDA_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/ghost_cuda.cu"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/frame_cuda.cu"
+)
+set(FLARESIM_CUDA_STUB_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/ghost_cuda_stub.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/frame_cuda_stub.cpp"
+)
 
 set(AE_SDK_RESOLVED_ROOT "")
 set(_flaresim_ae_sdk_candidates)
@@ -65,7 +71,7 @@ if(FLARESIM_ENABLE_CUDA)
         enable_language(CUDA)
         find_package(CUDAToolkit QUIET)
 
-        if(CUDAToolkit_FOUND AND EXISTS "${FLARESIM_CUDA_SOURCE}")
+        if(CUDAToolkit_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/ghost_cuda.cu")
             set(FLARESIM_CUDA_ENABLED ON)
 
             set(CMAKE_CUDA_STANDARD 17)
@@ -80,13 +86,15 @@ endif()
 
 if(FLARESIM_CUDA_ENABLED)
     add_library(flaresim_cuda STATIC
-        ${FLARESIM_CUDA_SOURCE}
+        ${FLARESIM_CUDA_SOURCES}
     )
 
     target_include_directories(flaresim_cuda
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda
             ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/ae
     )
 
     target_link_libraries(flaresim_cuda PUBLIC CUDA::cudart)
@@ -95,15 +103,17 @@ if(FLARESIM_CUDA_ENABLED)
         CUDA_SEPARABLE_COMPILATION OFF
         CUDA_ARCHITECTURES "${FLARESIM_CUDA_ARCHITECTURES}"
     )
-elseif(EXISTS "${FLARESIM_CUDA_STUB_SOURCE}")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/ghost_cuda_stub.cpp")
     add_library(flaresim_cuda STATIC
-        ${FLARESIM_CUDA_STUB_SOURCE}
+        ${FLARESIM_CUDA_STUB_SOURCES}
     )
 
     target_include_directories(flaresim_cuda
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda
             ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/ae
     )
 else()
     add_library(flaresim_cuda INTERFACE)

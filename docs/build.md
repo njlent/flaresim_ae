@@ -45,13 +45,13 @@ Current AE target coverage:
 - AE effect registration metadata
 - Smart Render + legacy render bridge into shared runtime
 - AE GPU Smart Render F32 selector path for CUDA hosts (`PF_Cmd_GPU_DEVICE_SETUP`, `PF_Cmd_SMART_RENDER_GPU`, `PF_PixelFormat_GPU_BGRA128`)
-- internal CUDA ghost rendering with CPU output back to AE worlds
+- device-resident CUDA flare/bloom/haze/starburst/composite path for AE GPU worlds
 - Camera / Aperture / Flare Settings / Post-processing AE sections
 - output `View` popup for Composite / Flare Only / Bloom Only / Sources / Diagnostics
 
 GPU Smart Render note:
-- current AE GPU path stages `GPU_BGRA128` worlds through host float buffers, runs the existing shared runtime/compositor, then uploads back to the output GPU world
-- this gives AE a real F32 GPU render path now, but it is not yet a zero-copy/full-GPU compositor
+- current AE GPU path keeps full-frame image buffers on device end-to-end
+- bright-source extraction, clustering, ghosting, haze, starburst, bloom, and composite now stay on device during AE GPU renders
 
 Current host-validation status:
 - After Effects 2025 (`25.5x4`) is installed locally
