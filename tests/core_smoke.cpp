@@ -583,6 +583,22 @@ void test_cuda_cell_rasterization_launch()
                              config,
                              cache,
                              &error));
+
+    sources[0].angle_x = 0.05f;
+    sources[0].r = 4.0f;
+    assert(launch_ghost_cuda(lens,
+                             setup,
+                             sources,
+                             sensor_half_w,
+                             sensor_half_h,
+                             out_r.data(),
+                             out_g.data(),
+                             out_b.data(),
+                             32,
+                             32,
+                             config,
+                             cache,
+                             &error));
 }
 
 void test_ae_adapter_bits()

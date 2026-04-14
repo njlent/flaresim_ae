@@ -7,6 +7,7 @@
 - `PluginDataEntryFunction2` now registers effect metadata for host discovery
 - Smart Render and legacy render now drive the shared frame bridge
 - Smart Render now carries resolved render state from pre-render into render, avoiding duplicate AE param checkouts per frame
+- CUDA ghost rendering now keeps uploaded setup buckets and pinned output staging resident per render thread, cutting repeat launch/upload overhead
 - AE param set now includes top-level Camera, Aperture, Flare Settings, and Post-processing sections
 - output `View` popup is wired through the shared runtime/compositor
 - shared runtime/core are buildable and tested locally without the Adobe SDK
