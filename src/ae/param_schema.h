@@ -70,6 +70,8 @@ inline constexpr int PARAM_ID_PREVIEW_RAY_GRID = 43;
 inline constexpr int PARAM_ID_PREVIEW_MAX_SOURCES = 44;
 inline constexpr int PARAM_ID_PREVIEW_DOWNSAMPLE = 45;
 inline constexpr int PARAM_ID_PREVIEW_SPECTRAL_SAMPLES = 46;
+inline constexpr int PARAM_ID_PAIR_START = 47;
+inline constexpr int PARAM_ID_PAIR_COUNT = 48;
 
 struct AeUiParameterState
 {
@@ -113,6 +115,8 @@ struct AeUiParameterState
     float footprint_radius_bias = 1.0f;
     float footprint_clamp = 1.15f;
     int max_adaptive_pair_grid = 0;
+    int pair_start = 0;
+    int pair_count = 0;
     int pupil_jitter_mode_index = 1;
     int pupil_jitter_seed = 0;
     bool pupil_jitter_auto_seed = true;
@@ -175,6 +179,8 @@ int adaptive_sampling_strength_param();
 int footprint_radius_bias_param();
 int footprint_clamp_param();
 int max_adaptive_pair_grid_param();
+int pair_start_param();
+int pair_count_param();
 int pupil_jitter_mode_param();
 int pupil_jitter_seed_param();
 int pupil_jitter_auto_seed_param();

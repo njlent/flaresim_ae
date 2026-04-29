@@ -174,7 +174,9 @@ int adaptive_sampling_strength_param() { return advanced_ghosts_section_start_pa
 int footprint_radius_bias_param() { return adaptive_sampling_strength_param() + 1; }
 int footprint_clamp_param() { return footprint_radius_bias_param() + 1; }
 int max_adaptive_pair_grid_param() { return footprint_clamp_param() + 1; }
-int pupil_jitter_mode_param() { return max_adaptive_pair_grid_param() + 1; }
+int pair_start_param() { return max_adaptive_pair_grid_param() + 1; }
+int pair_count_param() { return pair_start_param() + 1; }
+int pupil_jitter_mode_param() { return pair_count_param() + 1; }
 int pupil_jitter_seed_param() { return pupil_jitter_mode_param() + 1; }
 int pupil_jitter_auto_seed_param() { return pupil_jitter_seed_param() + 1; }
 int cell_coverage_bias_param() { return pupil_jitter_auto_seed_param() + 1; }
@@ -565,6 +567,8 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.footprint_radius_bias <= 0.0f ||
         ui_state.footprint_clamp <= 0.0f ||
         ui_state.max_adaptive_pair_grid < 0 ||
+        ui_state.pair_start < 0 ||
+        ui_state.pair_count < 0 ||
         ui_state.pupil_jitter_seed < 0 ||
         ui_state.cell_coverage_bias <= 0.0f ||
         ui_state.cell_edge_inset < 0.0f ||
@@ -658,6 +662,8 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.footprint_radius_bias = ui_state.footprint_radius_bias;
     out_state.footprint_clamp = ui_state.footprint_clamp;
     out_state.max_adaptive_pair_grid = ui_state.max_adaptive_pair_grid;
+    out_state.pair_start = ui_state.pair_start;
+    out_state.pair_count = ui_state.pair_count;
     out_state.projected_cells_mode = projected_cells_mode;
     out_state.pupil_jitter_mode = pupil_jitter_mode;
     out_state.pupil_jitter_seed = ui_state.pupil_jitter_seed;

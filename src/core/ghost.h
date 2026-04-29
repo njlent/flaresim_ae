@@ -115,6 +115,8 @@ struct GhostConfig
     float footprint_radius_bias = 1.0f;      // 1.0 = traced footprint radius as-is
     float footprint_clamp = 1.15f;           // max multiplier over fallback radius
     int max_adaptive_pair_grid = 0;          // 0 = auto (2x base grid)
+    int pair_start_index = 0;                // active-pair index offset after physical filtering
+    int pair_count = 0;                      // 0 = all active pairs after pair_start_index
     ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Auto;
     PupilJitterMode pupil_jitter = PupilJitterMode::Off;
     int pupil_jitter_seed = 0;

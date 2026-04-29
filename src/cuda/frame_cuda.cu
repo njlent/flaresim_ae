@@ -631,6 +631,8 @@ std::uint64_t hash_ghost_setup(const LensSystem& lens,
     hash_append(hash, settings.ghost_cleanup_mode);
     hash_append(hash, settings.adaptive_sampling_strength);
     hash_append(hash, settings.max_adaptive_pair_grid);
+    hash_append(hash, settings.pair_start);
+    hash_append(hash, settings.pair_count);
     hash_append(hash, settings.projected_cells_mode);
     hash_append(hash, settings.pupil_jitter_mode);
     hash_append(hash, settings.pupil_jitter_seed);
@@ -873,6 +875,8 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         ghost.footprint_radius_bias = settings.footprint_radius_bias;
         ghost.footprint_clamp = settings.footprint_clamp;
         ghost.max_adaptive_pair_grid = settings.max_adaptive_pair_grid;
+        ghost.pair_start_index = settings.pair_start;
+        ghost.pair_count = settings.pair_count;
         ghost.projected_cells_mode = settings.projected_cells_mode;
         ghost.pupil_jitter = settings.pupil_jitter_mode;
         ghost.pupil_jitter_seed = settings.pupil_jitter_seed;

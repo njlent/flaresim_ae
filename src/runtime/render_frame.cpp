@@ -194,6 +194,8 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     hash_append_value(hash, settings.footprint_radius_bias);
     hash_append_value(hash, settings.footprint_clamp);
     hash_append_value(hash, settings.max_adaptive_pair_grid);
+    hash_append_value(hash, settings.pair_start);
+    hash_append_value(hash, settings.pair_count);
     hash_append_value(hash, settings.projected_cells_mode);
     hash_append_value(hash, settings.pupil_jitter_mode);
     hash_append_value(hash, settings.pupil_jitter_seed);
@@ -225,6 +227,8 @@ std::uint64_t make_ghost_setup_key(std::uint64_t lens_key,
     hash_append_value(hash, settings.adaptive_quality);
     hash_append_value(hash, settings.adaptive_sampling_strength);
     hash_append_value(hash, settings.max_adaptive_pair_grid);
+    hash_append_value(hash, settings.pair_start);
+    hash_append_value(hash, settings.pair_count);
     hash_append_value(hash, settings.projected_cells_mode);
     hash_append_value(hash, settings.pupil_jitter_mode);
     hash_append_value(hash, settings.pupil_jitter_seed);
@@ -558,6 +562,8 @@ bool render_frame(
                 ghost.footprint_radius_bias = settings.footprint_radius_bias;
                 ghost.footprint_clamp = settings.footprint_clamp;
                 ghost.max_adaptive_pair_grid = settings.max_adaptive_pair_grid;
+                ghost.pair_start_index = settings.pair_start;
+                ghost.pair_count = settings.pair_count;
                 ghost.projected_cells_mode = settings.projected_cells_mode;
                 ghost.pupil_jitter = settings.pupil_jitter_mode;
                 ghost.pupil_jitter_seed = settings.pupil_jitter_seed;

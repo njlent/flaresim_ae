@@ -94,6 +94,8 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.footprint_radius_bias = params[footprint_radius_bias_param()]->u.fs_d.value;
     out_state.footprint_clamp = params[footprint_clamp_param()]->u.fs_d.value;
     out_state.max_adaptive_pair_grid = params[max_adaptive_pair_grid_param()]->u.sd.value;
+    out_state.pair_start = params[pair_start_param()]->u.sd.value;
+    out_state.pair_count = params[pair_count_param()]->u.sd.value;
     out_state.pupil_jitter_mode_index = params[pupil_jitter_mode_param()]->u.pd.value;
     out_state.pupil_jitter_seed = params[pupil_jitter_seed_param()]->u.sd.value;
     out_state.pupil_jitter_auto_seed = params[pupil_jitter_auto_seed_param()]->u.bd.value != 0;
@@ -359,6 +361,8 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef footprint_radius_bias_param_def;
     PF_ParamDef footprint_clamp_param_def;
     PF_ParamDef max_adaptive_pair_grid_param_def;
+    PF_ParamDef pair_start_param_def;
+    PF_ParamDef pair_count_param_def;
     PF_ParamDef pupil_jitter_mode_param_def;
     PF_ParamDef pupil_jitter_seed_param_def;
     PF_ParamDef pupil_jitter_auto_seed_param_def;
@@ -407,6 +411,8 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(footprint_radius_bias_param_def);
     AEFX_CLR_STRUCT(footprint_clamp_param_def);
     AEFX_CLR_STRUCT(max_adaptive_pair_grid_param_def);
+    AEFX_CLR_STRUCT(pair_start_param_def);
+    AEFX_CLR_STRUCT(pair_count_param_def);
     AEFX_CLR_STRUCT(pupil_jitter_mode_param_def);
     AEFX_CLR_STRUCT(pupil_jitter_seed_param_def);
     AEFX_CLR_STRUCT(pupil_jitter_auto_seed_param_def);
@@ -456,6 +462,8 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool footprint_radius_bias_checked_out = false;
     bool footprint_clamp_checked_out = false;
     bool max_adaptive_pair_grid_checked_out = false;
+    bool pair_start_checked_out = false;
+    bool pair_count_checked_out = false;
     bool pupil_jitter_mode_checked_out = false;
     bool pupil_jitter_seed_checked_out = false;
     bool pupil_jitter_auto_seed_checked_out = false;
@@ -792,6 +800,22 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     max_adaptive_pair_grid_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          pair_start_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &pair_start_param_def));
+    pair_start_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          pair_count_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &pair_count_param_def));
+    pair_count_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           pupil_jitter_mode_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -897,6 +921,8 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.footprint_radius_bias = footprint_radius_bias_param_def.u.fs_d.value;
         ui_state.footprint_clamp = footprint_clamp_param_def.u.fs_d.value;
         ui_state.max_adaptive_pair_grid = max_adaptive_pair_grid_param_def.u.sd.value;
+        ui_state.pair_start = pair_start_param_def.u.sd.value;
+        ui_state.pair_count = pair_count_param_def.u.sd.value;
         ui_state.pupil_jitter_mode_index = pupil_jitter_mode_param_def.u.pd.value;
         ui_state.pupil_jitter_seed = pupil_jitter_seed_param_def.u.sd.value;
         ui_state.pupil_jitter_auto_seed = pupil_jitter_auto_seed_param_def.u.bd.value != 0;
@@ -920,6 +946,12 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (max_adaptive_pair_grid_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &max_adaptive_pair_grid_param_def));
+    }
+    if (pair_count_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &pair_count_param_def));
+    }
+    if (pair_start_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &pair_start_param_def));
     }
     if (pupil_jitter_seed_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &pupil_jitter_seed_param_def));

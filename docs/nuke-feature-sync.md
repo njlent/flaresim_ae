@@ -11,7 +11,7 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 | Source Cap | `source_cap` knob clamps per-source luminance before flare contribution. | Ported | Added AE param, CPU extraction, CUDA extraction, docs, regression coverage. |
 | Preview Mode | Overrides ray grid, max sources, downsample, spectral samples; compensates flare gain for downsample. | Ported | Added AE params and applies preview overrides before render-state handoff. |
 | Auto Seed | Stratified jitter seed can follow frame number. | Ported | Added AE checkbox; smart/legacy render resolve seed from current frame for Stratified jitter. |
-| Per-pair toggles | Nuke dynamic Pairs tab with refresh/select/deselect. | Pending | AE has static params; likely needs fixed pair range or alternate include/exclude controls. |
+| Per-pair controls | Nuke dynamic Pairs tab with refresh/select/deselect. | Partial | AE now exposes `Pair Start` / `Pair Count` to isolate active pair ranges. Exact per-lens dynamic checkboxes remain a custom-UI task. |
 | Source preview/output | Nuke `source.rgb` and Sources Only mode. | Already covered | AE `View = Sources` / `Diagnostics`. |
 | Max Sources `0` | `0` means unlimited. | Ported | CPU already matched; GPU path now compacts detected candidates and honors unlimited mode. |
 | Mask input | Nuke second input alpha mask. | Already covered | AE `Mask Layer`; full-comp detection mask. |
@@ -25,3 +25,4 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 - 2026-04-29: Ported Auto Seed. AE now has the Nuke-style checkbox and derives Stratified jitter seed from the current frame.
 - 2026-04-29: Ported Preview Mode. AE preview controls override render quality and apply the Nuke downsample brightness compensation.
 - 2026-04-29: Fixed AE GPU source handling so `Max Sources = 0` means unlimited instead of zero sources.
+- 2026-04-29: Added AE pair-window controls (`Pair Start`, `Pair Count`) as an AE-compatible substitute for Nuke's dynamic per-pair checkbox tab.

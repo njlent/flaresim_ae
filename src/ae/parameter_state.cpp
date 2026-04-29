@@ -40,6 +40,8 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.footprint_radius_bias = state.footprint_radius_bias;
     settings.footprint_clamp = state.footprint_clamp;
     settings.max_adaptive_pair_grid = state.max_adaptive_pair_grid;
+    settings.pair_start = state.pair_start;
+    settings.pair_count = state.pair_count;
     settings.projected_cells_mode = state.projected_cells_mode;
     settings.pupil_jitter_mode = state.pupil_jitter_mode;
     settings.pupil_jitter_seed = state.pupil_jitter_seed;

@@ -249,6 +249,20 @@ void test_ghost_pair_planning()
         assert(plan.use_cell_rasterization);
     }
 
+    GhostConfig pair_window_config = config;
+    pair_window_config.pair_start_index = 1;
+    pair_window_config.pair_count = 2;
+    const auto pair_window_plans = plan_active_ghost_pairs(
+        lens,
+        60.0f * 3.14159265358979323846f / 180.0f,
+        40.0f * 3.14159265358979323846f / 180.0f,
+        1920,
+        1080,
+        pair_window_config);
+    assert(pair_window_plans.size() == 2);
+    assert(pair_window_plans[0].pair.surf_a == plans[1].pair.surf_a);
+    assert(pair_window_plans[0].pair.surf_b == plans[1].pair.surf_b);
+
     GhostConfig jitter_off = config;
     jitter_off.pupil_jitter = PupilJitterMode::Off;
     GhostRenderSetup off_setup;
@@ -1267,7 +1281,9 @@ void test_param_schema()
     assert(adaptive_sampling_strength_param() + 1 == footprint_radius_bias_param());
     assert(footprint_radius_bias_param() + 1 == footprint_clamp_param());
     assert(footprint_clamp_param() + 1 == max_adaptive_pair_grid_param());
-    assert(max_adaptive_pair_grid_param() + 1 == pupil_jitter_mode_param());
+    assert(max_adaptive_pair_grid_param() + 1 == pair_start_param());
+    assert(pair_start_param() + 1 == pair_count_param());
+    assert(pair_count_param() + 1 == pupil_jitter_mode_param());
     assert(pupil_jitter_mode_param() + 1 == pupil_jitter_seed_param());
     assert(pupil_jitter_seed_param() + 1 == pupil_jitter_auto_seed_param());
     assert(pupil_jitter_auto_seed_param() + 1 == cell_coverage_bias_param());
@@ -1300,6 +1316,8 @@ void test_param_schema()
     assert(PARAM_ID_PREVIEW_MAX_SOURCES == 44);
     assert(PARAM_ID_PREVIEW_DOWNSAMPLE == 45);
     assert(PARAM_ID_PREVIEW_SPECTRAL_SAMPLES == 46);
+    assert(PARAM_ID_PAIR_START == 47);
+    assert(PARAM_ID_PAIR_COUNT == 48);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -1364,6 +1382,8 @@ void test_param_schema()
     ui.footprint_radius_bias = 0.85f;
     ui.footprint_clamp = 1.8f;
     ui.max_adaptive_pair_grid = 40;
+    ui.pair_start = 3;
+    ui.pair_count = 7;
     ui.pupil_jitter_mode_index = pupil_jitter_mode_popup_index(PupilJitterMode::Halton);
     ui.pupil_jitter_seed = 55;
     ui.pupil_jitter_auto_seed = false;
@@ -1407,6 +1427,8 @@ void test_param_schema()
     assert(std::abs(state.footprint_radius_bias - 0.85f) < 1e-6f);
     assert(std::abs(state.footprint_clamp - 1.8f) < 1e-6f);
     assert(state.max_adaptive_pair_grid == 40);
+    assert(state.pair_start == 3);
+    assert(state.pair_count == 7);
     assert(state.projected_cells_mode == ProjectedCellsMode::Off);
     assert(state.pupil_jitter_mode == PupilJitterMode::Halton);
     assert(state.pupil_jitter_seed == 55);

@@ -511,6 +511,24 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Pair Start",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.pair_start,
+                  PARAM_ID_PAIR_START);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Pair Count",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.pair_count,
+                  PARAM_ID_PAIR_COUNT);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX("Pupil Jitter",
                   static_cast<A_short>(pupil_jitter_mode_popup_count()),
                   static_cast<A_short>(defaults.pupil_jitter_mode_index),

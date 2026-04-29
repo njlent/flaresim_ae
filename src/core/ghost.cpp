@@ -1028,6 +1028,18 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
         plans.push_back(plan);
     }
 
+    if ((!plans.empty()) && (config.pair_start_index > 0 || config.pair_count > 0)) {
+        const int start = std::clamp(config.pair_start_index, 0, static_cast<int>(plans.size()));
+        const int end = config.pair_count > 0
+                            ? std::min(static_cast<int>(plans.size()), start + config.pair_count)
+                            : static_cast<int>(plans.size());
+        if (start >= end) {
+            plans.clear();
+        } else {
+            plans = std::vector<GhostPairPlan>(plans.begin() + start, plans.begin() + end);
+        }
+    }
+
     return plans;
 }
 

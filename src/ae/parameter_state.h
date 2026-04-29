@@ -63,6 +63,8 @@ struct AeParameterState
     float footprint_radius_bias = 1.0f;
     float footprint_clamp = 1.15f;
     int max_adaptive_pair_grid = 0;
+    int pair_start = 0;
+    int pair_count = 0;
     ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Off;
     PupilJitterMode pupil_jitter_mode = PupilJitterMode::Off;
     int pupil_jitter_seed = 0;
