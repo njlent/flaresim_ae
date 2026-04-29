@@ -679,6 +679,8 @@ void test_ae_adapter_bits()
     state.projected_cells_mode = ProjectedCellsMode::Off;
     state.pupil_jitter_mode = PupilJitterMode::Halton;
     state.pupil_jitter_seed = 42;
+    state.spectral_jitter_mode = SpectralJitterMode::Stratified;
+    state.spectral_jitter_seed = 43;
     state.cell_coverage_bias = 1.2f;
     state.cell_edge_inset = 0.15f;
     state.bloom.strength = 0.75f;
@@ -718,6 +720,8 @@ void test_ae_adapter_bits()
     assert(settings.projected_cells_mode == ProjectedCellsMode::Off);
     assert(settings.pupil_jitter_mode == PupilJitterMode::Halton);
     assert(settings.pupil_jitter_seed == 42);
+    assert(settings.spectral_jitter_mode == SpectralJitterMode::Stratified);
+    assert(settings.spectral_jitter_seed == 43);
     assert(std::abs(settings.cell_coverage_bias - 1.2f) < 1e-6f);
     assert(std::abs(settings.cell_edge_inset - 0.15f) < 1e-6f);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
@@ -1275,7 +1279,9 @@ void test_param_schema()
     assert(preview_downsample_param() + 1 == preview_spectral_samples_param());
     assert(preview_spectral_samples_param() + 1 == flare_section_end_param());
     assert(flare_section_end_param() + 1 == post_section_start_param());
-    assert(spectral_samples_param() + 1 == ghost_cleanup_mode_param());
+    assert(spectral_samples_param() + 1 == spectral_jitter_mode_param());
+    assert(spectral_jitter_mode_param() + 1 == spectral_jitter_seed_param());
+    assert(spectral_jitter_seed_param() + 1 == ghost_cleanup_mode_param());
     assert(ghost_cleanup_mode_param() + 1 == advanced_ghosts_section_start_param());
     assert(advanced_ghosts_section_start_param() + 1 == adaptive_sampling_strength_param());
     assert(adaptive_sampling_strength_param() + 1 == footprint_radius_bias_param());
@@ -1318,6 +1324,8 @@ void test_param_schema()
     assert(PARAM_ID_PREVIEW_SPECTRAL_SAMPLES == 46);
     assert(PARAM_ID_PAIR_START == 47);
     assert(PARAM_ID_PAIR_COUNT == 48);
+    assert(PARAM_ID_SPECTRAL_JITTER_MODE == 49);
+    assert(PARAM_ID_SPECTRAL_JITTER_SEED == 50);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -1326,6 +1334,7 @@ void test_param_schema()
     const std::string spectral_popup = build_spectral_samples_popup_string();
     const std::string cleanup_popup = build_ghost_cleanup_mode_popup_string();
     const std::string jitter_popup = build_pupil_jitter_mode_popup_string();
+    const std::string spectral_jitter_popup = build_spectral_jitter_mode_popup_string();
     const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
     assert(legacy_lens_popup.find("Double Gauss") != std::string::npos);
@@ -1335,6 +1344,7 @@ void test_param_schema()
     assert(spectral_popup.find("31") != std::string::npos);
     assert(cleanup_popup.find("Sharp Adaptive") != std::string::npos);
     assert(jitter_popup.find("Halton") != std::string::npos);
+    assert(spectral_jitter_popup.find("Stratified") != std::string::npos);
     assert(projected_cells_popup.find("Disabled") != std::string::npos);
     assert(projected_cells_popup.find("Enabled") != std::string::npos);
     assert(view_popup.find("Flare Only") != std::string::npos);
@@ -1387,6 +1397,8 @@ void test_param_schema()
     ui.pupil_jitter_mode_index = pupil_jitter_mode_popup_index(PupilJitterMode::Halton);
     ui.pupil_jitter_seed = 55;
     ui.pupil_jitter_auto_seed = false;
+    ui.spectral_jitter_mode_index = spectral_jitter_mode_popup_index(SpectralJitterMode::Halton);
+    ui.spectral_jitter_seed = 56;
     ui.projected_cells_mode_index = projected_cells_mode_popup_index(ProjectedCellsMode::Off);
     ui.cell_coverage_bias = 1.35f;
     ui.cell_edge_inset = 0.2f;
@@ -1433,6 +1445,8 @@ void test_param_schema()
     assert(state.pupil_jitter_mode == PupilJitterMode::Halton);
     assert(state.pupil_jitter_seed == 55);
     assert(!state.pupil_jitter_auto_seed);
+    assert(state.spectral_jitter_mode == SpectralJitterMode::Halton);
+    assert(state.spectral_jitter_seed == 56);
     assert(std::abs(state.cell_coverage_bias - 1.35f) < 1e-6f);
     assert(std::abs(state.cell_edge_inset - 0.2f) < 1e-6f);
 

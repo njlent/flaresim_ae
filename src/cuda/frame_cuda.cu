@@ -636,6 +636,8 @@ std::uint64_t hash_ghost_setup(const LensSystem& lens,
     hash_append(hash, settings.projected_cells_mode);
     hash_append(hash, settings.pupil_jitter_mode);
     hash_append(hash, settings.pupil_jitter_seed);
+    hash_append(hash, settings.spectral_jitter_mode);
+    hash_append(hash, settings.spectral_jitter_seed);
     hash_append(hash, settings.cell_coverage_bias);
     hash_append(hash, settings.cell_edge_inset);
     return hash;
@@ -880,6 +882,8 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         ghost.projected_cells_mode = settings.projected_cells_mode;
         ghost.pupil_jitter = settings.pupil_jitter_mode;
         ghost.pupil_jitter_seed = settings.pupil_jitter_seed;
+        ghost.spectral_jitter = settings.spectral_jitter_mode;
+        ghost.spectral_jitter_seed = settings.spectral_jitter_seed;
         ghost.cell_coverage_bias = settings.cell_coverage_bias;
         ghost.cell_edge_inset = settings.cell_edge_inset;
 

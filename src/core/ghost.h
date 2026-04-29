@@ -35,6 +35,13 @@ enum class PupilJitterMode
     Halton,
 };
 
+enum class SpectralJitterMode
+{
+    Off,
+    Stratified,
+    Halton,
+};
+
 // A ghost bounce pair: surfaces where light reflects instead of transmitting.
 struct GhostPair
 {
@@ -120,6 +127,8 @@ struct GhostConfig
     ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Auto;
     PupilJitterMode pupil_jitter = PupilJitterMode::Off;
     int pupil_jitter_seed = 0;
+    SpectralJitterMode spectral_jitter = SpectralJitterMode::Off;
+    int spectral_jitter_seed = 0;
     float cell_coverage_bias = 1.0f;         // 1.0 = exact projected quad size
     float cell_edge_inset = 0.1f;            // inward inset before tracing cell corners
 };

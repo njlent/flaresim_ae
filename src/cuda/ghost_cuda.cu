@@ -1270,6 +1270,8 @@ std::uint64_t hash_spectral_config(const GhostConfig& config)
     const int spectral_samples = std::max(3, config.spectral_samples);
     hash_append_value(hash, spectral_samples);
     hash_append_bytes(hash, config.wavelengths, sizeof(config.wavelengths));
+    hash_append_value(hash, config.spectral_jitter);
+    hash_append_value(hash, config.spectral_jitter_seed);
     return hash;
 }
 
@@ -1347,11 +1349,43 @@ int fill_spectral_samples(const GhostConfig& config, GPUSpectralSampleDev* out_s
         return num_spectral_samples;
     }
 
+    auto wang_hash = [](std::uint32_t value) {
+        value = (value ^ 61u) ^ (value >> 16u);
+        value *= 9u;
+        value ^= value >> 4u;
+        value *= 0x27d4eb2du;
+        value ^= value >> 15u;
+        return value;
+    };
+    auto unit_from_hash = [&](std::uint32_t value) {
+        return static_cast<float>(wang_hash(value)) * (1.0f / 4294967296.0f);
+    };
+    auto halton2 = [](std::uint32_t value) {
+        value = (value << 16u) | (value >> 16u);
+        value = ((value & 0x00ff00ffu) << 8u) | ((value & 0xff00ff00u) >> 8u);
+        value = ((value & 0x0f0f0f0fu) << 4u) | ((value & 0xf0f0f0f0u) >> 4u);
+        value = ((value & 0x33333333u) << 2u) | ((value & 0xccccccccu) >> 2u);
+        value = ((value & 0x55555555u) << 1u) | ((value & 0xaaaaaaaau) >> 1u);
+        return static_cast<float>(value) * (1.0f / 4294967296.0f);
+    };
+
+    const std::uint32_t seed_offset =
+        static_cast<std::uint32_t>(std::max(config.spectral_jitter_seed, 0)) * 1000003u;
+    const bool jitter = config.spectral_jitter != SpectralJitterMode::Off;
+
     float sum_r = 0.0f;
     float sum_g = 0.0f;
     float sum_b = 0.0f;
     for (int i = 0; i < num_spectral_samples; ++i) {
-        const float lambda = 400.0f + (300.0f * i) / (num_spectral_samples - 1);
+        float lambda = 400.0f + (300.0f * i) / (num_spectral_samples - 1);
+        if (jitter) {
+            const float j =
+                config.spectral_jitter == SpectralJitterMode::Halton
+                    ? halton2(static_cast<std::uint32_t>(i + 1) + seed_offset)
+                    : unit_from_hash(static_cast<std::uint32_t>(i) + seed_offset);
+            lambda = 400.0f + 300.0f * (static_cast<float>(i) + j) / num_spectral_samples;
+        }
+        lambda = std::clamp(lambda, 400.0f, 700.0f);
         out_samples[i].lambda = lambda;
         out_samples[i].rw = cie_r(lambda);
         out_samples[i].gw = cie_g(lambda);

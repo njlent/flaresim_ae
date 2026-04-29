@@ -114,6 +114,108 @@ struct GhostSampleFootprint
     bool valid = false;
 };
 
+struct SpectralSample
+{
+    float lambda = 550.0f;
+    float rw = 0.0f;
+    float gw = 0.0f;
+    float bw = 0.0f;
+};
+
+static std::uint32_t wang_hash(std::uint32_t value)
+{
+    value = (value ^ 61u) ^ (value >> 16u);
+    value *= 9u;
+    value ^= value >> 4u;
+    value *= 0x27d4eb2du;
+    value ^= value >> 15u;
+    return value;
+}
+
+static float unit_from_hash(std::uint32_t value)
+{
+    return static_cast<float>(wang_hash(value)) * (1.0f / 4294967296.0f);
+}
+
+static float halton2(std::uint32_t value)
+{
+    value = (value << 16u) | (value >> 16u);
+    value = ((value & 0x00ff00ffu) << 8u) | ((value & 0xff00ff00u) >> 8u);
+    value = ((value & 0x0f0f0f0fu) << 4u) | ((value & 0xf0f0f0f0u) >> 4u);
+    value = ((value & 0x33333333u) << 2u) | ((value & 0xccccccccu) >> 2u);
+    value = ((value & 0x55555555u) << 1u) | ((value & 0xaaaaaaaau) >> 1u);
+    return static_cast<float>(value) * (1.0f / 4294967296.0f);
+}
+
+static float cie_r_weight(float lambda)
+{
+    const float a = (lambda - 600.0f) / 70.0f;
+    const float b = (lambda - 450.0f) / 30.0f;
+    return std::max(0.0f, 0.63f * std::exp(-0.5f * a * a) +
+                               0.22f * std::exp(-0.5f * b * b));
+}
+
+static float cie_g_weight(float lambda)
+{
+    const float a = (lambda - 545.0f) / 55.0f;
+    return std::max(0.0f, std::exp(-0.5f * a * a));
+}
+
+static float cie_b_weight(float lambda)
+{
+    const float a = (lambda - 445.0f) / 45.0f;
+    return std::max(0.0f, std::exp(-0.5f * a * a));
+}
+
+static std::vector<SpectralSample> build_spectral_samples(const GhostConfig& config)
+{
+    const int sample_count = std::max(3, config.spectral_samples);
+    std::vector<SpectralSample> samples(static_cast<std::size_t>(sample_count));
+
+    if (sample_count == 3) {
+        samples[0] = {config.wavelengths[0], 1.0f, 0.0f, 0.0f};
+        samples[1] = {config.wavelengths[1], 0.0f, 1.0f, 0.0f};
+        samples[2] = {config.wavelengths[2], 0.0f, 0.0f, 1.0f};
+        return samples;
+    }
+
+    const std::uint32_t seed_offset =
+        static_cast<std::uint32_t>(std::max(config.spectral_jitter_seed, 0)) * 1000003u;
+    const bool jitter = config.spectral_jitter != SpectralJitterMode::Off;
+
+    float sum_r = 0.0f;
+    float sum_g = 0.0f;
+    float sum_b = 0.0f;
+    for (int i = 0; i < sample_count; ++i) {
+        float lambda = 400.0f + (300.0f * i) / (sample_count - 1);
+        if (jitter) {
+            const float j =
+                config.spectral_jitter == SpectralJitterMode::Halton
+                    ? halton2(static_cast<std::uint32_t>(i + 1) + seed_offset)
+                    : unit_from_hash(static_cast<std::uint32_t>(i) + seed_offset);
+            lambda = 400.0f + 300.0f * (static_cast<float>(i) + j) / sample_count;
+        }
+
+        SpectralSample sample {};
+        sample.lambda = std::clamp(lambda, 400.0f, 700.0f);
+        sample.rw = cie_r_weight(sample.lambda);
+        sample.gw = cie_g_weight(sample.lambda);
+        sample.bw = cie_b_weight(sample.lambda);
+        sum_r += sample.rw;
+        sum_g += sample.gw;
+        sum_b += sample.bw;
+        samples[static_cast<std::size_t>(i)] = sample;
+    }
+
+    for (SpectralSample& sample : samples) {
+        if (sum_r > 1.0e-9f) sample.rw /= sum_r;
+        if (sum_g > 1.0e-9f) sample.gw /= sum_g;
+        if (sum_b > 1.0e-9f) sample.bw /= sum_b;
+    }
+
+    return samples;
+}
+
 static bool is_valid_pupil_sample(float u,
                                   float v,
                                   int aperture_blades,
@@ -1190,6 +1292,7 @@ void render_ghosts(const LensSystem &lens,
            config.cleanup_mode == GhostCleanupMode::LegacyBlur
                ? "legacy bilinear"
                : "sharp adaptive");
+    const std::vector<SpectralSample> spectral_samples = build_spectral_samples(config);
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -1264,14 +1367,13 @@ void render_ghosts(const LensSystem &lens,
         // Hit record for collect-then-splat
         struct SplatHit
         {
-            float px, py, value, radius;
-            int ch;
+            float px, py, r, g, b, radius;
         };
 
         // Pre-allocate hit buffer once per thread — max possible hits is
         // grid_samples × 3 channels.  Reused across sources without heap alloc.
         std::vector<SplatHit> hit_buf;
-        hit_buf.reserve((size_t)max_valid_grid_count * std::max(config.spectral_samples, 3));
+        hit_buf.reserve(static_cast<size_t>(max_valid_grid_count) * spectral_samples.size());
 
         // Process every bright source for this ghost pair
         for (int si = 0; si < (int)sources.size(); ++si)
@@ -1310,7 +1412,7 @@ void render_ghosts(const LensSystem &lens,
                                                cell_v11,
                                                cell_u01,
                                                cell_v01);
-                    for (int ch = 0; ch < 3; ++ch)
+                    for (const SpectralSample& sample : spectral_samples)
                     {
                         float p00x = 0.0f, p00y = 0.0f;
                         float p10x = 0.0f, p10y = 0.0f;
@@ -1321,19 +1423,19 @@ void render_ghosts(const LensSystem &lens,
                         float w11 = 0.0f;
                         float w01 = 0.0f;
                         if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u00, cell_v00, config.wavelengths[ch],
+                                                            cell_u00, cell_v00, sample.lambda,
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p00x, p00y, &w00) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u10, cell_v10, config.wavelengths[ch],
+                                                            cell_u10, cell_v10, sample.lambda,
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p10x, p10y, &w10) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u11, cell_v11, config.wavelengths[ch],
+                                                            cell_u11, cell_v11, sample.lambda,
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p11x, p11y, &w11) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u01, cell_v01, config.wavelengths[ch],
+                                                            cell_u01, cell_v01, sample.lambda,
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p01x, p01y, &w01)) {
                             continue;
@@ -1367,7 +1469,6 @@ void render_ghosts(const LensSystem &lens,
                                                                                footprint.area_px2);
                         attempts += 4;
                         hits += 4;
-                        const float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g : src.b;
                         const float total_area =
                             std::abs(signed_triangle_area(p00, p10, p11)) +
                             std::abs(signed_triangle_area(p00, p11, p01));
@@ -1379,24 +1480,56 @@ void render_ghosts(const LensSystem &lens,
                         }
                         const float avg_weight = weighted_integral / total_area;
                         const float contribution =
-                            src_i * avg_weight * cell_weight * config.gain * density_boost;
+                            avg_weight * cell_weight * config.gain * density_boost;
                         if (contribution < 1.0e-12f) {
                             continue;
                         }
 
-                        auto& buf = (ch == 0) ? tbuf_r[tid] : (ch == 1) ? tbuf_g[tid] : tbuf_b[tid];
-                        rasterize_quad_linear(buf.data(),
-                                              width,
-                                              height,
-                                              p00,
-                                              p10,
-                                              p11,
-                                              p01,
-                                              w00,
-                                              w10,
-                                              w11,
-                                              w01,
-                                              contribution);
+                        const float cr = src.r * sample.rw * contribution;
+                        const float cg = src.g * sample.gw * contribution;
+                        const float cb = src.b * sample.bw * contribution;
+                        if (cr > 1.0e-12f) {
+                            rasterize_quad_linear(tbuf_r[tid].data(),
+                                                  width,
+                                                  height,
+                                                  p00,
+                                                  p10,
+                                                  p11,
+                                                  p01,
+                                                  w00,
+                                                  w10,
+                                                  w11,
+                                                  w01,
+                                                  cr);
+                        }
+                        if (cg > 1.0e-12f) {
+                            rasterize_quad_linear(tbuf_g[tid].data(),
+                                                  width,
+                                                  height,
+                                                  p00,
+                                                  p10,
+                                                  p11,
+                                                  p01,
+                                                  w00,
+                                                  w10,
+                                                  w11,
+                                                  w01,
+                                                  cg);
+                        }
+                        if (cb > 1.0e-12f) {
+                            rasterize_quad_linear(tbuf_b[tid].data(),
+                                                  width,
+                                                  height,
+                                                  p00,
+                                                  p10,
+                                                  p11,
+                                                  p01,
+                                                  w00,
+                                                  w10,
+                                                  w11,
+                                                  w01,
+                                                  cb);
+                        }
                     }
                 }
 
@@ -1452,11 +1585,11 @@ void render_ghosts(const LensSystem &lens,
                 }
 
                 // Trace each wavelength independently (chromatic dispersion)
-                for (int ch = 0; ch < 3; ++ch)
+                for (const SpectralSample& sample : spectral_samples)
                 {
                     ++attempts;
                     TraceResult res = trace_ghost_ray(ray, lens, a, b,
-                                                      config.wavelengths[ch]);
+                                                      sample.lambda);
                     if (!res.valid)
                         continue;
 
@@ -1466,18 +1599,20 @@ void render_ghosts(const LensSystem &lens,
                     float px = (res.position.x / (2.0f * sensor_half_w) + 0.5f) * width;
                     float py = (res.position.y / (2.0f * sensor_half_h) + 0.5f) * height;
 
-                    // Source intensity for this channel
-                    float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g
-                                                                : src.b;
-                    float contribution = src_i * res.weight * ray_weight * config.gain * local_density_boost;
+                    float contribution = res.weight * ray_weight * config.gain * local_density_boost;
 
                     if (contribution < 1e-12f)
                         continue;
 
-                    hit_buf.push_back({px, py, contribution, local_radius_px, ch});
+                    hit_buf.push_back({px,
+                                       py,
+                                       src.r * sample.rw * contribution,
+                                       src.g * sample.gw * contribution,
+                                       src.b * sample.bw * contribution,
+                                       local_radius_px});
 
-                    // Update bounding box from green channel
-                    if (ch == 1)
+                    // Update bounding box from the green-weighted spectrum.
+                    if (sample.gw > 0.0f)
                     {
                         bbox_min_x = std::min(bbox_min_x, px);
                         bbox_max_x = std::max(bbox_max_x, px);
@@ -1513,19 +1648,33 @@ void render_ghosts(const LensSystem &lens,
             // ---- Pass 2: splat all collected hits ----
             for (auto &h : hit_buf)
             {
-               auto &buf = (h.ch == 0)   ? tbuf_r[tid]
-                            : (h.ch == 1) ? tbuf_g[tid]
-                                          : tbuf_b[tid];
                 if (config.cleanup_mode == GhostCleanupMode::LegacyBlur) {
-                    splat_bilinear(buf.data(), width, height, h.px, h.py, h.value);
+                    splat_bilinear(tbuf_r[tid].data(), width, height, h.px, h.py, h.r);
+                    splat_bilinear(tbuf_g[tid].data(), width, height, h.px, h.py, h.g);
+                    splat_bilinear(tbuf_b[tid].data(), width, height, h.px, h.py, h.b);
                 } else {
-                    splat_tent(buf.data(),
+                    const float radius = std::max(adaptive_r, h.radius);
+                    splat_tent(tbuf_r[tid].data(),
                                width,
                                height,
                                h.px,
                                h.py,
-                               h.value,
-                               std::max(adaptive_r, h.radius));
+                               h.r,
+                               radius);
+                    splat_tent(tbuf_g[tid].data(),
+                               width,
+                               height,
+                               h.px,
+                               h.py,
+                               h.g,
+                               radius);
+                    splat_tent(tbuf_b[tid].data(),
+                               width,
+                               height,
+                               h.px,
+                               h.py,
+                               h.b,
+                               radius);
                 }
             }
         }

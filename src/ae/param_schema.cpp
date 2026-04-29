@@ -64,6 +64,18 @@ constexpr PupilJitterModeDescriptor kPupilJitterModes[] = {
     {PupilJitterMode::Halton, "Halton"},
 };
 
+struct SpectralJitterModeDescriptor
+{
+    SpectralJitterMode mode;
+    std::string_view label;
+};
+
+constexpr SpectralJitterModeDescriptor kSpectralJitterModes[] = {
+    {SpectralJitterMode::Off, "Off"},
+    {SpectralJitterMode::Stratified, "Stratified"},
+    {SpectralJitterMode::Halton, "Halton"},
+};
+
 struct ProjectedCellsModeDescriptor
 {
     ProjectedCellsMode mode;
@@ -168,7 +180,9 @@ int haze_blur_passes_param() { return haze_radius_param() + 1; }
 int starburst_gain_param() { return haze_blur_passes_param() + 1; }
 int starburst_scale_param() { return starburst_gain_param() + 1; }
 int spectral_samples_param() { return starburst_scale_param() + 1; }
-int ghost_cleanup_mode_param() { return spectral_samples_param() + 1; }
+int spectral_jitter_mode_param() { return spectral_samples_param() + 1; }
+int spectral_jitter_seed_param() { return spectral_jitter_mode_param() + 1; }
+int ghost_cleanup_mode_param() { return spectral_jitter_seed_param() + 1; }
 int advanced_ghosts_section_start_param() { return ghost_cleanup_mode_param() + 1; }
 int adaptive_sampling_strength_param() { return advanced_ghosts_section_start_param() + 1; }
 int footprint_radius_bias_param() { return adaptive_sampling_strength_param() + 1; }
@@ -285,6 +299,15 @@ std::string build_spectral_samples_popup_string()
         "3", "5", "7", "9", "11", "15", "21", "31",
     };
     return build_popup_string_from_labels(labels.data(), labels.size());
+}
+
+std::string build_spectral_jitter_mode_popup_string()
+{
+    const char* labels[std::size(kSpectralJitterModes)] {};
+    for (std::size_t i = 0; i < std::size(kSpectralJitterModes); ++i) {
+        labels[i] = kSpectralJitterModes[i].label.data();
+    }
+    return build_popup_string_from_labels(labels, std::size(kSpectralJitterModes));
 }
 
 std::string build_ghost_cleanup_mode_popup_string()
@@ -447,6 +470,31 @@ bool spectral_samples_from_popup(int popup_index, int& out_spectral_samples)
     return true;
 }
 
+int spectral_jitter_mode_popup_count()
+{
+    return static_cast<int>(std::size(kSpectralJitterModes));
+}
+
+int spectral_jitter_mode_popup_index(SpectralJitterMode mode)
+{
+    for (std::size_t i = 0; i < std::size(kSpectralJitterModes); ++i) {
+        if (kSpectralJitterModes[i].mode == mode) {
+            return static_cast<int>(i) + 1;
+        }
+    }
+    return 1;
+}
+
+bool spectral_jitter_mode_from_popup(int popup_index, SpectralJitterMode& out_mode)
+{
+    if (popup_index < 1 || popup_index > static_cast<int>(std::size(kSpectralJitterModes))) {
+        return false;
+    }
+
+    out_mode = kSpectralJitterModes[popup_index - 1].mode;
+    return true;
+}
+
 int ghost_cleanup_mode_popup_count()
 {
     return static_cast<int>(std::size(kGhostCleanupModes));
@@ -570,6 +618,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.pair_start < 0 ||
         ui_state.pair_count < 0 ||
         ui_state.pupil_jitter_seed < 0 ||
+        ui_state.spectral_jitter_seed < 0 ||
         ui_state.cell_coverage_bias <= 0.0f ||
         ui_state.cell_edge_inset < 0.0f ||
         ui_state.sensor_width_mm < 0.0f ||
@@ -629,6 +678,11 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         return false;
     }
 
+    SpectralJitterMode spectral_jitter_mode = SpectralJitterMode::Off;
+    if (!spectral_jitter_mode_from_popup(ui_state.spectral_jitter_mode_index, spectral_jitter_mode)) {
+        return false;
+    }
+
     out_state.view = view;
     out_state.use_sensor_size = ui_state.use_sensor_size;
     out_state.sensor_preset_index = ui_state.sensor_preset_index;
@@ -668,6 +722,8 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.pupil_jitter_mode = pupil_jitter_mode;
     out_state.pupil_jitter_seed = ui_state.pupil_jitter_seed;
     out_state.pupil_jitter_auto_seed = ui_state.pupil_jitter_auto_seed;
+    out_state.spectral_jitter_mode = spectral_jitter_mode;
+    out_state.spectral_jitter_seed = ui_state.spectral_jitter_seed;
     out_state.cell_coverage_bias = ui_state.cell_coverage_bias;
     out_state.cell_edge_inset = ui_state.cell_edge_inset;
 

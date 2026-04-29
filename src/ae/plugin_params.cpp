@@ -23,6 +23,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_samples_popup = build_spectral_samples_popup_string();
+    const std::string spectral_jitter_popup = build_spectral_jitter_mode_popup_string();
     const std::string ghost_cleanup_popup = build_ghost_cleanup_mode_popup_string();
     const std::string pupil_jitter_popup = build_pupil_jitter_mode_popup_string();
     const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
@@ -450,6 +451,23 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   spectral_samples_popup.data(),
                   PF_ParamFlag_NONE,
                   PARAM_ID_SPECTRAL_SAMPLES);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Spectral Jitter",
+                  static_cast<A_short>(spectral_jitter_mode_popup_count()),
+                  static_cast<A_short>(defaults.spectral_jitter_mode_index),
+                  spectral_jitter_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_SPECTRAL_JITTER_MODE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Spectral Seed",
+                  0,
+                  kManualIntMax,
+                  0,
+                  1000000,
+                  defaults.spectral_jitter_seed,
+                  PARAM_ID_SPECTRAL_JITTER_SEED);
 
     // Keep disk IDs stable for saved comps; only the UI order changes here.
     AEFX_CLR_STRUCT(def);

@@ -45,6 +45,8 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.projected_cells_mode = state.projected_cells_mode;
     settings.pupil_jitter_mode = state.pupil_jitter_mode;
     settings.pupil_jitter_seed = state.pupil_jitter_seed;
+    settings.spectral_jitter_mode = state.spectral_jitter_mode;
+    settings.spectral_jitter_seed = state.spectral_jitter_seed;
     settings.cell_coverage_bias = state.cell_coverage_bias;
     settings.cell_edge_inset = state.cell_edge_inset;
     settings.bloom = state.bloom;

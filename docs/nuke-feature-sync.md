@@ -17,6 +17,7 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 | Mask input | Nuke second input alpha mask. | Already covered | AE `Mask Layer`; full-comp detection mask. |
 | Pupil jitter | Off, Stratified, Halton. | Already covered | AE has `Pupil Jitter` and `Jitter Seed`. |
 | Expanded Spectrum | Flares OFX docs describe `Expanded Spectrum` for stronger dispersion; open Nuke exposes 3/5/7/9/11. | Ported | AE popup now exposes 3/5/7/9/11/15/21/31. |
+| Spectral jitter | Flares OFX docs call out dispersion artifacts under low wavelength counts; no open Nuke knob found. | Ported | AE now has `Spectral Jitter` / `Spectral Seed`; CPU and CUDA share jittered wavelength tables. |
 | Haze/starburst | Haze + FFT aperture starburst. | Already covered | AE has haze/starburst controls. |
 
 ## Implementation Log
@@ -27,3 +28,4 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 - 2026-04-29: Fixed AE GPU source handling so `Max Sources = 0` means unlimited instead of zero sources.
 - 2026-04-29: Added AE pair-window controls (`Pair Start`, `Pair Count`) as an AE-compatible substitute for Nuke's dynamic per-pair checkbox tab.
 - 2026-04-29: Added Expanded Spectrum options by extending AE spectral sample popups to 15/21/31.
+- 2026-04-29: Added Spectral Jitter. CPU fallback now honors expanded spectral sample counts instead of tracing only RGB, and CUDA hashes/uploads jittered spectral tables.

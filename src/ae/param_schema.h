@@ -72,6 +72,8 @@ inline constexpr int PARAM_ID_PREVIEW_DOWNSAMPLE = 45;
 inline constexpr int PARAM_ID_PREVIEW_SPECTRAL_SAMPLES = 46;
 inline constexpr int PARAM_ID_PAIR_START = 47;
 inline constexpr int PARAM_ID_PAIR_COUNT = 48;
+inline constexpr int PARAM_ID_SPECTRAL_JITTER_MODE = 49;
+inline constexpr int PARAM_ID_SPECTRAL_JITTER_SEED = 50;
 
 struct AeUiParameterState
 {
@@ -110,6 +112,8 @@ struct AeUiParameterState
     float starburst_gain = 0.0f;
     float starburst_scale = 0.15f;
     int spectral_samples_index = 1;
+    int spectral_jitter_mode_index = 1;
+    int spectral_jitter_seed = 0;
     float adaptive_quality = 1.0f;
     float adaptive_sampling_strength = 0.0f;
     float footprint_radius_bias = 1.0f;
@@ -173,6 +177,8 @@ int haze_blur_passes_param();
 int starburst_gain_param();
 int starburst_scale_param();
 int spectral_samples_param();
+int spectral_jitter_mode_param();
+int spectral_jitter_seed_param();
 int ghost_cleanup_mode_param();
 int advanced_ghosts_section_start_param();
 int adaptive_sampling_strength_param();
@@ -207,6 +213,7 @@ std::string build_lens_manufacturer_popup_string();
 std::string build_lens_popup_string_for_manufacturer(int manufacturer_index);
 std::string build_sensor_preset_popup_string();
 std::string build_spectral_samples_popup_string();
+std::string build_spectral_jitter_mode_popup_string();
 std::string build_ghost_cleanup_mode_popup_string();
 std::string build_pupil_jitter_mode_popup_string();
 std::string build_projected_cells_mode_popup_string();
@@ -224,6 +231,10 @@ bool sensor_preset_dimensions_from_popup(int popup_index, float& out_width_mm, f
 int spectral_samples_popup_count();
 int spectral_samples_popup_index(int spectral_samples);
 bool spectral_samples_from_popup(int popup_index, int& out_spectral_samples);
+
+int spectral_jitter_mode_popup_count();
+int spectral_jitter_mode_popup_index(SpectralJitterMode mode);
+bool spectral_jitter_mode_from_popup(int popup_index, SpectralJitterMode& out_mode);
 
 int ghost_cleanup_mode_popup_count();
 int ghost_cleanup_mode_popup_index(GhostCleanupMode mode);

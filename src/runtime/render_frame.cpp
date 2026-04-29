@@ -199,6 +199,8 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     hash_append_value(hash, settings.projected_cells_mode);
     hash_append_value(hash, settings.pupil_jitter_mode);
     hash_append_value(hash, settings.pupil_jitter_seed);
+    hash_append_value(hash, settings.spectral_jitter_mode);
+    hash_append_value(hash, settings.spectral_jitter_seed);
     hash_append_value(hash, settings.cell_coverage_bias);
     hash_append_value(hash, settings.cell_edge_inset);
     return hash;
@@ -567,6 +569,8 @@ bool render_frame(
                 ghost.projected_cells_mode = settings.projected_cells_mode;
                 ghost.pupil_jitter = settings.pupil_jitter_mode;
                 ghost.pupil_jitter_seed = settings.pupil_jitter_seed;
+                ghost.spectral_jitter = settings.spectral_jitter_mode;
+                ghost.spectral_jitter_seed = settings.spectral_jitter_seed;
                 ghost.cell_coverage_bias = settings.cell_coverage_bias;
                 ghost.cell_edge_inset = settings.cell_edge_inset;
 

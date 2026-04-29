@@ -207,6 +207,7 @@ Mask behavior:
 - Camera mode: direct FOV or sensor size + focal length
 - Aperture blades + rotation
 - Spectral samples
+- Spectral jitter + seed
 - Ghost blur + passes
 - Haze gain/radius/passes
 - Starburst gain/scale
