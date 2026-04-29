@@ -104,6 +104,9 @@ These only matter when chasing ghost artifacts/perf tradeoffs. Most shots should
 | Footprint Bias | slider `0.25`-`2` | `1` | Multiplier for adaptive splat footprint radius. Lower = sharper/riskier. Higher = smoother/softer. |
 | Footprint Clamp | slider `0.5`-`4` | `1.15` | Caps adaptive footprint expansion. Prevents extremely wide splats. |
 | Max Pair Grid | `0`-`512` | `0` | `0` keeps automatic limits. Non-zero hard-caps adaptive per-pair ray grids. |
+| Pupil Jitter | `Off`, `Stratified`, `Halton` | `Off` | Entrance-pupil sampling pattern. Stratified and Halton break up regular grid dots. |
+| Jitter Seed | `0`-`1000000` | `0` | Fixed seed for Stratified jitter when `Auto Seed` is off. |
+| Auto Seed | `Off`, `On` | `On` | Uses the current frame as the Stratified jitter seed for animated noise variation. |
 | Cell Coverage | slider `0.5`-`2.5` | `1` | Expands or contracts projected-cell coverage. Higher can fill missing lobes; too high can bloat shapes. |
 | Cell Edge Inset | slider `0`-`0.45` | `0.1` | Pulls risky cell corners inward near aperture boundaries. Higher can stabilize edge cells but may introduce gaps. |
 

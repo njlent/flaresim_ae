@@ -170,7 +170,8 @@ int footprint_clamp_param() { return footprint_radius_bias_param() + 1; }
 int max_adaptive_pair_grid_param() { return footprint_clamp_param() + 1; }
 int pupil_jitter_mode_param() { return max_adaptive_pair_grid_param() + 1; }
 int pupil_jitter_seed_param() { return pupil_jitter_mode_param() + 1; }
-int cell_coverage_bias_param() { return pupil_jitter_seed_param() + 1; }
+int pupil_jitter_auto_seed_param() { return pupil_jitter_seed_param() + 1; }
+int cell_coverage_bias_param() { return pupil_jitter_auto_seed_param() + 1; }
 int cell_edge_inset_param() { return cell_coverage_bias_param() + 1; }
 int advanced_ghosts_section_end_param() { return cell_edge_inset_param() + 1; }
 int post_section_end_param() { return advanced_ghosts_section_end_param() + 1; }
@@ -646,6 +647,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.projected_cells_mode = projected_cells_mode;
     out_state.pupil_jitter_mode = pupil_jitter_mode;
     out_state.pupil_jitter_seed = ui_state.pupil_jitter_seed;
+    out_state.pupil_jitter_auto_seed = ui_state.pupil_jitter_auto_seed;
     out_state.cell_coverage_bias = ui_state.cell_coverage_bias;
     out_state.cell_edge_inset = ui_state.cell_edge_inset;
 

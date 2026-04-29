@@ -64,6 +64,7 @@ inline constexpr int PARAM_ID_PUPIL_JITTER_MODE = 37;
 inline constexpr int PARAM_ID_PUPIL_JITTER_SEED = 38;
 inline constexpr int PARAM_ID_ADAPTIVE_QUALITY = 39;
 inline constexpr int PARAM_ID_SOURCE_CAP = 40;
+inline constexpr int PARAM_ID_PUPIL_JITTER_AUTO_SEED = 41;
 
 struct AeUiParameterState
 {
@@ -104,6 +105,7 @@ struct AeUiParameterState
     int max_adaptive_pair_grid = 0;
     int pupil_jitter_mode_index = 1;
     int pupil_jitter_seed = 0;
+    bool pupil_jitter_auto_seed = true;
     int projected_cells_mode_index = 1;
     float cell_coverage_bias = 1.0f;
     float cell_edge_inset = 0.1f;
@@ -160,6 +162,7 @@ int footprint_clamp_param();
 int max_adaptive_pair_grid_param();
 int pupil_jitter_mode_param();
 int pupil_jitter_seed_param();
+int pupil_jitter_auto_seed_param();
 int cell_coverage_bias_param();
 int cell_edge_inset_param();
 int advanced_ghosts_section_end_param();

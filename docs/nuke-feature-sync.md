@@ -10,7 +10,7 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 | --- | --- | --- | --- |
 | Source Cap | `source_cap` knob clamps per-source luminance before flare contribution. | Ported | Added AE param, CPU extraction, CUDA extraction, docs, regression coverage. |
 | Preview Mode | Overrides ray grid, max sources, downsample, spectral samples; compensates flare gain for downsample. | Pending | Needs render-settings override layer and AE params. |
-| Auto Seed | Stratified jitter seed can follow frame number. | Pending | Needs frame-time plumbing into render settings/hash. |
+| Auto Seed | Stratified jitter seed can follow frame number. | Ported | Added AE checkbox; smart/legacy render resolve seed from current frame for Stratified jitter. |
 | Per-pair toggles | Nuke dynamic Pairs tab with refresh/select/deselect. | Pending | AE has static params; likely needs fixed pair range or alternate include/exclude controls. |
 | Source preview/output | Nuke `source.rgb` and Sources Only mode. | Already covered | AE `View = Sources` / `Diagnostics`. |
 | Mask input | Nuke second input alpha mask. | Already covered | AE `Mask Layer`; full-comp detection mask. |
@@ -21,3 +21,4 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 ## Implementation Log
 
 - 2026-04-29: Ported Source Cap from Nuke. CPU path clamps source luminance during extraction; CUDA path clamps source candidates before threshold rejection. Added docs and smoke-test assertions.
+- 2026-04-29: Ported Auto Seed. AE now has the Nuke-style checkbox and derives Stratified jitter seed from the current frame.

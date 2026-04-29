@@ -66,6 +66,7 @@ struct AeParameterState
     ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Off;
     PupilJitterMode pupil_jitter_mode = PupilJitterMode::Off;
     int pupil_jitter_seed = 0;
+    bool pupil_jitter_auto_seed = true;
     float cell_coverage_bias = 1.0f;
     float cell_edge_inset = 0.1f;
     BloomConfig bloom {};

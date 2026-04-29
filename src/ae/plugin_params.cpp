@@ -487,6 +487,12 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_PUPIL_JITTER_SEED);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("Auto Seed",
+                     defaults.pupil_jitter_auto_seed,
+                     PF_ParamFlag_NONE,
+                     PARAM_ID_PUPIL_JITTER_AUTO_SEED);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Cell Coverage",
                          0.1f,
                          kManualFloatMax,
