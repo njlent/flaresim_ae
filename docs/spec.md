@@ -199,6 +199,7 @@ Mask behavior:
 - Ray Grid
 - Threshold
 - Source Cap
+- Manual/offscreen source position + intensity/color
 - Max Sources
 - Downsample
 - Cluster Radius

@@ -158,6 +158,13 @@ std::uint64_t make_source_key(std::uint64_t scene_key, const FrameRenderSettings
     hash_append_value(hash, settings.focal_length_mm);
     hash_append_value(hash, settings.downsample);
     hash_append_value(hash, settings.source_cap);
+    hash_append_value(hash, settings.manual_source_enabled);
+    hash_append_value(hash, settings.manual_source_x);
+    hash_append_value(hash, settings.manual_source_y);
+    hash_append_value(hash, settings.manual_source_intensity);
+    hash_append_value(hash, settings.manual_source_r);
+    hash_append_value(hash, settings.manual_source_g);
+    hash_append_value(hash, settings.manual_source_b);
     hash_append_value(hash, settings.max_sources);
     hash_append_value(hash, settings.cluster_radius_px);
     return hash;
@@ -349,6 +356,31 @@ void rasterize_sources(const std::vector<BrightPixel>& sources,
     }
 }
 
+bool build_manual_source(const FrameRenderSettings& settings,
+                         float fov_h,
+                         float fov_v,
+                         BrightPixel& out_source)
+{
+    const float intensity = std::max(settings.manual_source_intensity, 0.0f);
+    const float r = std::max(settings.manual_source_r, 0.0f) * intensity;
+    const float g = std::max(settings.manual_source_g, 0.0f) * intensity;
+    const float b = std::max(settings.manual_source_b, 0.0f) * intensity;
+    if (!settings.manual_source_enabled ||
+        intensity <= 0.0f ||
+        !(r > 0.0f || g > 0.0f || b > 0.0f)) {
+        return false;
+    }
+
+    const float tan_half_h = std::tan(fov_h * 0.5f);
+    const float tan_half_v = std::tan(fov_v * 0.5f);
+    out_source.angle_x = std::atan((settings.manual_source_x - 0.5f) * 2.0f * tan_half_h);
+    out_source.angle_y = std::atan((settings.manual_source_y - 0.5f) * 2.0f * tan_half_v);
+    out_source.r = r;
+    out_source.g = g;
+    out_source.b = b;
+    return true;
+}
+
 } // namespace
 
 void FrameRenderCache::clear()
@@ -521,6 +553,12 @@ bool render_frame(
                                   input.width,
                                   std::tan(fov_h * 0.5f));
             limit_bright_pixels(outputs.sources, static_cast<std::size_t>(settings.max_sources));
+
+            BrightPixel manual_source {};
+            if (build_manual_source(settings, fov_h, fov_v, manual_source)) {
+                outputs.detected_sources.push_back(manual_source);
+                outputs.sources.push_back(manual_source);
+            }
             outputs.stats.recomputed_sources = true;
 
             if (cache) {

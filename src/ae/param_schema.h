@@ -74,6 +74,13 @@ inline constexpr int PARAM_ID_PAIR_START = 47;
 inline constexpr int PARAM_ID_PAIR_COUNT = 48;
 inline constexpr int PARAM_ID_SPECTRAL_JITTER_MODE = 49;
 inline constexpr int PARAM_ID_SPECTRAL_JITTER_SEED = 50;
+inline constexpr int PARAM_ID_MANUAL_SOURCE_ENABLED = 51;
+inline constexpr int PARAM_ID_MANUAL_SOURCE_X = 52;
+inline constexpr int PARAM_ID_MANUAL_SOURCE_Y = 53;
+inline constexpr int PARAM_ID_MANUAL_SOURCE_INTENSITY = 54;
+inline constexpr int PARAM_ID_MANUAL_SOURCE_R = 55;
+inline constexpr int PARAM_ID_MANUAL_SOURCE_G = 56;
+inline constexpr int PARAM_ID_MANUAL_SOURCE_B = 57;
 
 struct AeUiParameterState
 {
@@ -94,6 +101,13 @@ struct AeUiParameterState
     float sky_brightness = 1.0f;
     float threshold = 8.0f;
     float source_cap = 0.0f;
+    bool manual_source_enabled = false;
+    float manual_source_x = 0.5f;
+    float manual_source_y = 0.5f;
+    float manual_source_intensity = 16.0f;
+    float manual_source_r = 1.0f;
+    float manual_source_g = 1.0f;
+    float manual_source_b = 1.0f;
     int ray_grid = 128;
     int downsample = 2;
     int max_sources = 256;
@@ -159,6 +173,13 @@ int flare_gain_param();
 int sky_brightness_param();
 int threshold_param();
 int source_cap_param();
+int manual_source_enabled_param();
+int manual_source_x_param();
+int manual_source_y_param();
+int manual_source_intensity_param();
+int manual_source_r_param();
+int manual_source_g_param();
+int manual_source_b_param();
 int ray_grid_param();
 int downsample_param();
 int max_sources_param();

@@ -161,7 +161,14 @@ int flare_gain_param() { return adaptive_quality_param() + 1; }
 int sky_brightness_param() { return flare_gain_param() + 1; }
 int threshold_param() { return sky_brightness_param() + 1; }
 int source_cap_param() { return threshold_param() + 1; }
-int ray_grid_param() { return source_cap_param() + 1; }
+int manual_source_enabled_param() { return source_cap_param() + 1; }
+int manual_source_x_param() { return manual_source_enabled_param() + 1; }
+int manual_source_y_param() { return manual_source_x_param() + 1; }
+int manual_source_intensity_param() { return manual_source_y_param() + 1; }
+int manual_source_r_param() { return manual_source_intensity_param() + 1; }
+int manual_source_g_param() { return manual_source_r_param() + 1; }
+int manual_source_b_param() { return manual_source_g_param() + 1; }
+int ray_grid_param() { return manual_source_b_param() + 1; }
 int downsample_param() { return ray_grid_param() + 1; }
 int max_sources_param() { return downsample_param() + 1; }
 int cluster_radius_param() { return max_sources_param() + 1; }
@@ -607,6 +614,10 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.preview_downsample < 1 ||
         ui_state.preview_max_sources < 0 ||
         ui_state.source_cap < 0.0f ||
+        ui_state.manual_source_intensity < 0.0f ||
+        ui_state.manual_source_r < 0.0f ||
+        ui_state.manual_source_g < 0.0f ||
+        ui_state.manual_source_b < 0.0f ||
         ui_state.ghost_blur_passes < 0 ||
         ui_state.haze_blur_passes < 0 ||
         ui_state.aperture_blades < 0 ||
@@ -698,6 +709,13 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.sky_brightness = ui_state.sky_brightness;
     out_state.threshold = ui_state.threshold;
     out_state.source_cap = ui_state.source_cap;
+    out_state.manual_source_enabled = ui_state.manual_source_enabled;
+    out_state.manual_source_x = ui_state.manual_source_x;
+    out_state.manual_source_y = ui_state.manual_source_y;
+    out_state.manual_source_intensity = ui_state.manual_source_intensity;
+    out_state.manual_source_r = ui_state.manual_source_r;
+    out_state.manual_source_g = ui_state.manual_source_g;
+    out_state.manual_source_b = ui_state.manual_source_b;
     out_state.ray_grid = ui_state.ray_grid;
     out_state.downsample = ui_state.downsample;
     out_state.max_sources = ui_state.max_sources;

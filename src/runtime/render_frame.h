@@ -31,6 +31,13 @@ struct FrameRenderSettings
     float flare_gain = 8000.0f;
     float sky_brightness = 1.0f;
     float source_cap = 0.0f;
+    bool manual_source_enabled = false;
+    float manual_source_x = 0.5f;
+    float manual_source_y = 0.5f;
+    float manual_source_intensity = 16.0f;
+    float manual_source_r = 1.0f;
+    float manual_source_g = 1.0f;
+    float manual_source_b = 1.0f;
     float ghost_blur = 0.003f;
     int ghost_blur_passes = 3;
     GhostCleanupMode ghost_cleanup_mode = GhostCleanupMode::SharpAdaptive;

@@ -701,6 +701,31 @@ bool blur_channel(float* src, float* tmp, float* dst, int width, int height, int
     return cudaGetLastError() == cudaSuccess;
 }
 
+bool build_manual_source(const FrameRenderSettings& settings,
+                         float fov_h,
+                         float fov_v,
+                         BrightPixel& out_source)
+{
+    const float intensity = std::max(settings.manual_source_intensity, 0.0f);
+    const float r = std::max(settings.manual_source_r, 0.0f) * intensity;
+    const float g = std::max(settings.manual_source_g, 0.0f) * intensity;
+    const float b = std::max(settings.manual_source_b, 0.0f) * intensity;
+    if (!settings.manual_source_enabled ||
+        intensity <= 0.0f ||
+        !(r > 0.0f || g > 0.0f || b > 0.0f)) {
+        return false;
+    }
+
+    const float tan_half_h = std::tan(fov_h * 0.5f);
+    const float tan_half_v = std::tan(fov_v * 0.5f);
+    out_source.angle_x = std::atan((settings.manual_source_x - 0.5f) * 2.0f * tan_half_h);
+    out_source.angle_y = std::atan((settings.manual_source_y - 0.5f) * 2.0f * tan_half_v);
+    out_source.r = r;
+    out_source.g = g;
+    out_source.b = b;
+    return true;
+}
+
 } // namespace
 
 void GpuFrameRenderCache::release()
@@ -838,27 +863,49 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
             return false;
         }
 
-        if (source_count > 0) {
+        BrightPixel manual_source {};
+        const bool has_manual_source = build_manual_source(settings, fov_h, fov_v, manual_source);
+        const int detected_source_count = source_count;
+        const int total_source_count = detected_source_count + (has_manual_source ? 1 : 0);
+
+        if (total_source_count > 0) {
             if (!ensure_device_bytes(reinterpret_cast<void*&>(cache.d_sources),
                                      cache.source_capacity,
-                                     static_cast<std::size_t>(source_count) * sizeof(BrightPixel),
+                                     static_cast<std::size_t>(total_source_count) * sizeof(BrightPixel),
                                      out_error)) {
                 return false;
             }
 
-            const int precluster_count =
-                std::min<int>(static_cast<int>(max_candidates), std::max(source_count * 8, source_count));
-            cluster_sorted_sources_kernel<<<1, 1>>>(cache.d_candidates,
-                                                    precluster_count,
-                                                    cache.d_sources,
-                                                    source_count,
-                                                    settings.cluster_radius_px,
-                                                    width,
-                                                    std::tan(fov_h * 0.5f));
-            if (cudaGetLastError() != cudaSuccess) {
-                report_error("cluster_sorted_sources_kernel failed.", out_error);
-                return false;
+            if (detected_source_count > 0) {
+                const int precluster_count =
+                    std::min<int>(static_cast<int>(max_candidates),
+                                  std::max(detected_source_count * 8, detected_source_count));
+                cluster_sorted_sources_kernel<<<1, 1>>>(cache.d_candidates,
+                                                        precluster_count,
+                                                        cache.d_sources,
+                                                        detected_source_count,
+                                                        settings.cluster_radius_px,
+                                                        width,
+                                                        std::tan(fov_h * 0.5f));
+                if (cudaGetLastError() != cudaSuccess) {
+                    report_error("cluster_sorted_sources_kernel failed.", out_error);
+                    return false;
+                }
             }
+
+            if (has_manual_source) {
+                const cudaError_t copy_error =
+                    cudaMemcpy(cache.d_sources + detected_source_count,
+                               &manual_source,
+                               sizeof(BrightPixel),
+                               cudaMemcpyHostToDevice);
+                if (copy_error != cudaSuccess) {
+                    report_error(cudaGetErrorString(copy_error), out_error);
+                    return false;
+                }
+            }
+
+            source_count = total_source_count;
         }
     }
 

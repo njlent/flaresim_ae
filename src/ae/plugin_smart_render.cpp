@@ -71,6 +71,13 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.sky_brightness = params[sky_brightness_param()]->u.fs_d.value;
     out_state.threshold = params[threshold_param()]->u.fs_d.value;
     out_state.source_cap = params[source_cap_param()]->u.fs_d.value;
+    out_state.manual_source_enabled = params[manual_source_enabled_param()]->u.bd.value != 0;
+    out_state.manual_source_x = params[manual_source_x_param()]->u.fs_d.value;
+    out_state.manual_source_y = params[manual_source_y_param()]->u.fs_d.value;
+    out_state.manual_source_intensity = params[manual_source_intensity_param()]->u.fs_d.value;
+    out_state.manual_source_r = params[manual_source_r_param()]->u.fs_d.value;
+    out_state.manual_source_g = params[manual_source_g_param()]->u.fs_d.value;
+    out_state.manual_source_b = params[manual_source_b_param()]->u.fs_d.value;
     out_state.ray_grid = params[ray_grid_param()]->u.sd.value;
     out_state.downsample = params[downsample_param()]->u.sd.value;
     out_state.max_sources = params[max_sources_param()]->u.sd.value;
@@ -340,6 +347,13 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef sky_brightness_param_def;
     PF_ParamDef threshold_param_def;
     PF_ParamDef source_cap_param_def;
+    PF_ParamDef manual_source_enabled_param_def;
+    PF_ParamDef manual_source_x_param_def;
+    PF_ParamDef manual_source_y_param_def;
+    PF_ParamDef manual_source_intensity_param_def;
+    PF_ParamDef manual_source_r_param_def;
+    PF_ParamDef manual_source_g_param_def;
+    PF_ParamDef manual_source_b_param_def;
     PF_ParamDef ray_grid_param_def;
     PF_ParamDef downsample_param_def;
     PF_ParamDef max_sources_param_def;
@@ -392,6 +406,13 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(sky_brightness_param_def);
     AEFX_CLR_STRUCT(threshold_param_def);
     AEFX_CLR_STRUCT(source_cap_param_def);
+    AEFX_CLR_STRUCT(manual_source_enabled_param_def);
+    AEFX_CLR_STRUCT(manual_source_x_param_def);
+    AEFX_CLR_STRUCT(manual_source_y_param_def);
+    AEFX_CLR_STRUCT(manual_source_intensity_param_def);
+    AEFX_CLR_STRUCT(manual_source_r_param_def);
+    AEFX_CLR_STRUCT(manual_source_g_param_def);
+    AEFX_CLR_STRUCT(manual_source_b_param_def);
     AEFX_CLR_STRUCT(ray_grid_param_def);
     AEFX_CLR_STRUCT(downsample_param_def);
     AEFX_CLR_STRUCT(max_sources_param_def);
@@ -445,6 +466,13 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool sky_brightness_checked_out = false;
     bool threshold_checked_out = false;
     bool source_cap_checked_out = false;
+    bool manual_source_enabled_checked_out = false;
+    bool manual_source_x_checked_out = false;
+    bool manual_source_y_checked_out = false;
+    bool manual_source_intensity_checked_out = false;
+    bool manual_source_r_checked_out = false;
+    bool manual_source_g_checked_out = false;
+    bool manual_source_b_checked_out = false;
     bool ray_grid_checked_out = false;
     bool downsample_checked_out = false;
     bool max_sources_checked_out = false;
@@ -622,6 +650,62 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
                           in_data->time_scale,
                           &source_cap_param_def));
     source_cap_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_enabled_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_enabled_param_def));
+    manual_source_enabled_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_x_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_x_param_def));
+    manual_source_x_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_y_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_y_param_def));
+    manual_source_y_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_intensity_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_intensity_param_def));
+    manual_source_intensity_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_r_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_r_param_def));
+    manual_source_r_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_g_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_g_param_def));
+    manual_source_g_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_b_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_b_param_def));
+    manual_source_b_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
                           ray_grid_param(),
@@ -922,6 +1006,13 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.sky_brightness = sky_brightness_param_def.u.fs_d.value;
         ui_state.threshold = threshold_param_def.u.fs_d.value;
         ui_state.source_cap = source_cap_param_def.u.fs_d.value;
+        ui_state.manual_source_enabled = manual_source_enabled_param_def.u.bd.value != 0;
+        ui_state.manual_source_x = manual_source_x_param_def.u.fs_d.value;
+        ui_state.manual_source_y = manual_source_y_param_def.u.fs_d.value;
+        ui_state.manual_source_intensity = manual_source_intensity_param_def.u.fs_d.value;
+        ui_state.manual_source_r = manual_source_r_param_def.u.fs_d.value;
+        ui_state.manual_source_g = manual_source_g_param_def.u.fs_d.value;
+        ui_state.manual_source_b = manual_source_b_param_def.u.fs_d.value;
         ui_state.ray_grid = ray_grid_param_def.u.sd.value;
         ui_state.downsample = downsample_param_def.u.sd.value;
         ui_state.max_sources = max_sources_param_def.u.sd.value;
@@ -1074,6 +1165,27 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (source_cap_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &source_cap_param_def));
+    }
+    if (manual_source_b_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_b_param_def));
+    }
+    if (manual_source_g_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_g_param_def));
+    }
+    if (manual_source_r_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_r_param_def));
+    }
+    if (manual_source_intensity_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_intensity_param_def));
+    }
+    if (manual_source_y_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_y_param_def));
+    }
+    if (manual_source_x_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_x_param_def));
+    }
+    if (manual_source_enabled_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_enabled_param_def));
     }
     if (sky_brightness_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &sky_brightness_param_def));

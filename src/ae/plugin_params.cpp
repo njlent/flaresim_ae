@@ -282,6 +282,84 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                          PARAM_ID_SOURCE_CAP);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("Manual Source",
+                     defaults.manual_source_enabled,
+                     PF_ParamFlag_NONE,
+                     PARAM_ID_MANUAL_SOURCE_ENABLED);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source X",
+                         -kManualFloatMax,
+                         kManualFloatMax,
+                         -1.0f,
+                         2.0f,
+                         defaults.manual_source_x,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_X);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Y",
+                         -kManualFloatMax,
+                         kManualFloatMax,
+                         -1.0f,
+                         2.0f,
+                         defaults.manual_source_y,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_Y);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Intensity",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         256.0f,
+                         defaults.manual_source_intensity,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_INTENSITY);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Red",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.manual_source_r,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_R);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Green",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.manual_source_g,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_G);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Blue",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.manual_source_b,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_B);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Ray Grid",
                   1,
                   kManualIntMax,

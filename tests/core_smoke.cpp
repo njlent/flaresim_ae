@@ -662,6 +662,14 @@ void test_ae_adapter_bits()
     state.aperture_rotation_deg = 15.0f;
     state.flare_gain = 250.0f;
     state.sky_brightness = 0.25f;
+    state.source_cap = 6.0f;
+    state.manual_source_enabled = true;
+    state.manual_source_x = 1.25f;
+    state.manual_source_y = 0.4f;
+    state.manual_source_intensity = 12.0f;
+    state.manual_source_r = 1.0f;
+    state.manual_source_g = 0.5f;
+    state.manual_source_b = 0.25f;
     state.ghost_blur = 0.01f;
     state.ghost_blur_passes = 2;
     state.ghost_cleanup_mode = GhostCleanupMode::SharpAdaptivePlusBlur;
@@ -703,6 +711,14 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.aperture_rotation_deg - 15.0f) < 1e-6f);
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(settings.sky_brightness - 0.25f) < 1e-6f);
+    assert(std::abs(settings.source_cap - 6.0f) < 1e-6f);
+    assert(settings.manual_source_enabled);
+    assert(std::abs(settings.manual_source_x - 1.25f) < 1e-6f);
+    assert(std::abs(settings.manual_source_y - 0.4f) < 1e-6f);
+    assert(std::abs(settings.manual_source_intensity - 12.0f) < 1e-6f);
+    assert(std::abs(settings.manual_source_r - 1.0f) < 1e-6f);
+    assert(std::abs(settings.manual_source_g - 0.5f) < 1e-6f);
+    assert(std::abs(settings.manual_source_b - 0.25f) < 1e-6f);
     assert(std::abs(settings.ghost_blur - 0.01f) < 1e-6f);
     assert(settings.ghost_blur_passes == 2);
     assert(settings.ghost_cleanup_mode == GhostCleanupMode::SharpAdaptivePlusBlur);
@@ -806,6 +822,41 @@ void test_output_views()
     float source_sum = 0.0f;
     for (float v : out_r) source_sum += v;
     assert(source_sum > 0.0f);
+}
+
+void test_manual_offscreen_source()
+{
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    std::vector<float> src_r(64, 0.0f);
+    std::vector<float> src_g(64, 0.0f);
+    std::vector<float> src_b(64, 0.0f);
+    const RgbImageView input {src_r.data(), src_g.data(), src_b.data(), 8, 8};
+
+    FrameRenderSettings settings {};
+    settings.fov_h_deg = 60.0f;
+    settings.threshold = 100.0f;
+    settings.downsample = 1;
+    settings.max_sources = 0;
+    settings.manual_source_enabled = true;
+    settings.manual_source_x = 1.25f;
+    settings.manual_source_y = 0.5f;
+    settings.manual_source_intensity = 10.0f;
+    settings.manual_source_r = 1.0f;
+    settings.manual_source_g = 0.5f;
+    settings.manual_source_b = 0.25f;
+
+    FrameRenderOutputs outputs;
+    const FrameRenderPlan sources_plan = build_output_view_render_plan(AeOutputView::Sources);
+    assert(render_frame(lens, input, settings, outputs, sources_plan, nullptr));
+    assert(outputs.detected_sources.size() == 1);
+    assert(outputs.sources.size() == 1);
+    assert(outputs.sources[0].angle_x > settings.fov_h_deg * 3.14159265358979323846f / 360.0f);
+    assert(std::abs(outputs.sources[0].r - 10.0f) < 1.0e-6f);
+    assert(std::abs(outputs.sources[0].g - 5.0f) < 1.0e-6f);
+    assert(std::abs(outputs.sources[0].b - 2.5f) < 1.0e-6f);
 }
 
 void test_render_plan_cache()
@@ -1270,7 +1321,14 @@ void test_param_schema()
     assert(flare_gain_param() + 1 == sky_brightness_param());
     assert(sky_brightness_param() + 1 == threshold_param());
     assert(threshold_param() + 1 == source_cap_param());
-    assert(source_cap_param() + 1 == ray_grid_param());
+    assert(source_cap_param() + 1 == manual_source_enabled_param());
+    assert(manual_source_enabled_param() + 1 == manual_source_x_param());
+    assert(manual_source_x_param() + 1 == manual_source_y_param());
+    assert(manual_source_y_param() + 1 == manual_source_intensity_param());
+    assert(manual_source_intensity_param() + 1 == manual_source_r_param());
+    assert(manual_source_r_param() + 1 == manual_source_g_param());
+    assert(manual_source_g_param() + 1 == manual_source_b_param());
+    assert(manual_source_b_param() + 1 == ray_grid_param());
     assert(max_sources_param() + 1 == cluster_radius_param());
     assert(cluster_radius_param() + 1 == preview_mode_param());
     assert(preview_mode_param() + 1 == preview_ray_grid_param());
@@ -1326,6 +1384,13 @@ void test_param_schema()
     assert(PARAM_ID_PAIR_COUNT == 48);
     assert(PARAM_ID_SPECTRAL_JITTER_MODE == 49);
     assert(PARAM_ID_SPECTRAL_JITTER_SEED == 50);
+    assert(PARAM_ID_MANUAL_SOURCE_ENABLED == 51);
+    assert(PARAM_ID_MANUAL_SOURCE_X == 52);
+    assert(PARAM_ID_MANUAL_SOURCE_Y == 53);
+    assert(PARAM_ID_MANUAL_SOURCE_INTENSITY == 54);
+    assert(PARAM_ID_MANUAL_SOURCE_R == 55);
+    assert(PARAM_ID_MANUAL_SOURCE_G == 56);
+    assert(PARAM_ID_MANUAL_SOURCE_B == 57);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -1369,6 +1434,13 @@ void test_param_schema()
     ui.sky_brightness = 0.25f;
     ui.threshold = 1.5f;
     ui.source_cap = 6.0f;
+    ui.manual_source_enabled = true;
+    ui.manual_source_x = -0.25f;
+    ui.manual_source_y = 1.25f;
+    ui.manual_source_intensity = 24.0f;
+    ui.manual_source_r = 0.75f;
+    ui.manual_source_g = 0.5f;
+    ui.manual_source_b = 0.25f;
     ui.ray_grid = 8;
     ui.downsample = 2;
     ui.max_sources = 222;
@@ -1421,6 +1493,13 @@ void test_param_schema()
     assert(std::abs(state.sky_brightness - 0.25f) < 1e-6f);
     assert(std::abs(state.threshold - 1.5f) < 1e-6f);
     assert(std::abs(state.source_cap - 6.0f) < 1e-6f);
+    assert(state.manual_source_enabled);
+    assert(std::abs(state.manual_source_x + 0.25f) < 1e-6f);
+    assert(std::abs(state.manual_source_y - 1.25f) < 1e-6f);
+    assert(std::abs(state.manual_source_intensity - 24.0f) < 1e-6f);
+    assert(std::abs(state.manual_source_r - 0.75f) < 1e-6f);
+    assert(std::abs(state.manual_source_g - 0.5f) < 1e-6f);
+    assert(std::abs(state.manual_source_b - 0.25f) < 1e-6f);
     assert(state.ray_grid == 8);
     assert(state.downsample == 2);
     assert(state.max_sources == 222);
@@ -1491,6 +1570,7 @@ int main()
     test_cuda_cell_rasterization_launch();
     test_ae_adapter_bits();
     test_output_views();
+    test_manual_offscreen_source();
     test_render_plan_cache();
     test_pixel_convert();
     test_frame_bridge();

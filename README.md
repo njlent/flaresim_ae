@@ -72,6 +72,10 @@ Notes:
 | Sky Brightness | slider `0`-`4`; manual higher values allowed | `1` | Scales sub-threshold scene values before source extraction. |
 | Threshold | slider `0`-`64` | `8` | Bright-pixel cutoff for source detection. Lower = more sources/noise. |
 | Source Cap | slider `0`-`64`; manual higher values allowed | `0` | Clamps individual source luminance before thresholding and flare contribution. `0` disables the cap. |
+| Manual Source | `Off`, `On` | `Off` | Adds one artist-placed source in addition to detected HDR sources. |
+| Source X / Source Y | slider `-1`-`2`; manual values allowed outside slider range | `0.5`, `0.5` | Manual source position in normalized frame space. `0..1` is on-frame; outside values create offscreen sources. |
+| Source Intensity | slider `0`-`256`; manual higher values allowed | `16` | Manual source brightness. |
+| Source Red / Green / Blue | slider `0`-`4`; manual higher values allowed | `1`, `1`, `1` | Manual source color multipliers. |
 | Ray Grid | `1`-`2048` | `128` | Base ray density for ghost tracing. Main quality/perf lever. |
 | Downsample | `1`-`12` | `2` | Source extraction block size. Higher = faster, fewer detected highlights. |
 | Max Sources | `0`-`2048` | `256` | `0` means unlimited. Otherwise keeps only the brightest detected sources. |
