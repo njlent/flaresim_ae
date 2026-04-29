@@ -38,7 +38,7 @@ constexpr SensorPresetDescriptor kSensorPresets[] = {
     {"Micro Four Thirds", 17.3f, 13.0f},
 };
 
-constexpr int kSpectralSamples[] = {3, 5, 7, 9, 11};
+constexpr int kSpectralSamples[] = {3, 5, 7, 9, 11, 15, 21, 31};
 
 struct GhostCleanupModeDescriptor
 {
@@ -282,7 +282,7 @@ std::string build_sensor_preset_popup_string()
 std::string build_spectral_samples_popup_string()
 {
     std::array<const char*, std::size(kSpectralSamples)> labels = {
-        "3", "5", "7", "9", "11",
+        "3", "5", "7", "9", "11", "15", "21", "31",
     };
     return build_popup_string_from_labels(labels.data(), labels.size());
 }

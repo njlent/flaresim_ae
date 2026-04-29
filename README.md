@@ -80,7 +80,7 @@ Notes:
 | Preview Ray Grid | `1`-`128` | `16` | Ray grid used while Preview Mode is on. |
 | Preview Max Sources | `0`-`512` | `100` | Source cap used while Preview Mode is on. |
 | Preview Downsample | `1`-`24` | `8` | Source extraction stride used while Preview Mode is on. |
-| Preview Spectral Samples | `3`, `5`, `7`, `9`, `11` | `3` | Spectral sample count used while Preview Mode is on. |
+| Preview Spectral Samples | `3`, `5`, `7`, `9`, `11`, `15`, `21`, `31` | `3` | Spectral sample count used while Preview Mode is on. |
 
 ### Post-processing
 
@@ -93,7 +93,7 @@ Notes:
 | Haze Blur Passes | `0`-`8` | `3` | Additional haze blur passes. |
 | Starburst Gain | slider `0`-`10` | `0` | Enables diffraction-style starburst. `0` disables starburst. |
 | Starburst Scale | slider `0`-`0.5` | `0.15` | Starburst size. Shape follows aperture blades/rotation. |
-| Spectral Samples | `3`, `5`, `7`, `9`, `11` | `3` | Wavelength samples per ghost trace. Higher = better dispersion/color, slower render. |
+| Spectral Samples | `3`, `5`, `7`, `9`, `11`, `15`, `21`, `31` | `3` | Wavelength samples per ghost trace. Higher = better dispersion/color, slower render. |
 | Ghost Cleanup | `Legacy Blur`, `Sharp Adaptive`, `Sharp + Blur` | `Sharp Adaptive` | Reconstruction mode for ghost artifacts. `Legacy Blur`: old soft cleanup. `Sharp Adaptive`: sharper footprint-based reconstruction. `Sharp + Blur`: sharp reconstruction plus post blur. |
 
 Notes:

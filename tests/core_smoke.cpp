@@ -1332,7 +1332,7 @@ void test_param_schema()
     assert(manufacturer_popup.find("Canon") != std::string::npos);
     assert(grouped_lens_popup.find("Double Gauss") != std::string::npos);
     assert(sensor_preset_popup.find("Full Frame") != std::string::npos);
-    assert(spectral_popup.find("11") != std::string::npos);
+    assert(spectral_popup.find("31") != std::string::npos);
     assert(cleanup_popup.find("Sharp Adaptive") != std::string::npos);
     assert(jitter_popup.find("Halton") != std::string::npos);
     assert(projected_cells_popup.find("Disabled") != std::string::npos);
@@ -1376,7 +1376,7 @@ void test_param_schema()
     ui.haze_blur_passes = 2;
     ui.starburst_gain = 0.2f;
     ui.starburst_scale = 0.1f;
-    ui.spectral_samples_index = spectral_samples_popup_index(11);
+    ui.spectral_samples_index = spectral_samples_popup_index(31);
     ui.adaptive_quality = 0.65f;
     ui.adaptive_sampling_strength = 1.5f;
     ui.footprint_radius_bias = 0.85f;
@@ -1421,7 +1421,7 @@ void test_param_schema()
     assert(state.haze_blur_passes == 2);
     assert(std::abs(state.starburst_gain - 0.2f) < 1e-6f);
     assert(std::abs(state.starburst_scale - 0.1f) < 1e-6f);
-    assert(state.spectral_samples == 11);
+    assert(state.spectral_samples == 31);
     assert(std::abs(state.adaptive_quality - 0.65f) < 1e-6f);
     assert(std::abs(state.adaptive_sampling_strength - 1.5f) < 1e-6f);
     assert(std::abs(state.footprint_radius_bias - 0.85f) < 1e-6f);
