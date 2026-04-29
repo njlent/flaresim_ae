@@ -4,6 +4,7 @@
 #include "source_extract.h"
 
 #include <cuda_runtime.h>
+#include <thrust/count.h>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
@@ -168,6 +169,14 @@ struct BrightPixelIntensityGreater
     __host__ __device__ bool operator()(const BrightPixel& a, const BrightPixel& b) const
     {
         return bright_pixel_luma(a) > bright_pixel_luma(b);
+    }
+};
+
+struct BrightPixelHasEnergy
+{
+    __host__ __device__ bool operator()(const BrightPixel& pixel) const
+    {
+        return bright_pixel_luma(pixel) > 0.0f;
     }
 };
 
@@ -738,7 +747,7 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
 
     const FrameRenderPlan plan = build_output_view_render_plan(view);
     const bool need_sources = plan.need_source_output || plan.need_flare || plan.need_haze || plan.need_starburst;
-    const int source_slots = std::max(0, settings.max_sources);
+    int source_count = 0;
     float fov_h = 0.0f;
     float fov_v = 0.0f;
     if (need_sources && !compute_camera_fov(settings, width, height, fov_h, fov_v)) {
@@ -775,7 +784,7 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         return false;
     }
 
-    if (need_sources && source_slots > 0) {
+    if (need_sources) {
         const int stride = std::max(1, settings.downsample);
         const int dw = std::max(1, width / stride);
         const int dh = std::max(1, height / stride);
@@ -783,10 +792,6 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         if (!ensure_device_bytes(reinterpret_cast<void*&>(cache.d_candidates),
                                  cache.candidate_capacity,
                                  max_candidates * sizeof(BrightPixel),
-                                 out_error) ||
-            !ensure_device_bytes(reinterpret_cast<void*&>(cache.d_sources),
-                                 cache.source_capacity,
-                                 static_cast<std::size_t>(source_slots) * sizeof(BrightPixel),
                                  out_error)) {
             return false;
         }
@@ -816,27 +821,44 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
                          candidates_begin,
                          candidates_begin + static_cast<std::ptrdiff_t>(max_candidates),
                          BrightPixelIntensityGreater {});
+            const int valid_count =
+                static_cast<int>(thrust::count_if(thrust::device,
+                                                  candidates_begin,
+                                                  candidates_begin + static_cast<std::ptrdiff_t>(max_candidates),
+                                                  BrightPixelHasEnergy {}));
+            source_count = settings.max_sources > 0
+                               ? std::min(valid_count, settings.max_sources)
+                               : valid_count;
         } catch (const std::exception& error) {
             report_error(error.what(), out_error);
             return false;
         }
 
-        const int precluster_count =
-            std::min<int>(static_cast<int>(max_candidates), std::max(source_slots * 8, source_slots));
-        cluster_sorted_sources_kernel<<<1, 1>>>(cache.d_candidates,
-                                                precluster_count,
-                                                cache.d_sources,
-                                                source_slots,
-                                                settings.cluster_radius_px,
-                                                width,
-                                                std::tan(fov_h * 0.5f));
-        if (cudaGetLastError() != cudaSuccess) {
-            report_error("cluster_sorted_sources_kernel failed.", out_error);
-            return false;
+        if (source_count > 0) {
+            if (!ensure_device_bytes(reinterpret_cast<void*&>(cache.d_sources),
+                                     cache.source_capacity,
+                                     static_cast<std::size_t>(source_count) * sizeof(BrightPixel),
+                                     out_error)) {
+                return false;
+            }
+
+            const int precluster_count =
+                std::min<int>(static_cast<int>(max_candidates), std::max(source_count * 8, source_count));
+            cluster_sorted_sources_kernel<<<1, 1>>>(cache.d_candidates,
+                                                    precluster_count,
+                                                    cache.d_sources,
+                                                    source_count,
+                                                    settings.cluster_radius_px,
+                                                    width,
+                                                    std::tan(fov_h * 0.5f));
+            if (cudaGetLastError() != cudaSuccess) {
+                report_error("cluster_sorted_sources_kernel failed.", out_error);
+                return false;
+            }
         }
     }
 
-    if (plan.need_flare && source_slots > 0) {
+    if (plan.need_flare && source_count > 0) {
         GhostConfig ghost {};
         ghost.ray_grid = settings.ray_grid;
         ghost.min_intensity = settings.min_ghost;
@@ -872,7 +894,7 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         if (!launch_ghost_cuda_device(lens,
                                       cache.ghost_setup,
                                       cache.d_sources,
-                                      source_slots,
+                                      source_count,
                                       sensor_half_w,
                                       sensor_half_h,
                                       width,
@@ -909,14 +931,14 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
             return false;
         }
         clear_rgb_kernel<<<grid1d, 256>>>(cache.d_haze_r, cache.d_haze_g, cache.d_haze_b, count);
-        if (source_slots > 0 && settings.haze_gain > 0.0f) {
+        if (source_count > 0 && settings.haze_gain > 0.0f) {
             const int haze_block = std::max(1, settings.downsample);
             const float tan_half_h = std::tan(fov_h * 0.5f);
             const float tan_half_v = std::tan(fov_v * 0.5f);
             const dim3 haze_grid((haze_block + kBlockSize2D - 1) / kBlockSize2D,
                                  (haze_block + kBlockSize2D - 1) / kBlockSize2D,
                                  1);
-            for (int source_index = 0; source_index < source_slots; ++source_index) {
+            for (int source_index = 0; source_index < source_count; ++source_index) {
                 rasterize_haze_source_kernel<<<haze_grid, block2d>>>(cache.d_sources,
                                                                      source_index,
                                                                      tan_half_h,
@@ -950,7 +972,7 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
             return false;
         }
         clear_rgb_kernel<<<grid1d, 256>>>(cache.d_starburst_r, cache.d_starburst_g, cache.d_starburst_b, count);
-        if (source_slots > 0 && settings.starburst_gain > 0.0f) {
+        if (source_count > 0 && settings.starburst_gain > 0.0f) {
             const std::uint64_t psf_key = hash_starburst_psf(settings);
             if (cache.starburst_psf_key != psf_key || cache.starburst_psf.empty()) {
                 StarburstConfig config {};
@@ -979,7 +1001,7 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
             const dim3 starburst_grid((span + kBlockSize2D - 1) / kBlockSize2D,
                                       (span + kBlockSize2D - 1) / kBlockSize2D,
                                       1);
-            for (int source_index = 0; source_index < source_slots; ++source_index) {
+            for (int source_index = 0; source_index < source_count; ++source_index) {
                 render_starburst_source_kernel<<<starburst_grid, block2d>>>(cache.d_sources,
                                                                             source_index,
                                                                             cache.d_starburst_psf,
@@ -1088,7 +1110,7 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         const dim3 source_grid((block + kBlockSize2D - 1) / kBlockSize2D,
                                (block + kBlockSize2D - 1) / kBlockSize2D,
                                1);
-        for (int source_index = 0; source_index < source_slots; ++source_index) {
+        for (int source_index = 0; source_index < source_count; ++source_index) {
             draw_source_block_kernel<<<source_grid, block2d>>>(cache.d_sources,
                                                                source_index,
                                                                tan_half_h,

@@ -941,6 +941,7 @@ void test_frame_bridge()
     AeParameterState state {};
     state.threshold = 0.25f;
     state.downsample = 1;
+    state.max_sources = 0;
     state.ray_grid = 4;
     state.flare_gain = 100.0f;
     state.sky_brightness = 0.5f;

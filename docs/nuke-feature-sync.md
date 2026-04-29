@@ -13,6 +13,7 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 | Auto Seed | Stratified jitter seed can follow frame number. | Ported | Added AE checkbox; smart/legacy render resolve seed from current frame for Stratified jitter. |
 | Per-pair toggles | Nuke dynamic Pairs tab with refresh/select/deselect. | Pending | AE has static params; likely needs fixed pair range or alternate include/exclude controls. |
 | Source preview/output | Nuke `source.rgb` and Sources Only mode. | Already covered | AE `View = Sources` / `Diagnostics`. |
+| Max Sources `0` | `0` means unlimited. | Ported | CPU already matched; GPU path now compacts detected candidates and honors unlimited mode. |
 | Mask input | Nuke second input alpha mask. | Already covered | AE `Mask Layer`; full-comp detection mask. |
 | Pupil jitter | Off, Stratified, Halton. | Already covered | AE has `Pupil Jitter` and `Jitter Seed`. |
 | Spectral samples | 3/5/7/9/11. | Already covered | AE has popup. |
@@ -23,3 +24,4 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 - 2026-04-29: Ported Source Cap from Nuke. CPU path clamps source luminance during extraction; CUDA path clamps source candidates before threshold rejection. Added docs and smoke-test assertions.
 - 2026-04-29: Ported Auto Seed. AE now has the Nuke-style checkbox and derives Stratified jitter seed from the current frame.
 - 2026-04-29: Ported Preview Mode. AE preview controls override render quality and apply the Nuke downsample brightness compensation.
+- 2026-04-29: Fixed AE GPU source handling so `Max Sources = 0` means unlimited instead of zero sources.
