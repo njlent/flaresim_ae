@@ -216,6 +216,14 @@ static std::vector<SpectralSample> build_spectral_samples(const GhostConfig& con
     return samples;
 }
 
+static float effective_sensor_half_w(const LensSystem& lens,
+                                     float fov_h,
+                                     const GhostConfig& config)
+{
+    const float squeeze = std::clamp(config.anamorphic_squeeze, 0.1f, 8.0f);
+    return lens.focal_length * std::tan(fov_h * 0.5f) / squeeze;
+}
+
 static bool is_valid_pupil_sample(float u,
                                   float v,
                                   int aperture_blades,
@@ -1045,7 +1053,7 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
     }
 
     const auto pairs = enumerate_ghost_pairs(lens);
-    const float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
+    const float sensor_half_w = effective_sensor_half_w(lens, fov_h, config);
     const float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
 
     for (const GhostPair& pair : pairs) {
@@ -1208,7 +1216,7 @@ void render_ghosts(const LensSystem &lens,
     printf("Total ghost pairs: %zu\n", pairs.size());
 
     // Sensor dimensions from focal length and FOV
-    float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
+    float sensor_half_w = effective_sensor_half_w(lens, fov_h, config);
     float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
 
     // Entrance pupil sampling setup

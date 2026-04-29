@@ -20,6 +20,7 @@ struct FrameRenderSettings
     float sensor_width_mm = 36.0f;
     float sensor_height_mm = 24.0f;
     float focal_length_mm = 50.0f;
+    float anamorphic_squeeze = 1.0f;
     float threshold = 8.0f;
     int downsample = 2;
     int ray_grid = 128;
@@ -56,6 +57,9 @@ struct FrameRenderSettings
     int max_adaptive_pair_grid = 0;
     int pair_start = 0;
     int pair_count = 0;
+    int surface_art_start = 0;
+    int surface_art_count = 0;
+    float surface_art_gain = 1.0f;
     ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Off;
     PupilJitterMode pupil_jitter_mode = PupilJitterMode::Off;
     int pupil_jitter_seed = 0;

@@ -617,6 +617,7 @@ std::uint64_t hash_ghost_setup(const LensSystem& lens,
         hash_append(hash, surface.semi_aperture);
         hash_append(hash, surface.coating);
         hash_append(hash, surface.is_stop);
+        hash_append(hash, surface.reflectance_scale);
         hash_append(hash, surface.z);
     }
     hash_append(hash, fov_h);
@@ -626,6 +627,7 @@ std::uint64_t hash_ghost_setup(const LensSystem& lens,
     hash_append(hash, settings.ray_grid);
     hash_append(hash, settings.flare_gain);
     hash_append(hash, settings.spectral_samples);
+    hash_append(hash, settings.anamorphic_squeeze);
     hash_append(hash, settings.aperture_blades);
     hash_append(hash, settings.aperture_rotation_deg);
     hash_append(hash, settings.ghost_cleanup_mode);
@@ -633,6 +635,9 @@ std::uint64_t hash_ghost_setup(const LensSystem& lens,
     hash_append(hash, settings.max_adaptive_pair_grid);
     hash_append(hash, settings.pair_start);
     hash_append(hash, settings.pair_count);
+    hash_append(hash, settings.surface_art_start);
+    hash_append(hash, settings.surface_art_count);
+    hash_append(hash, settings.surface_art_gain);
     hash_append(hash, settings.projected_cells_mode);
     hash_append(hash, settings.pupil_jitter_mode);
     hash_append(hash, settings.pupil_jitter_seed);
@@ -724,6 +729,27 @@ bool build_manual_source(const FrameRenderSettings& settings,
     out_source.g = g;
     out_source.b = b;
     return true;
+}
+
+const LensSystem& select_art_directed_lens(const LensSystem& lens,
+                                           const FrameRenderSettings& settings,
+                                           LensSystem& adjusted_lens)
+{
+    if (std::abs(settings.surface_art_gain - 1.0f) <= 1.0e-6f ||
+        settings.surface_art_start >= lens.num_surfaces()) {
+        return lens;
+    }
+
+    adjusted_lens = lens;
+    const int start = std::clamp(settings.surface_art_start, 0, adjusted_lens.num_surfaces());
+    const int end = settings.surface_art_count > 0
+                        ? std::min(adjusted_lens.num_surfaces(), start + settings.surface_art_count)
+                        : adjusted_lens.num_surfaces();
+    const float gain = std::clamp(settings.surface_art_gain, 0.0f, 16.0f);
+    for (int i = start; i < end; ++i) {
+        adjusted_lens.surfaces[static_cast<std::size_t>(i)].reflectance_scale *= gain;
+    }
+    return adjusted_lens;
 }
 
 } // namespace
@@ -909,12 +935,16 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         }
     }
 
+    LensSystem adjusted_lens;
+    const LensSystem& render_lens = select_art_directed_lens(lens, settings, adjusted_lens);
+
     if (plan.need_flare && source_count > 0) {
         GhostConfig ghost {};
         ghost.ray_grid = settings.ray_grid;
         ghost.min_intensity = settings.min_ghost;
         ghost.gain = settings.flare_gain;
         ghost.spectral_samples = settings.spectral_samples;
+        ghost.anamorphic_squeeze = settings.anamorphic_squeeze;
         ghost.aperture_blades = settings.aperture_blades;
         ghost.aperture_rotation_deg = settings.aperture_rotation_deg;
         ghost.ghost_normalize = settings.ghost_normalize;
@@ -934,9 +964,9 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         ghost.cell_coverage_bias = settings.cell_coverage_bias;
         ghost.cell_edge_inset = settings.cell_edge_inset;
 
-        const std::uint64_t setup_key = hash_ghost_setup(lens, fov_h, fov_v, width, height, settings);
+        const std::uint64_t setup_key = hash_ghost_setup(render_lens, fov_h, fov_v, width, height, settings);
         if (!cache.has_ghost_setup || cache.ghost_setup_key != setup_key) {
-            if (!build_ghost_render_setup(lens, fov_h, fov_v, width, height, ghost, cache.ghost_setup)) {
+            if (!build_ghost_render_setup(render_lens, fov_h, fov_v, width, height, ghost, cache.ghost_setup)) {
                 report_error("Failed to build ghost setup.", out_error);
                 return false;
             }
@@ -944,9 +974,11 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
             cache.ghost_setup_key = setup_key;
         }
 
-        const float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
-        const float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
-        if (!launch_ghost_cuda_device(lens,
+        const float sensor_half_w =
+            render_lens.focal_length * std::tan(fov_h * 0.5f) /
+            std::clamp(settings.anamorphic_squeeze, 0.1f, 8.0f);
+        const float sensor_half_h = render_lens.focal_length * std::tan(fov_v * 0.5f);
+        if (!launch_ghost_cuda_device(render_lens,
                                       cache.ghost_setup,
                                       cache.d_sources,
                                       source_count,

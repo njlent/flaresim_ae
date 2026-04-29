@@ -337,7 +337,10 @@ __device__ __forceinline__ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
         const float n1 = current_ior;
         const float n2 = d_ior_at(surfaces[s], lambda_nm);
         const float cos_i = fabsf(dv_dot(normal, ray.dir));
-        const float R = d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm);
+        const float R = fminf(fmaxf(d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm) *
+                                    surfaces[s].reflectance_scale,
+                                    0.0f),
+                              1.0f);
 
         if (s == bounce_b) {
             DVec3 reflected;
@@ -370,7 +373,10 @@ __device__ __forceinline__ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
         const float n1 = current_ior;
         const float n2 = d_ior_before(surfaces, s, lambda_nm);
         const float cos_i = fabsf(dv_dot(normal, ray.dir));
-        const float R = d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm);
+        const float R = fminf(fmaxf(d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm) *
+                                    surfaces[s].reflectance_scale,
+                                    0.0f),
+                              1.0f);
 
         if (s == bounce_a) {
             DVec3 reflected;
@@ -404,7 +410,10 @@ __device__ __forceinline__ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
         const float n1 = current_ior;
         const float n2 = d_ior_at(surfaces[s], lambda_nm);
         const float cos_i = fabsf(dv_dot(normal, ray.dir));
-        const float R = d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm);
+        const float R = fminf(fmaxf(d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm) *
+                                    surfaces[s].reflectance_scale,
+                                    0.0f),
+                              1.0f);
 
         DVec3 refracted;
         if (!d_refract(ray.dir, normal, n1 / n2, refracted)) {

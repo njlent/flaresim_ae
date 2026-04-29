@@ -131,6 +131,7 @@ std::uint64_t hash_lens(const LensSystem& lens)
         hash_append_value(hash, surface.semi_aperture);
         hash_append_value(hash, surface.coating);
         hash_append_value(hash, surface.is_stop);
+        hash_append_value(hash, surface.reflectance_scale);
         hash_append_value(hash, surface.z);
     }
 
@@ -156,6 +157,7 @@ std::uint64_t make_source_key(std::uint64_t scene_key, const FrameRenderSettings
     hash_append_value(hash, settings.sensor_width_mm);
     hash_append_value(hash, settings.sensor_height_mm);
     hash_append_value(hash, settings.focal_length_mm);
+    hash_append_value(hash, settings.anamorphic_squeeze);
     hash_append_value(hash, settings.downsample);
     hash_append_value(hash, settings.source_cap);
     hash_append_value(hash, settings.manual_source_enabled);
@@ -191,6 +193,7 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     hash_append_value(hash, settings.min_ghost);
     hash_append_value(hash, settings.flare_gain);
     hash_append_value(hash, settings.spectral_samples);
+    hash_append_value(hash, settings.anamorphic_squeeze);
     hash_append_value(hash, settings.aperture_blades);
     hash_append_value(hash, settings.aperture_rotation_deg);
     hash_append_value(hash, settings.ghost_normalize);
@@ -203,6 +206,9 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     hash_append_value(hash, settings.max_adaptive_pair_grid);
     hash_append_value(hash, settings.pair_start);
     hash_append_value(hash, settings.pair_count);
+    hash_append_value(hash, settings.surface_art_start);
+    hash_append_value(hash, settings.surface_art_count);
+    hash_append_value(hash, settings.surface_art_gain);
     hash_append_value(hash, settings.projected_cells_mode);
     hash_append_value(hash, settings.pupil_jitter_mode);
     hash_append_value(hash, settings.pupil_jitter_seed);
@@ -228,6 +234,7 @@ std::uint64_t make_ghost_setup_key(std::uint64_t lens_key,
     hash_append_value(hash, height);
     hash_append_value(hash, settings.ray_grid);
     hash_append_value(hash, settings.min_ghost);
+    hash_append_value(hash, settings.anamorphic_squeeze);
     hash_append_value(hash, settings.aperture_blades);
     hash_append_value(hash, settings.aperture_rotation_deg);
     hash_append_value(hash, settings.ghost_normalize);
@@ -238,6 +245,9 @@ std::uint64_t make_ghost_setup_key(std::uint64_t lens_key,
     hash_append_value(hash, settings.max_adaptive_pair_grid);
     hash_append_value(hash, settings.pair_start);
     hash_append_value(hash, settings.pair_count);
+    hash_append_value(hash, settings.surface_art_start);
+    hash_append_value(hash, settings.surface_art_count);
+    hash_append_value(hash, settings.surface_art_gain);
     hash_append_value(hash, settings.projected_cells_mode);
     hash_append_value(hash, settings.pupil_jitter_mode);
     hash_append_value(hash, settings.pupil_jitter_seed);
@@ -379,6 +389,27 @@ bool build_manual_source(const FrameRenderSettings& settings,
     out_source.g = g;
     out_source.b = b;
     return true;
+}
+
+const LensSystem& select_art_directed_lens(const LensSystem& lens,
+                                           const FrameRenderSettings& settings,
+                                           LensSystem& adjusted_lens)
+{
+    if (std::abs(settings.surface_art_gain - 1.0f) <= 1.0e-6f ||
+        settings.surface_art_start >= lens.num_surfaces()) {
+        return lens;
+    }
+
+    adjusted_lens = lens;
+    const int start = std::clamp(settings.surface_art_start, 0, adjusted_lens.num_surfaces());
+    const int end = settings.surface_art_count > 0
+                        ? std::min(adjusted_lens.num_surfaces(), start + settings.surface_art_count)
+                        : adjusted_lens.num_surfaces();
+    const float gain = std::clamp(settings.surface_art_gain, 0.0f, 16.0f);
+    for (int i = start; i < end; ++i) {
+        adjusted_lens.surfaces[static_cast<std::size_t>(i)].reflectance_scale *= gain;
+    }
+    return adjusted_lens;
 }
 
 } // namespace
@@ -570,7 +601,9 @@ bool render_frame(
         }
     }
 
-    const std::uint64_t lens_key = hash_lens(lens);
+    LensSystem adjusted_lens;
+    const LensSystem& render_lens = select_art_directed_lens(lens, settings, adjusted_lens);
+    const std::uint64_t lens_key = hash_lens(render_lens);
 
     if (plan.need_flare) {
         const std::uint64_t ghost_key = make_ghost_key(source_key, lens_key, settings);
@@ -592,6 +625,7 @@ bool render_frame(
                 ghost.min_intensity = settings.min_ghost;
                 ghost.gain = settings.flare_gain;
                 ghost.spectral_samples = settings.spectral_samples;
+                ghost.anamorphic_squeeze = settings.anamorphic_squeeze;
                 ghost.aperture_blades = settings.aperture_blades;
                 ghost.aperture_rotation_deg = settings.aperture_rotation_deg;
                 ghost.ghost_normalize = settings.ghost_normalize;
@@ -627,7 +661,7 @@ bool render_frame(
                 if (ghost_setup_cache_hit) {
                     ghost_setup = &cache->ghost_setup;
                 } else {
-                    build_ghost_render_setup(lens,
+                    build_ghost_render_setup(render_lens,
                                              fov_h,
                                              fov_v,
                                              input.width,
@@ -647,7 +681,7 @@ bool render_frame(
                 }
 
                 render_ghosts(
-                    lens,
+                    render_lens,
                     outputs.sources,
                     fov_h,
                     fov_v,

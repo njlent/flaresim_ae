@@ -168,6 +168,7 @@ TraceResult trace_ghost_ray(const Ray &ray_in, const LensSystem &lens,
         float cos_i = std::abs(dot(norm, ray.dir));
         float R = surface_reflectance(cos_i, n1, n2,
                                       lens.surfaces[s].coating, lambda_nm);
+        R = std::clamp(R * lens.surfaces[s].reflectance_scale, 0.0f, 1.0f);
 
         if (s == bounce_b)
         {
@@ -209,6 +210,7 @@ TraceResult trace_ghost_ray(const Ray &ray_in, const LensSystem &lens,
         float cos_i = std::abs(dot(norm, ray.dir));
         float R = surface_reflectance(cos_i, n1, n2,
                                       lens.surfaces[s].coating, lambda_nm);
+        R = std::clamp(R * lens.surfaces[s].reflectance_scale, 0.0f, 1.0f);
 
         if (s == bounce_a)
         {
@@ -251,6 +253,7 @@ TraceResult trace_ghost_ray(const Ray &ray_in, const LensSystem &lens,
         float cos_i = std::abs(dot(norm, ray.dir));
         float R = surface_reflectance(cos_i, n1, n2,
                                       lens.surfaces[s].coating, lambda_nm);
+        R = std::clamp(R * lens.surfaces[s].reflectance_scale, 0.0f, 1.0f);
 
         Vec3f new_dir;
         if (!refract_direction(ray.dir, norm, n1 / n2, new_dir))

@@ -14,11 +14,13 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 | Per-pair controls | Nuke dynamic Pairs tab with refresh/select/deselect. | Partial | AE now exposes `Pair Start` / `Pair Count` to isolate active pair ranges. Exact per-lens dynamic checkboxes remain a custom-UI task. |
 | Source preview/output | Nuke `source.rgb` and Sources Only mode. | Already covered | AE `View = Sources` / `Diagnostics`. |
 | Offscreen source support | Flares OFX/marketing docs advertise automatic positioning; no open Nuke offscreen knob found. | Ported | Added one manual source with normalized frame coordinates that can sit outside `0..1`, plus intensity/color controls. |
+| Anamorphic lens support | No open Nuke anamorphic lens prescriptions or knobs found in `flaresim_nuke`. | Ported | Added `Anamorphic Squeeze` to horizontally desqueeze ghost projection for anamorphic plates. This is an artist/camera projection control, not a proprietary cylindrical lens prescription library. |
 | Max Sources `0` | `0` means unlimited. | Ported | CPU already matched; GPU path now compacts detected candidates and honors unlimited mode. |
 | Mask input | Nuke second input alpha mask. | Already covered | AE `Mask Layer`; full-comp detection mask. |
 | Pupil jitter | Off, Stratified, Halton. | Already covered | AE has `Pupil Jitter` and `Jitter Seed`. |
 | Expanded Spectrum | Flares OFX docs describe `Expanded Spectrum` for stronger dispersion; open Nuke exposes 3/5/7/9/11. | Ported | AE popup now exposes 3/5/7/9/11/15/21/31. |
 | Spectral jitter | Flares OFX docs call out dispersion artifacts under low wavelength counts; no open Nuke knob found. | Ported | AE now has `Spectral Jitter` / `Spectral Seed`; CPU and CUDA share jittered wavelength tables. |
+| Per-surface art direction | No open Nuke per-surface art controls found. | Ported | Added `Surface Start`, `Surface Count`, and `Surface Gain` to scale selected surface reflectance before CPU/CUDA tracing. |
 | Haze/starburst | Haze + FFT aperture starburst. | Already covered | AE has haze/starburst controls. |
 
 ## Implementation Log
@@ -31,3 +33,5 @@ User link checked first: NVIDIA AI Decoded ray reconstruction article. That arti
 - 2026-04-29: Added Expanded Spectrum options by extending AE spectral sample popups to 15/21/31.
 - 2026-04-29: Added Spectral Jitter. CPU fallback now honors expanded spectral sample counts instead of tracing only RGB, and CUDA hashes/uploads jittered spectral tables.
 - 2026-04-29: Added manual/offscreen source support. AE now appends a manual source after detected-source limiting so artists can place flares outside the comp frame.
+- 2026-04-29: Added Anamorphic Squeeze. CPU and CUDA ghost projection now share the squeezed sensor-width mapping and invalidate render caches when it changes.
+- 2026-04-29: Added per-surface reflectance art direction. CPU and CUDA tracing now respect selected surface gain ranges while keeping base `.lens` files unchanged.

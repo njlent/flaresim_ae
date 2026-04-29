@@ -177,6 +177,18 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                          PARAM_ID_FOCAL_LENGTH);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Anamorphic Squeeze",
+                         0.1f,
+                         kManualFloatMax,
+                         1.0f,
+                         4.0f,
+                         defaults.anamorphic_squeeze,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_ANAMORPHIC_SQUEEZE);
+
+    AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_CAMERA_SECTION_END);
 
     AEFX_CLR_STRUCT(def);
@@ -623,6 +635,36 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   512,
                   defaults.pair_count,
                   PARAM_ID_PAIR_COUNT);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Surface Start",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.surface_art_start,
+                  PARAM_ID_SURFACE_ART_START);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Surface Count",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.surface_art_count,
+                  PARAM_ID_SURFACE_ART_COUNT);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Surface Gain",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.surface_art_gain,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_SURFACE_ART_GAIN);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX("Pupil Jitter",

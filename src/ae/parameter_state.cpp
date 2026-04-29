@@ -13,6 +13,7 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.sensor_width_mm = state.sensor_width_mm;
     settings.sensor_height_mm = state.sensor_height_mm;
     settings.focal_length_mm = state.focal_length_mm;
+    settings.anamorphic_squeeze = state.anamorphic_squeeze;
     settings.threshold = state.threshold;
     settings.downsample = state.downsample;
     settings.ray_grid = state.ray_grid;
@@ -49,6 +50,9 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.max_adaptive_pair_grid = state.max_adaptive_pair_grid;
     settings.pair_start = state.pair_start;
     settings.pair_count = state.pair_count;
+    settings.surface_art_start = state.surface_art_start;
+    settings.surface_art_count = state.surface_art_count;
+    settings.surface_art_gain = state.surface_art_gain;
     settings.projected_cells_mode = state.projected_cells_mode;
     settings.pupil_jitter_mode = state.pupil_jitter_mode;
     settings.pupil_jitter_seed = state.pupil_jitter_seed;

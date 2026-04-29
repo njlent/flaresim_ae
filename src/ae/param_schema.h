@@ -81,6 +81,10 @@ inline constexpr int PARAM_ID_MANUAL_SOURCE_INTENSITY = 54;
 inline constexpr int PARAM_ID_MANUAL_SOURCE_R = 55;
 inline constexpr int PARAM_ID_MANUAL_SOURCE_G = 56;
 inline constexpr int PARAM_ID_MANUAL_SOURCE_B = 57;
+inline constexpr int PARAM_ID_ANAMORPHIC_SQUEEZE = 58;
+inline constexpr int PARAM_ID_SURFACE_ART_START = 59;
+inline constexpr int PARAM_ID_SURFACE_ART_COUNT = 60;
+inline constexpr int PARAM_ID_SURFACE_ART_GAIN = 61;
 
 struct AeUiParameterState
 {
@@ -95,6 +99,7 @@ struct AeUiParameterState
     float sensor_width_mm = 36.0f;
     float sensor_height_mm = 24.0f;
     float focal_length_mm = 50.0f;
+    float anamorphic_squeeze = 1.0f;
     int aperture_blades = 0;
     float aperture_rotation_deg = 0.0f;
     float flare_gain = 8000.0f;
@@ -135,6 +140,9 @@ struct AeUiParameterState
     int max_adaptive_pair_grid = 0;
     int pair_start = 0;
     int pair_count = 0;
+    int surface_art_start = 0;
+    int surface_art_count = 0;
+    float surface_art_gain = 1.0f;
     int pupil_jitter_mode_index = 1;
     int pupil_jitter_seed = 0;
     bool pupil_jitter_auto_seed = true;
@@ -159,6 +167,7 @@ int fov_v_param();
 int sensor_width_param();
 int sensor_height_param();
 int focal_length_param();
+int anamorphic_squeeze_param();
 int camera_section_end_param();
 
 int aperture_section_start_param();
@@ -208,6 +217,9 @@ int footprint_clamp_param();
 int max_adaptive_pair_grid_param();
 int pair_start_param();
 int pair_count_param();
+int surface_art_start_param();
+int surface_art_count_param();
+int surface_art_gain_param();
 int pupil_jitter_mode_param();
 int pupil_jitter_seed_param();
 int pupil_jitter_auto_seed_param();

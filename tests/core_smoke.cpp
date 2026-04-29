@@ -653,6 +653,7 @@ void test_ae_adapter_bits()
     state.sensor_width_mm = 36.0f;
     state.sensor_height_mm = 24.0f;
     state.focal_length_mm = 50.0f;
+    state.anamorphic_squeeze = 2.0f;
     state.threshold = 2.5f;
     state.downsample = 2;
     state.ray_grid = 8;
@@ -684,6 +685,9 @@ void test_ae_adapter_bits()
     state.footprint_radius_bias = 0.9f;
     state.footprint_clamp = 1.4f;
     state.max_adaptive_pair_grid = 48;
+    state.surface_art_start = 1;
+    state.surface_art_count = 2;
+    state.surface_art_gain = 0.5f;
     state.projected_cells_mode = ProjectedCellsMode::Off;
     state.pupil_jitter_mode = PupilJitterMode::Halton;
     state.pupil_jitter_seed = 42;
@@ -702,6 +706,7 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.sensor_width_mm - 36.0f) < 1e-6f);
     assert(std::abs(settings.sensor_height_mm - 24.0f) < 1e-6f);
     assert(std::abs(settings.focal_length_mm - 50.0f) < 1e-6f);
+    assert(std::abs(settings.anamorphic_squeeze - 2.0f) < 1e-6f);
     assert(std::abs(settings.threshold - 2.5f) < 1e-6f);
     assert(settings.downsample == 2);
     assert(settings.ray_grid == 8);
@@ -733,6 +738,9 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.footprint_radius_bias - 0.9f) < 1e-6f);
     assert(std::abs(settings.footprint_clamp - 1.4f) < 1e-6f);
     assert(settings.max_adaptive_pair_grid == 48);
+    assert(settings.surface_art_start == 1);
+    assert(settings.surface_art_count == 2);
+    assert(std::abs(settings.surface_art_gain - 0.5f) < 1e-6f);
     assert(settings.projected_cells_mode == ProjectedCellsMode::Off);
     assert(settings.pupil_jitter_mode == PupilJitterMode::Halton);
     assert(settings.pupil_jitter_seed == 42);
@@ -1313,6 +1321,8 @@ void test_param_schema()
     assert(parameter_count() > 100);
     assert(lens_section_start_param() == PARAM_LENS_SECTION_START);
     assert(lens_section_end_param() + 1 == camera_section_start_param());
+    assert(focal_length_param() + 1 == anamorphic_squeeze_param());
+    assert(anamorphic_squeeze_param() + 1 == camera_section_end_param());
     assert(camera_section_end_param() + 1 == aperture_section_start_param());
     assert(aperture_section_end_param() + 1 == flare_section_start_param());
     assert(flare_section_start_param() + 1 == projected_cells_mode_param());
@@ -1347,7 +1357,10 @@ void test_param_schema()
     assert(footprint_clamp_param() + 1 == max_adaptive_pair_grid_param());
     assert(max_adaptive_pair_grid_param() + 1 == pair_start_param());
     assert(pair_start_param() + 1 == pair_count_param());
-    assert(pair_count_param() + 1 == pupil_jitter_mode_param());
+    assert(pair_count_param() + 1 == surface_art_start_param());
+    assert(surface_art_start_param() + 1 == surface_art_count_param());
+    assert(surface_art_count_param() + 1 == surface_art_gain_param());
+    assert(surface_art_gain_param() + 1 == pupil_jitter_mode_param());
     assert(pupil_jitter_mode_param() + 1 == pupil_jitter_seed_param());
     assert(pupil_jitter_seed_param() + 1 == pupil_jitter_auto_seed_param());
     assert(pupil_jitter_auto_seed_param() + 1 == cell_coverage_bias_param());
@@ -1391,6 +1404,10 @@ void test_param_schema()
     assert(PARAM_ID_MANUAL_SOURCE_R == 55);
     assert(PARAM_ID_MANUAL_SOURCE_G == 56);
     assert(PARAM_ID_MANUAL_SOURCE_B == 57);
+    assert(PARAM_ID_ANAMORPHIC_SQUEEZE == 58);
+    assert(PARAM_ID_SURFACE_ART_START == 59);
+    assert(PARAM_ID_SURFACE_ART_COUNT == 60);
+    assert(PARAM_ID_SURFACE_ART_GAIN == 61);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -1427,6 +1444,7 @@ void test_param_schema()
     ui.sensor_width_mm = 12.0f;
     ui.sensor_height_mm = 8.0f;
     ui.focal_length_mm = 75.0f;
+    ui.anamorphic_squeeze = 1.75f;
     ui.aperture_blades = 8;
     ui.aperture_rotation_deg = 12.0f;
     ui.view_mode_index = output_view_popup_index(AeOutputView::Diagnostics);
@@ -1466,6 +1484,9 @@ void test_param_schema()
     ui.max_adaptive_pair_grid = 40;
     ui.pair_start = 3;
     ui.pair_count = 7;
+    ui.surface_art_start = 4;
+    ui.surface_art_count = 5;
+    ui.surface_art_gain = 1.5f;
     ui.pupil_jitter_mode_index = pupil_jitter_mode_popup_index(PupilJitterMode::Halton);
     ui.pupil_jitter_seed = 55;
     ui.pupil_jitter_auto_seed = false;
@@ -1487,6 +1508,7 @@ void test_param_schema()
     assert(std::abs(state.sensor_width_mm - 36.0f) < 1e-6f);
     assert(std::abs(state.sensor_height_mm - 24.0f) < 1e-6f);
     assert(std::abs(state.focal_length_mm - 75.0f) < 1e-6f);
+    assert(std::abs(state.anamorphic_squeeze - 1.75f) < 1e-6f);
     assert(state.aperture_blades == 8);
     assert(std::abs(state.aperture_rotation_deg - 12.0f) < 1e-6f);
     assert(std::abs(state.flare_gain - 250.0f) < 1e-6f);
@@ -1520,6 +1542,9 @@ void test_param_schema()
     assert(state.max_adaptive_pair_grid == 40);
     assert(state.pair_start == 3);
     assert(state.pair_count == 7);
+    assert(state.surface_art_start == 4);
+    assert(state.surface_art_count == 5);
+    assert(std::abs(state.surface_art_gain - 1.5f) < 1e-6f);
     assert(state.projected_cells_mode == ProjectedCellsMode::Off);
     assert(state.pupil_jitter_mode == PupilJitterMode::Halton);
     assert(state.pupil_jitter_seed == 55);

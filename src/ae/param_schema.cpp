@@ -147,7 +147,8 @@ int fov_v_param() { return auto_fov_v_param() + 1; }
 int sensor_width_param() { return fov_v_param() + 1; }
 int sensor_height_param() { return sensor_width_param() + 1; }
 int focal_length_param() { return sensor_height_param() + 1; }
-int camera_section_end_param() { return focal_length_param() + 1; }
+int anamorphic_squeeze_param() { return focal_length_param() + 1; }
+int camera_section_end_param() { return anamorphic_squeeze_param() + 1; }
 
 int aperture_section_start_param() { return camera_section_end_param() + 1; }
 int aperture_blades_param() { return aperture_section_start_param() + 1; }
@@ -197,7 +198,10 @@ int footprint_clamp_param() { return footprint_radius_bias_param() + 1; }
 int max_adaptive_pair_grid_param() { return footprint_clamp_param() + 1; }
 int pair_start_param() { return max_adaptive_pair_grid_param() + 1; }
 int pair_count_param() { return pair_start_param() + 1; }
-int pupil_jitter_mode_param() { return pair_count_param() + 1; }
+int surface_art_start_param() { return pair_count_param() + 1; }
+int surface_art_count_param() { return surface_art_start_param() + 1; }
+int surface_art_gain_param() { return surface_art_count_param() + 1; }
+int pupil_jitter_mode_param() { return surface_art_gain_param() + 1; }
 int pupil_jitter_seed_param() { return pupil_jitter_mode_param() + 1; }
 int pupil_jitter_auto_seed_param() { return pupil_jitter_seed_param() + 1; }
 int cell_coverage_bias_param() { return pupil_jitter_auto_seed_param() + 1; }
@@ -634,7 +638,11 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.cell_edge_inset < 0.0f ||
         ui_state.sensor_width_mm < 0.0f ||
         ui_state.sensor_height_mm < 0.0f ||
-        ui_state.focal_length_mm <= 0.0f) {
+        ui_state.focal_length_mm <= 0.0f ||
+        ui_state.anamorphic_squeeze <= 0.0f ||
+        ui_state.surface_art_start < 0 ||
+        ui_state.surface_art_count < 0 ||
+        ui_state.surface_art_gain < 0.0f) {
         return false;
     }
 
@@ -703,6 +711,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.sensor_width_mm = ui_state.sensor_width_mm;
     out_state.sensor_height_mm = ui_state.sensor_height_mm;
     out_state.focal_length_mm = ui_state.focal_length_mm;
+    out_state.anamorphic_squeeze = ui_state.anamorphic_squeeze;
     out_state.aperture_blades = ui_state.aperture_blades;
     out_state.aperture_rotation_deg = ui_state.aperture_rotation_deg;
     out_state.flare_gain = ui_state.flare_gain;
@@ -736,6 +745,9 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.max_adaptive_pair_grid = ui_state.max_adaptive_pair_grid;
     out_state.pair_start = ui_state.pair_start;
     out_state.pair_count = ui_state.pair_count;
+    out_state.surface_art_start = ui_state.surface_art_start;
+    out_state.surface_art_count = ui_state.surface_art_count;
+    out_state.surface_art_gain = ui_state.surface_art_gain;
     out_state.projected_cells_mode = projected_cells_mode;
     out_state.pupil_jitter_mode = pupil_jitter_mode;
     out_state.pupil_jitter_seed = ui_state.pupil_jitter_seed;

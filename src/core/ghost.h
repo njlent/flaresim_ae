@@ -109,6 +109,7 @@ struct GhostConfig
     float gain = 1000.0f;                            // ghost intensity multiplier
     float wavelengths[3] = {650.0f, 550.0f, 450.0f}; // R, G, B in nm
     int spectral_samples = 3;                        // 3, 5, 7, 9, 11, 15, 21, 31
+    float anamorphic_squeeze = 1.0f;                 // 1 = spherical, 2 = 2x horizontal desqueeze
     int aperture_blades = 0;                         // 0 = circular
     float aperture_rotation_deg = 0.0f;
 

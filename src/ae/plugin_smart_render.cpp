@@ -65,6 +65,7 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.sensor_width_mm = params[sensor_width_param()]->u.fs_d.value;
     out_state.sensor_height_mm = params[sensor_height_param()]->u.fs_d.value;
     out_state.focal_length_mm = params[focal_length_param()]->u.fs_d.value;
+    out_state.anamorphic_squeeze = params[anamorphic_squeeze_param()]->u.fs_d.value;
     out_state.aperture_blades = params[aperture_blades_param()]->u.sd.value;
     out_state.aperture_rotation_deg = params[aperture_rotation_param()]->u.fs_d.value;
     out_state.flare_gain = params[flare_gain_param()]->u.fs_d.value;
@@ -105,6 +106,9 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.max_adaptive_pair_grid = params[max_adaptive_pair_grid_param()]->u.sd.value;
     out_state.pair_start = params[pair_start_param()]->u.sd.value;
     out_state.pair_count = params[pair_count_param()]->u.sd.value;
+    out_state.surface_art_start = params[surface_art_start_param()]->u.sd.value;
+    out_state.surface_art_count = params[surface_art_count_param()]->u.sd.value;
+    out_state.surface_art_gain = params[surface_art_gain_param()]->u.fs_d.value;
     out_state.pupil_jitter_mode_index = params[pupil_jitter_mode_param()]->u.pd.value;
     out_state.pupil_jitter_seed = params[pupil_jitter_seed_param()]->u.sd.value;
     out_state.pupil_jitter_auto_seed = params[pupil_jitter_auto_seed_param()]->u.bd.value != 0;
@@ -341,6 +345,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef sensor_width_param_def;
     PF_ParamDef sensor_height_param_def;
     PF_ParamDef focal_length_param_def;
+    PF_ParamDef anamorphic_squeeze_param_def;
     PF_ParamDef aperture_blades_param_def;
     PF_ParamDef aperture_rotation_param_def;
     PF_ParamDef flare_gain_param_def;
@@ -381,6 +386,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef max_adaptive_pair_grid_param_def;
     PF_ParamDef pair_start_param_def;
     PF_ParamDef pair_count_param_def;
+    PF_ParamDef surface_art_start_param_def;
+    PF_ParamDef surface_art_count_param_def;
+    PF_ParamDef surface_art_gain_param_def;
     PF_ParamDef pupil_jitter_mode_param_def;
     PF_ParamDef pupil_jitter_seed_param_def;
     PF_ParamDef pupil_jitter_auto_seed_param_def;
@@ -400,6 +408,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(sensor_width_param_def);
     AEFX_CLR_STRUCT(sensor_height_param_def);
     AEFX_CLR_STRUCT(focal_length_param_def);
+    AEFX_CLR_STRUCT(anamorphic_squeeze_param_def);
     AEFX_CLR_STRUCT(aperture_blades_param_def);
     AEFX_CLR_STRUCT(aperture_rotation_param_def);
     AEFX_CLR_STRUCT(flare_gain_param_def);
@@ -440,6 +449,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(max_adaptive_pair_grid_param_def);
     AEFX_CLR_STRUCT(pair_start_param_def);
     AEFX_CLR_STRUCT(pair_count_param_def);
+    AEFX_CLR_STRUCT(surface_art_start_param_def);
+    AEFX_CLR_STRUCT(surface_art_count_param_def);
+    AEFX_CLR_STRUCT(surface_art_gain_param_def);
     AEFX_CLR_STRUCT(pupil_jitter_mode_param_def);
     AEFX_CLR_STRUCT(pupil_jitter_seed_param_def);
     AEFX_CLR_STRUCT(pupil_jitter_auto_seed_param_def);
@@ -460,6 +472,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool sensor_width_checked_out = false;
     bool sensor_height_checked_out = false;
     bool focal_length_checked_out = false;
+    bool anamorphic_squeeze_checked_out = false;
     bool aperture_blades_checked_out = false;
     bool aperture_rotation_checked_out = false;
     bool flare_gain_checked_out = false;
@@ -500,6 +513,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool max_adaptive_pair_grid_checked_out = false;
     bool pair_start_checked_out = false;
     bool pair_count_checked_out = false;
+    bool surface_art_start_checked_out = false;
+    bool surface_art_count_checked_out = false;
+    bool surface_art_gain_checked_out = false;
     bool pupil_jitter_mode_checked_out = false;
     bool pupil_jitter_seed_checked_out = false;
     bool pupil_jitter_auto_seed_checked_out = false;
@@ -602,6 +618,14 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
                           in_data->time_scale,
                           &focal_length_param_def));
     focal_length_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          anamorphic_squeeze_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &anamorphic_squeeze_param_def));
+    anamorphic_squeeze_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
                           aperture_blades_param(),
@@ -924,6 +948,30 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     pair_count_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          surface_art_start_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &surface_art_start_param_def));
+    surface_art_start_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          surface_art_count_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &surface_art_count_param_def));
+    surface_art_count_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          surface_art_gain_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &surface_art_gain_param_def));
+    surface_art_gain_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           pupil_jitter_mode_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -1000,6 +1048,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.sensor_width_mm = sensor_width_param_def.u.fs_d.value;
         ui_state.sensor_height_mm = sensor_height_param_def.u.fs_d.value;
         ui_state.focal_length_mm = focal_length_param_def.u.fs_d.value;
+        ui_state.anamorphic_squeeze = anamorphic_squeeze_param_def.u.fs_d.value;
         ui_state.aperture_blades = aperture_blades_param_def.u.sd.value;
         ui_state.aperture_rotation_deg = aperture_rotation_param_def.u.fs_d.value;
         ui_state.flare_gain = flare_gain_param_def.u.fs_d.value;
@@ -1040,6 +1089,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.max_adaptive_pair_grid = max_adaptive_pair_grid_param_def.u.sd.value;
         ui_state.pair_start = pair_start_param_def.u.sd.value;
         ui_state.pair_count = pair_count_param_def.u.sd.value;
+        ui_state.surface_art_start = surface_art_start_param_def.u.sd.value;
+        ui_state.surface_art_count = surface_art_count_param_def.u.sd.value;
+        ui_state.surface_art_gain = surface_art_gain_param_def.u.fs_d.value;
         ui_state.pupil_jitter_mode_index = pupil_jitter_mode_param_def.u.pd.value;
         ui_state.pupil_jitter_seed = pupil_jitter_seed_param_def.u.sd.value;
         ui_state.pupil_jitter_auto_seed = pupil_jitter_auto_seed_param_def.u.bd.value != 0;
@@ -1066,6 +1118,15 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (pair_count_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &pair_count_param_def));
+    }
+    if (surface_art_gain_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &surface_art_gain_param_def));
+    }
+    if (surface_art_count_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &surface_art_count_param_def));
+    }
+    if (surface_art_start_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &surface_art_start_param_def));
     }
     if (pair_start_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &pair_start_param_def));
@@ -1201,6 +1262,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (focal_length_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &focal_length_param_def));
+    }
+    if (anamorphic_squeeze_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &anamorphic_squeeze_param_def));
     }
     if (sensor_height_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &sensor_height_param_def));
