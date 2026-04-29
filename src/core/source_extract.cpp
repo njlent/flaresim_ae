@@ -9,6 +9,7 @@ std::vector<BrightPixel> extract_bright_pixels(
     int downsample,
     float fov_h,
     float fov_v,
+    float source_cap,
     const MonoImageView* mask)
 {
     std::vector<BrightPixel> result;
@@ -69,6 +70,14 @@ std::vector<BrightPixel> extract_bright_pixels(
 
             if (peak_x < 0 || peak_y < 0) {
                 continue;
+            }
+
+            if (source_cap > 0.0f && peak_lum > source_cap) {
+                const float scale = source_cap / peak_lum;
+                peak_r *= scale;
+                peak_g *= scale;
+                peak_b *= scale;
+                peak_lum = source_cap;
             }
 
             if (peak_lum <= threshold) {

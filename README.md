@@ -71,6 +71,7 @@ Notes:
 | Flare Gain | slider `0`-`5000`; manual values allowed above slider max | `8000` | Global flare brightness multiplier. |
 | Sky Brightness | slider `0`-`4`; manual higher values allowed | `1` | Scales sub-threshold scene values before source extraction. |
 | Threshold | slider `0`-`64` | `8` | Bright-pixel cutoff for source detection. Lower = more sources/noise. |
+| Source Cap | slider `0`-`64`; manual higher values allowed | `0` | Clamps individual source luminance before thresholding and flare contribution. `0` disables the cap. |
 | Ray Grid | `1`-`2048` | `128` | Base ray density for ghost tracing. Main quality/perf lever. |
 | Downsample | `1`-`12` | `2` | Source extraction block size. Higher = faster, fewer detected highlights. |
 | Max Sources | `0`-`2048` | `256` | `0` means unlimited. Otherwise keeps only the brightest detected sources. |

@@ -157,6 +157,7 @@ std::uint64_t make_source_key(std::uint64_t scene_key, const FrameRenderSettings
     hash_append_value(hash, settings.sensor_height_mm);
     hash_append_value(hash, settings.focal_length_mm);
     hash_append_value(hash, settings.downsample);
+    hash_append_value(hash, settings.source_cap);
     hash_append_value(hash, settings.max_sources);
     hash_append_value(hash, settings.cluster_radius_px);
     return hash;
@@ -505,6 +506,7 @@ bool render_frame(
                 settings.downsample,
                 fov_h,
                 fov_v,
+                settings.source_cap,
                 active_detection_mask);
 
             outputs.sources = outputs.detected_sources;

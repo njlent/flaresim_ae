@@ -74,13 +74,24 @@ void test_source_extract()
     std::vector<float> mask(16, 0.0f);
     mask[5] = 1.0f;
     const MonoImageView mask_view {mask.data(), 4, 4};
-    const auto masked_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, &mask_view);
+    const auto masked_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, 0.0f, &mask_view);
     assert(masked_sources.size() == 1);
     assert(std::abs(masked_sources[0].r - 0.98f) < 1.0e-6f);
 
     mask[5] = 0.0f;
-    const auto rejected_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, &mask_view);
+    const auto rejected_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, 0.0f, &mask_view);
     assert(rejected_sources.empty());
+
+    const auto capped_sources = extract_bright_pixels(img, 1.0f, 1, 1.0f, 1.0f, 2.0f);
+    assert(capped_sources.size() == 1);
+    const float capped_luma =
+        0.2126f * capped_sources[0].r +
+        0.7152f * capped_sources[0].g +
+        0.0722f * capped_sources[0].b;
+    assert(std::abs(capped_luma - 2.0f) < 1.0e-5f);
+
+    const auto cap_rejected_sources = extract_bright_pixels(img, 2.5f, 1, 1.0f, 1.0f, 2.0f);
+    assert(cap_rejected_sources.empty());
 
     std::vector<BrightPixel> clustered_sources = {
         {.angle_x = 0.0f, .angle_y = 0.0f, .r = 4.0f, .g = 4.0f, .b = 4.0f},

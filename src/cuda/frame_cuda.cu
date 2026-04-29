@@ -79,6 +79,7 @@ __global__ void extract_source_candidates_kernel(const float* scene_pixels,
                                                  int height,
                                                  int stride,
                                                  float threshold,
+                                                 float source_cap,
                                                  float tan_half_h,
                                                  float tan_half_v,
                                                  BrightPixel* out_candidates)
@@ -134,6 +135,14 @@ __global__ void extract_source_candidates_kernel(const float* scene_pixels,
                 peak_y = y;
             }
         }
+    }
+
+    if (peak_x >= 0 && peak_y >= 0 && source_cap > 0.0f && peak_lum > source_cap) {
+        const float scale = source_cap / peak_lum;
+        peak_r *= scale;
+        peak_g *= scale;
+        peak_b *= scale;
+        peak_lum = source_cap;
     }
 
     if (peak_x < 0 || peak_y < 0 || peak_lum <= threshold) {
@@ -792,6 +801,7 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
                                                                    height,
                                                                    stride,
                                                                    settings.threshold,
+                                                                   settings.source_cap,
                                                                    std::tan(fov_h * 0.5f),
                                                                    std::tan(fov_v * 0.5f),
                                                                    cache.d_candidates);

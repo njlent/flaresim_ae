@@ -23,6 +23,7 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.min_ghost = state.min_ghost;
     settings.flare_gain = state.flare_gain;
     settings.sky_brightness = state.sky_brightness;
+    settings.source_cap = state.source_cap;
     settings.ghost_blur = state.ghost_blur;
     settings.ghost_blur_passes = state.ghost_blur_passes;
     settings.ghost_cleanup_mode = state.ghost_cleanup_mode;

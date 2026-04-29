@@ -63,6 +63,7 @@ inline constexpr int PARAM_ID_CLUSTER_RADIUS = 36;
 inline constexpr int PARAM_ID_PUPIL_JITTER_MODE = 37;
 inline constexpr int PARAM_ID_PUPIL_JITTER_SEED = 38;
 inline constexpr int PARAM_ID_ADAPTIVE_QUALITY = 39;
+inline constexpr int PARAM_ID_SOURCE_CAP = 40;
 
 struct AeUiParameterState
 {
@@ -82,6 +83,7 @@ struct AeUiParameterState
     float flare_gain = 8000.0f;
     float sky_brightness = 1.0f;
     float threshold = 8.0f;
+    float source_cap = 0.0f;
     int ray_grid = 128;
     int downsample = 2;
     int max_sources = 256;
@@ -136,6 +138,7 @@ int adaptive_quality_param();
 int flare_gain_param();
 int sky_brightness_param();
 int threshold_param();
+int source_cap_param();
 int ray_grid_param();
 int downsample_param();
 int max_sources_param();

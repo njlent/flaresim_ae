@@ -269,6 +269,18 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                          PARAM_ID_THRESHOLD);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Cap",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         64.0f,
+                         defaults.source_cap,
+                         4,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_SOURCE_CAP);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Ray Grid",
                   1,
                   kManualIntMax,
