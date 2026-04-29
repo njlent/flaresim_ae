@@ -143,7 +143,8 @@ int aperture_section_end_param() { return aperture_rotation_param() + 1; }
 
 int flare_section_start_param() { return aperture_section_end_param() + 1; }
 int projected_cells_mode_param() { return flare_section_start_param() + 1; }
-int flare_gain_param() { return projected_cells_mode_param() + 1; }
+int adaptive_quality_param() { return projected_cells_mode_param() + 1; }
+int flare_gain_param() { return adaptive_quality_param() + 1; }
 int sky_brightness_param() { return flare_gain_param() + 1; }
 int threshold_param() { return sky_brightness_param() + 1; }
 int ray_grid_param() { return threshold_param() + 1; }
@@ -547,6 +548,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.ghost_blur_passes < 0 ||
         ui_state.haze_blur_passes < 0 ||
         ui_state.aperture_blades < 0 ||
+        ui_state.adaptive_quality <= 0.0f ||
         ui_state.adaptive_sampling_strength < 0.0f ||
         ui_state.footprint_radius_bias <= 0.0f ||
         ui_state.footprint_clamp <= 0.0f ||
@@ -633,6 +635,7 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.starburst_gain = ui_state.starburst_gain;
     out_state.starburst_scale = ui_state.starburst_scale;
     out_state.spectral_samples = spectral_samples;
+    out_state.adaptive_quality = ui_state.adaptive_quality;
     out_state.adaptive_sampling_strength = ui_state.adaptive_sampling_strength;
     out_state.footprint_radius_bias = ui_state.footprint_radius_bias;
     out_state.footprint_clamp = ui_state.footprint_clamp;

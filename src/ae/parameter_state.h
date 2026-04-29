@@ -57,6 +57,7 @@ struct AeParameterState
     float min_ghost = 1e-7f;
     bool ghost_normalize = true;
     float max_area_boost = 100.0f;
+    float adaptive_quality = 1.0f;
     float adaptive_sampling_strength = 0.0f;
     float footprint_radius_bias = 1.0f;
     float footprint_clamp = 1.15f;

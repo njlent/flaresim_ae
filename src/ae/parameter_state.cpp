@@ -1,5 +1,7 @@
 #include "parameter_state.h"
 
+#include <algorithm>
+
 FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
 {
     FrameRenderSettings settings {};
@@ -32,6 +34,7 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.spectral_samples = state.spectral_samples;
     settings.ghost_normalize = state.ghost_normalize;
     settings.max_area_boost = state.max_area_boost;
+    settings.adaptive_quality = std::clamp(state.adaptive_quality, 0.25f, 2.0f);
     settings.adaptive_sampling_strength = state.adaptive_sampling_strength;
     settings.footprint_radius_bias = state.footprint_radius_bias;
     settings.footprint_clamp = state.footprint_clamp;

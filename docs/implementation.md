@@ -191,6 +191,12 @@ Ship an AE implementation in staged slices, with frequent commits.
 - AE bridge alpha now expands from rendered RGB energy so masked source isolation does not clip flare lobes outside the source matte
 - SmartFX pre-render/render now carries the checked-out mask layer rect through to rendering so smaller selected layers align correctly in comp space
 
+### Slice 31
+- added a top-level `Adaptive Quality` control to scale adaptive per-pair ray grids without changing the base `Ray Grid`
+- adaptive pair planning now uses quality-scaled min/base/max buckets so complex lenses can be bounded quickly while keeping the reconstruction path active
+- shared frame render caches now own a persistent CUDA ghost buffer cache, with the previous thread-local CUDA cache retained only as a no-cache fallback path
+- smoke coverage now verifies adaptive quality planning and AE parameter/runtime propagation
+
 Verification:
 - `cmake -S . -B build`
 - `cmake --build build`
@@ -199,5 +205,4 @@ Verification:
 - `cmake --build build-ae --config Debug`
 
 ## Next slices
-- per-instance/persistent CUDA allocation ownership in AE sequence or compute-cache state
 - tighten Smart PreRender invalidation / host-cache behavior across parameter changes

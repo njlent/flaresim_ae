@@ -57,6 +57,7 @@ const char* ghost_render_backend_name(GhostRenderBackend backend)
 int select_ghost_pair_ray_grid(int base_ray_grid,
                                float estimated_extent_px,
                                float distortion_score,
+                               float adaptive_quality,
                                float adaptive_sampling_strength,
                                int max_adaptive_pair_grid)
 {
@@ -64,19 +65,21 @@ int select_ghost_pair_ray_grid(int base_ray_grid,
         return 0;
     }
 
+    const float quality = std::clamp(adaptive_quality, 0.25f, 2.0f);
     const float strength = std::clamp(adaptive_sampling_strength, 0.0f, 2.0f);
-    const int min_grid = std::max(4, base_ray_grid / 2);
-    const int auto_max_grid = std::max(base_ray_grid, base_ray_grid * 2);
+    const int quality_grid = std::max(4, static_cast<int>(std::lround(base_ray_grid * quality)));
+    const int min_grid = std::max(4, quality_grid / 2);
+    const int auto_max_grid = std::max(quality_grid, static_cast<int>(std::lround(base_ray_grid * quality * 2.0f)));
     const int max_grid = max_adaptive_pair_grid > 0
-        ? std::max(base_ray_grid, max_adaptive_pair_grid)
+        ? std::max(quality_grid, max_adaptive_pair_grid)
         : auto_max_grid;
-    const float approx_valid_samples = std::max(0.78539816339f * base_ray_grid * base_ray_grid, 1.0f);
+    const float approx_valid_samples = std::max(0.78539816339f * quality_grid * quality_grid, 1.0f);
     const float linear_density = std::sqrt(approx_valid_samples);
     const float sample_spacing_px = estimated_extent_px / linear_density;
-    const float promote_spacing = std::max(1.5f, 3.5f - strength * 1.25f);
-    const float demote_spacing = std::max(0.75f, 1.25f + (1.0f - strength) * 0.4f);
-    const float promote_distortion = std::max(0.02f, 0.12f - strength * 0.04f);
-    const float demote_distortion = std::max(0.0f, 0.03f + (1.0f - strength) * 0.02f);
+    const float promote_spacing = std::max(1.5f, 3.5f - strength * 1.25f) / std::sqrt(quality);
+    const float demote_spacing = std::max(0.75f, 1.25f + (1.0f - strength) * 0.4f) * std::sqrt(quality);
+    const float promote_distortion = std::max(0.02f, 0.12f - strength * 0.04f) / quality;
+    const float demote_distortion = std::max(0.0f, 0.03f + (1.0f - strength) * 0.02f) * quality;
 
     if (strength > 0.0f && (sample_spacing_px > promote_spacing || distortion_score > promote_distortion)) {
         return max_grid;
@@ -84,7 +87,7 @@ int select_ghost_pair_ray_grid(int base_ray_grid,
     if (strength < 1.75f && sample_spacing_px < demote_spacing && distortion_score < demote_distortion) {
         return min_grid;
     }
-    return base_ray_grid;
+    return quality_grid;
 }
 
 // ---------------------------------------------------------------------------
@@ -1008,6 +1011,7 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
         plan.ray_grid = select_ghost_pair_ray_grid(config.ray_grid,
                                                    plan.estimated_extent_px,
                                                    plan.distortion_score,
+                                                   config.adaptive_quality,
                                                    config.adaptive_sampling_strength,
                                                    config.max_adaptive_pair_grid);
 
@@ -1079,6 +1083,7 @@ void render_ghosts(const LensSystem &lens,
                    int width, int height,
                    const GhostConfig &config,
                    const GhostRenderSetup* setup,
+                   GpuBufferCache* gpu_cache,
                    GhostRenderBackend* out_backend)
 {
     if (out_backend) {
@@ -1138,7 +1143,8 @@ void render_ghosts(const LensSystem &lens,
     }
 
     if (!active_pair_plans.empty() && !sources.empty()) {
-        thread_local GpuBufferCache gpu_cache;
+        thread_local GpuBufferCache fallback_gpu_cache;
+        GpuBufferCache& cuda_cache = gpu_cache ? *gpu_cache : fallback_gpu_cache;
         std::string cuda_error;
 
         if (launch_ghost_cuda(lens,
@@ -1152,7 +1158,7 @@ void render_ghosts(const LensSystem &lens,
                               width,
                               height,
                               config,
-                              gpu_cache,
+                              cuda_cache,
                               &cuda_error)) {
             if (out_backend) {
                 *out_backend = GhostRenderBackend::CUDA;

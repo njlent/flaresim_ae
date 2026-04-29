@@ -221,6 +221,18 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_PROJECTED_CELLS_MODE);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Adaptive Quality",
+                         0.25f,
+                         kManualFloatMax,
+                         0.25f,
+                         2.0f,
+                         defaults.adaptive_quality,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_ADAPTIVE_QUALITY);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Flare Gain",
                          0.0f,
                          kManualFloatMax,

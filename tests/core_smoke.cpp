@@ -151,11 +151,13 @@ void test_bloom()
 
 void test_ghost_pair_planning()
 {
-    assert(select_ghost_pair_ray_grid(16, 4.0f, 0.0f, 1.0f, 0) == 8);
-    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 0) == 32);
-    assert(select_ghost_pair_ray_grid(16, 12.0f, 0.2f, 1.0f, 0) == 32);
-    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 24) == 24);
-    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 0.0f, 0) == 16);
+    assert(select_ghost_pair_ray_grid(16, 4.0f, 0.0f, 1.0f, 1.0f, 0) == 8);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 1.0f, 0) == 32);
+    assert(select_ghost_pair_ray_grid(16, 12.0f, 0.2f, 1.0f, 1.0f, 0) == 32);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 1.0f, 24) == 24);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 0.0f, 0) == 16);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 0.5f, 1.0f, 0) == 16);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 0.25f, 0.0f, 0) == 4);
     assert(select_ghost_footprint_radius(4.0f, 1.0f, 1.0f, 1.0f, 1.15f) <= 2.0f);
     assert(select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 1.0f, 1.15f) >= 4.0f);
     assert(select_ghost_footprint_radius(4.0f, 49.0f, 4.0f, 1.0f, 1.15f) <
@@ -644,6 +646,7 @@ void test_ae_adapter_bits()
     state.starburst_gain = 0.3f;
     state.starburst_scale = 0.2f;
     state.spectral_samples = 9;
+    state.adaptive_quality = 0.75f;
     state.adaptive_sampling_strength = 1.25f;
     state.footprint_radius_bias = 0.9f;
     state.footprint_clamp = 1.4f;
@@ -682,6 +685,7 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.starburst_gain - 0.3f) < 1e-6f);
     assert(std::abs(settings.starburst_scale - 0.2f) < 1e-6f);
     assert(settings.spectral_samples == 9);
+    assert(std::abs(settings.adaptive_quality - 0.75f) < 1e-6f);
     assert(std::abs(settings.adaptive_sampling_strength - 1.25f) < 1e-6f);
     assert(std::abs(settings.footprint_radius_bias - 0.9f) < 1e-6f);
     assert(std::abs(settings.footprint_clamp - 1.4f) < 1e-6f);
@@ -1231,7 +1235,8 @@ void test_param_schema()
     assert(camera_section_end_param() + 1 == aperture_section_start_param());
     assert(aperture_section_end_param() + 1 == flare_section_start_param());
     assert(flare_section_start_param() + 1 == projected_cells_mode_param());
-    assert(projected_cells_mode_param() + 1 == flare_gain_param());
+    assert(projected_cells_mode_param() + 1 == adaptive_quality_param());
+    assert(adaptive_quality_param() + 1 == flare_gain_param());
     assert(flare_gain_param() + 1 == sky_brightness_param());
     assert(sky_brightness_param() + 1 == threshold_param());
     assert(max_sources_param() + 1 == cluster_radius_param());
@@ -1267,6 +1272,7 @@ void test_param_schema()
     assert(PARAM_ID_CLUSTER_RADIUS == 36);
     assert(PARAM_ID_PUPIL_JITTER_MODE == 37);
     assert(PARAM_ID_PUPIL_JITTER_SEED == 38);
+    assert(PARAM_ID_ADAPTIVE_QUALITY == 39);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -1320,6 +1326,7 @@ void test_param_schema()
     ui.starburst_gain = 0.2f;
     ui.starburst_scale = 0.1f;
     ui.spectral_samples_index = spectral_samples_popup_index(11);
+    ui.adaptive_quality = 0.65f;
     ui.adaptive_sampling_strength = 1.5f;
     ui.footprint_radius_bias = 0.85f;
     ui.footprint_clamp = 1.8f;
@@ -1360,6 +1367,7 @@ void test_param_schema()
     assert(std::abs(state.starburst_gain - 0.2f) < 1e-6f);
     assert(std::abs(state.starburst_scale - 0.1f) < 1e-6f);
     assert(state.spectral_samples == 11);
+    assert(std::abs(state.adaptive_quality - 0.65f) < 1e-6f);
     assert(std::abs(state.adaptive_sampling_strength - 1.5f) < 1e-6f);
     assert(std::abs(state.footprint_radius_bias - 0.85f) < 1e-6f);
     assert(std::abs(state.footprint_clamp - 1.8f) < 1e-6f);

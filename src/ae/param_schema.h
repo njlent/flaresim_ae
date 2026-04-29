@@ -62,6 +62,7 @@ inline constexpr int PARAM_ID_CELL_EDGE_INSET = 35;
 inline constexpr int PARAM_ID_CLUSTER_RADIUS = 36;
 inline constexpr int PARAM_ID_PUPIL_JITTER_MODE = 37;
 inline constexpr int PARAM_ID_PUPIL_JITTER_SEED = 38;
+inline constexpr int PARAM_ID_ADAPTIVE_QUALITY = 39;
 
 struct AeUiParameterState
 {
@@ -94,6 +95,7 @@ struct AeUiParameterState
     float starburst_gain = 0.0f;
     float starburst_scale = 0.15f;
     int spectral_samples_index = 1;
+    float adaptive_quality = 1.0f;
     float adaptive_sampling_strength = 0.0f;
     float footprint_radius_bias = 1.0f;
     float footprint_clamp = 1.15f;
@@ -129,6 +131,8 @@ int aperture_rotation_param();
 int aperture_section_end_param();
 
 int flare_section_start_param();
+int projected_cells_mode_param();
+int adaptive_quality_param();
 int flare_gain_param();
 int sky_brightness_param();
 int threshold_param();
@@ -153,7 +157,6 @@ int footprint_clamp_param();
 int max_adaptive_pair_grid_param();
 int pupil_jitter_mode_param();
 int pupil_jitter_seed_param();
-int projected_cells_mode_param();
 int cell_coverage_bias_param();
 int cell_edge_inset_param();
 int advanced_ghosts_section_end_param();

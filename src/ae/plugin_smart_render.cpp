@@ -58,6 +58,7 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.starburst_gain = params[starburst_gain_param()]->u.fs_d.value;
     out_state.starburst_scale = params[starburst_scale_param()]->u.fs_d.value;
     out_state.spectral_samples_index = params[spectral_samples_param()]->u.pd.value;
+    out_state.adaptive_quality = params[adaptive_quality_param()]->u.fs_d.value;
     out_state.adaptive_sampling_strength = params[adaptive_sampling_strength_param()]->u.fs_d.value;
     out_state.footprint_radius_bias = params[footprint_radius_bias_param()]->u.fs_d.value;
     out_state.footprint_clamp = params[footprint_clamp_param()]->u.fs_d.value;
@@ -315,6 +316,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef starburst_gain_param_def;
     PF_ParamDef starburst_scale_param_def;
     PF_ParamDef spectral_samples_param_def;
+    PF_ParamDef adaptive_quality_param_def;
     PF_ParamDef adaptive_sampling_strength_param_def;
     PF_ParamDef footprint_radius_bias_param_def;
     PF_ParamDef footprint_clamp_param_def;
@@ -355,6 +357,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(starburst_gain_param_def);
     AEFX_CLR_STRUCT(starburst_scale_param_def);
     AEFX_CLR_STRUCT(spectral_samples_param_def);
+    AEFX_CLR_STRUCT(adaptive_quality_param_def);
     AEFX_CLR_STRUCT(adaptive_sampling_strength_param_def);
     AEFX_CLR_STRUCT(footprint_radius_bias_param_def);
     AEFX_CLR_STRUCT(footprint_clamp_param_def);
@@ -396,6 +399,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool starburst_gain_checked_out = false;
     bool starburst_scale_checked_out = false;
     bool spectral_samples_checked_out = false;
+    bool adaptive_quality_checked_out = false;
     bool adaptive_sampling_strength_checked_out = false;
     bool footprint_radius_bias_checked_out = false;
     bool footprint_clamp_checked_out = false;
@@ -647,6 +651,14 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     spectral_samples_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          adaptive_quality_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &adaptive_quality_param_def));
+    adaptive_quality_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           adaptive_sampling_strength_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -765,6 +777,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.starburst_gain = starburst_gain_param_def.u.fs_d.value;
         ui_state.starburst_scale = starburst_scale_param_def.u.fs_d.value;
         ui_state.spectral_samples_index = spectral_samples_param_def.u.pd.value;
+        ui_state.adaptive_quality = adaptive_quality_param_def.u.fs_d.value;
         ui_state.adaptive_sampling_strength = adaptive_sampling_strength_param_def.u.fs_d.value;
         ui_state.footprint_radius_bias = footprint_radius_bias_param_def.u.fs_d.value;
         ui_state.footprint_clamp = footprint_clamp_param_def.u.fs_d.value;
@@ -813,6 +826,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (adaptive_sampling_strength_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &adaptive_sampling_strength_param_def));
+    }
+    if (adaptive_quality_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &adaptive_quality_param_def));
     }
     if (spectral_samples_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &spectral_samples_param_def));

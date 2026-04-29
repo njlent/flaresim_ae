@@ -67,6 +67,7 @@ Notes:
 | Setting | Values / range | Default | Notes |
 | --- | --- | --- | --- |
 | Adaptive Sampling | `Disabled`, `Enabled` | `Disabled` | Enables projected-cell reconstruction. Faster than brute-force grid increases, but more stylized/experimental. |
+| Adaptive Quality | slider `0.25`-`2` | `1` | Scales adaptive per-pair ray grids. Lower values bound complex-lens render spikes; `1` keeps the `Ray Grid` baseline. |
 | Flare Gain | slider `0`-`5000`; manual values allowed above slider max | `8000` | Global flare brightness multiplier. |
 | Sky Brightness | slider `0`-`4`; manual higher values allowed | `1` | Scales sub-threshold scene values before source extraction. |
 | Threshold | slider `0`-`64` | `8` | Bright-pixel cutoff for source detection. Lower = more sources/noise. |
@@ -107,6 +108,7 @@ These only matter when chasing ghost artifacts/perf tradeoffs. Most shots should
 
 Guidance:
 - grid/lattice artifacts first: try `Ghost Cleanup = Sharp Adaptive`, then raise `Ray Grid`
+- complex-lens stalls: lower `Adaptive Quality` before lowering `Ray Grid`
 - over-smooth ghosts: lower `Footprint Bias` a bit before touching `Ghost Blur`
 - missing projected-cell coverage: raise `Cell Coverage` slightly, then adjust `Cell Edge Inset`
 - perf spikes in hard shots: keep `Adaptive Sampling` disabled, or cap `Max Pair Grid`

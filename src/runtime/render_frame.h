@@ -2,6 +2,7 @@
 
 #include "bloom.h"
 #include "ghost.h"
+#include "ghost_cuda.h"
 #include "image.h"
 #include "lens.h"
 #include "starburst.h"
@@ -40,6 +41,7 @@ struct FrameRenderSettings
     int spectral_samples = 3;
     bool ghost_normalize = true;
     float max_area_boost = 100.0f;
+    float adaptive_quality = 1.0f;
     float adaptive_sampling_strength = 0.0f;
     float footprint_radius_bias = 1.0f;
     float footprint_clamp = 1.15f;
@@ -118,6 +120,7 @@ struct FrameRenderCache
     std::uint64_t ghost_key = 0;
     bool has_ghosts = false;
     GhostRenderBackend ghost_backend = GhostRenderBackend::CPU;
+    GpuBufferCache ghost_gpu_cache;
     std::vector<float> flare_r;
     std::vector<float> flare_g;
     std::vector<float> flare_b;
