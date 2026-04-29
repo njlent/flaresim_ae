@@ -65,6 +65,11 @@ inline constexpr int PARAM_ID_PUPIL_JITTER_SEED = 38;
 inline constexpr int PARAM_ID_ADAPTIVE_QUALITY = 39;
 inline constexpr int PARAM_ID_SOURCE_CAP = 40;
 inline constexpr int PARAM_ID_PUPIL_JITTER_AUTO_SEED = 41;
+inline constexpr int PARAM_ID_PREVIEW_MODE = 42;
+inline constexpr int PARAM_ID_PREVIEW_RAY_GRID = 43;
+inline constexpr int PARAM_ID_PREVIEW_MAX_SOURCES = 44;
+inline constexpr int PARAM_ID_PREVIEW_DOWNSAMPLE = 45;
+inline constexpr int PARAM_ID_PREVIEW_SPECTRAL_SAMPLES = 46;
 
 struct AeUiParameterState
 {
@@ -89,6 +94,11 @@ struct AeUiParameterState
     int downsample = 2;
     int max_sources = 256;
     int cluster_radius_px = 0;
+    bool preview_mode = false;
+    int preview_ray_grid = 16;
+    int preview_max_sources = 100;
+    int preview_downsample = 8;
+    int preview_spectral_samples_index = 1;
     float ghost_blur = 0.003f;
     int ghost_blur_passes = 3;
     int ghost_cleanup_mode_index = 2;
@@ -145,6 +155,11 @@ int ray_grid_param();
 int downsample_param();
 int max_sources_param();
 int cluster_radius_param();
+int preview_mode_param();
+int preview_ray_grid_param();
+int preview_max_sources_param();
+int preview_downsample_param();
+int preview_spectral_samples_param();
 int post_section_start_param();
 int ghost_blur_param();
 int ghost_blur_passes_param();

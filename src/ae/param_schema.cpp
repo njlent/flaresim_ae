@@ -2,6 +2,7 @@
 
 #include "builtin_lenses.h"
 
+#include <algorithm>
 #include <array>
 #include <string_view>
 
@@ -152,7 +153,12 @@ int ray_grid_param() { return source_cap_param() + 1; }
 int downsample_param() { return ray_grid_param() + 1; }
 int max_sources_param() { return downsample_param() + 1; }
 int cluster_radius_param() { return max_sources_param() + 1; }
-int flare_section_end_param() { return cluster_radius_param() + 1; }
+int preview_mode_param() { return cluster_radius_param() + 1; }
+int preview_ray_grid_param() { return preview_mode_param() + 1; }
+int preview_max_sources_param() { return preview_ray_grid_param() + 1; }
+int preview_downsample_param() { return preview_max_sources_param() + 1; }
+int preview_spectral_samples_param() { return preview_downsample_param() + 1; }
+int flare_section_end_param() { return preview_spectral_samples_param() + 1; }
 int post_section_start_param() { return flare_section_end_param() + 1; }
 int ghost_blur_param() { return post_section_start_param() + 1; }
 int ghost_blur_passes_param() { return ghost_blur_param() + 1; }
@@ -547,6 +553,9 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         ui_state.downsample < 1 ||
         ui_state.max_sources < 0 ||
         ui_state.cluster_radius_px < 0 ||
+        ui_state.preview_ray_grid < 1 ||
+        ui_state.preview_downsample < 1 ||
+        ui_state.preview_max_sources < 0 ||
         ui_state.source_cap < 0.0f ||
         ui_state.ghost_blur_passes < 0 ||
         ui_state.haze_blur_passes < 0 ||
@@ -593,6 +602,11 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
 
     int spectral_samples = 3;
     if (!spectral_samples_from_popup(ui_state.spectral_samples_index, spectral_samples)) {
+        return false;
+    }
+
+    int preview_spectral_samples = 3;
+    if (!spectral_samples_from_popup(ui_state.preview_spectral_samples_index, preview_spectral_samples)) {
         return false;
     }
 
@@ -650,6 +664,17 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     out_state.pupil_jitter_auto_seed = ui_state.pupil_jitter_auto_seed;
     out_state.cell_coverage_bias = ui_state.cell_coverage_bias;
     out_state.cell_edge_inset = ui_state.cell_edge_inset;
+
+    if (ui_state.preview_mode) {
+        const float downsample_ratio =
+            static_cast<float>(ui_state.preview_downsample) /
+            static_cast<float>(std::max(ui_state.downsample, 1));
+        out_state.ray_grid = ui_state.preview_ray_grid;
+        out_state.downsample = ui_state.preview_downsample;
+        out_state.max_sources = ui_state.preview_max_sources;
+        out_state.spectral_samples = preview_spectral_samples;
+        out_state.flare_gain = ui_state.flare_gain * downsample_ratio * downsample_ratio;
+    }
 
     float preset_width = 0.0f;
     float preset_height = 0.0f;

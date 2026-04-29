@@ -1253,7 +1253,12 @@ void test_param_schema()
     assert(threshold_param() + 1 == source_cap_param());
     assert(source_cap_param() + 1 == ray_grid_param());
     assert(max_sources_param() + 1 == cluster_radius_param());
-    assert(cluster_radius_param() + 1 == flare_section_end_param());
+    assert(cluster_radius_param() + 1 == preview_mode_param());
+    assert(preview_mode_param() + 1 == preview_ray_grid_param());
+    assert(preview_ray_grid_param() + 1 == preview_max_sources_param());
+    assert(preview_max_sources_param() + 1 == preview_downsample_param());
+    assert(preview_downsample_param() + 1 == preview_spectral_samples_param());
+    assert(preview_spectral_samples_param() + 1 == flare_section_end_param());
     assert(flare_section_end_param() + 1 == post_section_start_param());
     assert(spectral_samples_param() + 1 == ghost_cleanup_mode_param());
     assert(ghost_cleanup_mode_param() + 1 == advanced_ghosts_section_start_param());
@@ -1289,6 +1294,11 @@ void test_param_schema()
     assert(PARAM_ID_ADAPTIVE_QUALITY == 39);
     assert(PARAM_ID_SOURCE_CAP == 40);
     assert(PARAM_ID_PUPIL_JITTER_AUTO_SEED == 41);
+    assert(PARAM_ID_PREVIEW_MODE == 42);
+    assert(PARAM_ID_PREVIEW_RAY_GRID == 43);
+    assert(PARAM_ID_PREVIEW_MAX_SOURCES == 44);
+    assert(PARAM_ID_PREVIEW_DOWNSAMPLE == 45);
+    assert(PARAM_ID_PREVIEW_SPECTRAL_SAMPLES == 46);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -1334,6 +1344,11 @@ void test_param_schema()
     ui.downsample = 2;
     ui.max_sources = 222;
     ui.cluster_radius_px = 18;
+    ui.preview_mode = false;
+    ui.preview_ray_grid = 16;
+    ui.preview_max_sources = 100;
+    ui.preview_downsample = 8;
+    ui.preview_spectral_samples_index = spectral_samples_popup_index(3);
     ui.ghost_blur = 0.02f;
     ui.ghost_blur_passes = 2;
     ui.ghost_cleanup_mode_index = ghost_cleanup_mode_popup_index(GhostCleanupMode::SharpAdaptive);
@@ -1397,6 +1412,20 @@ void test_param_schema()
     assert(!state.pupil_jitter_auto_seed);
     assert(std::abs(state.cell_coverage_bias - 1.35f) < 1e-6f);
     assert(std::abs(state.cell_edge_inset - 0.2f) < 1e-6f);
+
+    AeUiParameterState preview_ui = ui;
+    preview_ui.preview_mode = true;
+    preview_ui.preview_ray_grid = 4;
+    preview_ui.preview_max_sources = 12;
+    preview_ui.preview_downsample = 8;
+    preview_ui.preview_spectral_samples_index = spectral_samples_popup_index(5);
+    AeParameterState preview_state {};
+    assert(apply_ui_parameter_state(preview_ui, preview_state));
+    assert(preview_state.ray_grid == 4);
+    assert(preview_state.max_sources == 12);
+    assert(preview_state.downsample == 8);
+    assert(preview_state.spectral_samples == 5);
+    assert(std::abs(preview_state.flare_gain - (250.0f * 16.0f)) < 1e-4f);
 
     AeUiParameterState legacy_ui {};
     legacy_ui.legacy_lens_preset_index = lens_popup_index_for_builtin("cooke-triplet");

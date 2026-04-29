@@ -75,6 +75,12 @@ Notes:
 | Ray Grid | `1`-`2048` | `128` | Base ray density for ghost tracing. Main quality/perf lever. |
 | Downsample | `1`-`12` | `2` | Source extraction block size. Higher = faster, fewer detected highlights. |
 | Max Sources | `0`-`2048` | `256` | `0` means unlimited. Otherwise keeps only the brightest detected sources. |
+| Cluster Radius | `0`-`256` | `0` | Merges nearby detected sources before ghost tracing. `0` disables clustering. |
+| Preview Mode | `Off`, `On` | `Off` | Overrides quality controls below for faster interactive previews. |
+| Preview Ray Grid | `1`-`128` | `16` | Ray grid used while Preview Mode is on. |
+| Preview Max Sources | `0`-`512` | `100` | Source cap used while Preview Mode is on. |
+| Preview Downsample | `1`-`24` | `8` | Source extraction stride used while Preview Mode is on. |
+| Preview Spectral Samples | `3`, `5`, `7`, `9`, `11` | `3` | Spectral sample count used while Preview Mode is on. |
 
 ### Post-processing
 
@@ -113,6 +119,7 @@ These only matter when chasing ghost artifacts/perf tradeoffs. Most shots should
 Guidance:
 - grid/lattice artifacts first: try `Ghost Cleanup = Sharp Adaptive`, then raise `Ray Grid`
 - complex-lens stalls: lower `Adaptive Quality` before lowering `Ray Grid`
+- interactive setup: enable `Preview Mode`; brightness is compensated for preview downsample changes, not for a lower preview source cap
 - over-smooth ghosts: lower `Footprint Bias` a bit before touching `Ghost Blur`
 - missing projected-cell coverage: raise `Cell Coverage` slightly, then adjust `Cell Edge Inset`
 - perf spikes in hard shots: keep `Adaptive Sampling` disabled, or cap `Max Pair Grid`

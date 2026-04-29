@@ -75,6 +75,11 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.downsample = params[downsample_param()]->u.sd.value;
     out_state.max_sources = params[max_sources_param()]->u.sd.value;
     out_state.cluster_radius_px = params[cluster_radius_param()]->u.sd.value;
+    out_state.preview_mode = params[preview_mode_param()]->u.bd.value != 0;
+    out_state.preview_ray_grid = params[preview_ray_grid_param()]->u.sd.value;
+    out_state.preview_max_sources = params[preview_max_sources_param()]->u.sd.value;
+    out_state.preview_downsample = params[preview_downsample_param()]->u.sd.value;
+    out_state.preview_spectral_samples_index = params[preview_spectral_samples_param()]->u.pd.value;
     out_state.ghost_blur = params[ghost_blur_param()]->u.fs_d.value;
     out_state.ghost_blur_passes = params[ghost_blur_passes_param()]->u.sd.value;
     out_state.ghost_cleanup_mode_index = params[ghost_cleanup_mode_param()]->u.pd.value;
@@ -335,6 +340,11 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef downsample_param_def;
     PF_ParamDef max_sources_param_def;
     PF_ParamDef cluster_radius_param_def;
+    PF_ParamDef preview_mode_param_def;
+    PF_ParamDef preview_ray_grid_param_def;
+    PF_ParamDef preview_max_sources_param_def;
+    PF_ParamDef preview_downsample_param_def;
+    PF_ParamDef preview_spectral_samples_param_def;
     PF_ParamDef ghost_blur_param_def;
     PF_ParamDef ghost_blur_passes_param_def;
     PF_ParamDef ghost_cleanup_mode_param_def;
@@ -378,6 +388,11 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(downsample_param_def);
     AEFX_CLR_STRUCT(max_sources_param_def);
     AEFX_CLR_STRUCT(cluster_radius_param_def);
+    AEFX_CLR_STRUCT(preview_mode_param_def);
+    AEFX_CLR_STRUCT(preview_ray_grid_param_def);
+    AEFX_CLR_STRUCT(preview_max_sources_param_def);
+    AEFX_CLR_STRUCT(preview_downsample_param_def);
+    AEFX_CLR_STRUCT(preview_spectral_samples_param_def);
     AEFX_CLR_STRUCT(ghost_blur_param_def);
     AEFX_CLR_STRUCT(ghost_blur_passes_param_def);
     AEFX_CLR_STRUCT(ghost_cleanup_mode_param_def);
@@ -422,6 +437,11 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool downsample_checked_out = false;
     bool max_sources_checked_out = false;
     bool cluster_radius_checked_out = false;
+    bool preview_mode_checked_out = false;
+    bool preview_ray_grid_checked_out = false;
+    bool preview_max_sources_checked_out = false;
+    bool preview_downsample_checked_out = false;
+    bool preview_spectral_samples_checked_out = false;
     bool ghost_blur_checked_out = false;
     bool ghost_blur_passes_checked_out = false;
     bool ghost_cleanup_mode_checked_out = false;
@@ -618,6 +638,46 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
                           in_data->time_scale,
                           &cluster_radius_param_def));
     cluster_radius_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_mode_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_mode_param_def));
+    preview_mode_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_ray_grid_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_ray_grid_param_def));
+    preview_ray_grid_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_max_sources_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_max_sources_param_def));
+    preview_max_sources_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_downsample_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_downsample_param_def));
+    preview_downsample_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_spectral_samples_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_spectral_samples_param_def));
+    preview_spectral_samples_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
                           ghost_blur_param(),
@@ -818,6 +878,11 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.downsample = downsample_param_def.u.sd.value;
         ui_state.max_sources = max_sources_param_def.u.sd.value;
         ui_state.cluster_radius_px = cluster_radius_param_def.u.sd.value;
+        ui_state.preview_mode = preview_mode_param_def.u.bd.value != 0;
+        ui_state.preview_ray_grid = preview_ray_grid_param_def.u.sd.value;
+        ui_state.preview_max_sources = preview_max_sources_param_def.u.sd.value;
+        ui_state.preview_downsample = preview_downsample_param_def.u.sd.value;
+        ui_state.preview_spectral_samples_index = preview_spectral_samples_param_def.u.pd.value;
         ui_state.ghost_blur = ghost_blur_param_def.u.fs_d.value;
         ui_state.ghost_blur_passes = ghost_blur_passes_param_def.u.sd.value;
         ui_state.ghost_cleanup_mode_index = ghost_cleanup_mode_param_def.u.pd.value;
@@ -921,6 +986,21 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (cluster_radius_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &cluster_radius_param_def));
+    }
+    if (preview_spectral_samples_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_spectral_samples_param_def));
+    }
+    if (preview_downsample_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_downsample_param_def));
+    }
+    if (preview_max_sources_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_max_sources_param_def));
+    }
+    if (preview_ray_grid_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_ray_grid_param_def));
+    }
+    if (preview_mode_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_mode_param_def));
     }
     if (ray_grid_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &ray_grid_param_def));

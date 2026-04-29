@@ -317,6 +317,47 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_CLUSTER_RADIUS);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("Preview Mode",
+                     defaults.preview_mode,
+                     PF_ParamFlag_NONE,
+                     PARAM_ID_PREVIEW_MODE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Preview Ray Grid",
+                  1,
+                  kManualIntMax,
+                  1,
+                  128,
+                  defaults.preview_ray_grid,
+                  PARAM_ID_PREVIEW_RAY_GRID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Preview Max Sources",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.preview_max_sources,
+                  PARAM_ID_PREVIEW_MAX_SOURCES);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Preview Downsample",
+                  1,
+                  kManualIntMax,
+                  1,
+                  24,
+                  defaults.preview_downsample,
+                  PARAM_ID_PREVIEW_DOWNSAMPLE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Preview Spectral Samples",
+                  static_cast<A_short>(spectral_samples_popup_count()),
+                  static_cast<A_short>(defaults.preview_spectral_samples_index),
+                  spectral_samples_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_PREVIEW_SPECTRAL_SAMPLES);
+
+    AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_FLARE_SECTION_END);
 
     AEFX_CLR_STRUCT(def);
