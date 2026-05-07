@@ -22,6 +22,9 @@ PF_Err PluginHandleSequenceFlatten(PF_InData* in_data, PF_OutData* out_data, PF_
 PF_Err PluginHandleSequenceSetdown(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output);
 PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData* out_data, void* extra);
 PF_Err PluginHandleSmartRender(PF_InData* in_data, PF_OutData* out_data, void* extra);
+PF_Err PluginHandleGpuDeviceSetup(PF_InData* in_data, PF_OutData* out_data, void* extra);
+PF_Err PluginHandleGpuDeviceSetdown(PF_InData* in_data, PF_OutData* out_data, void* extra);
+PF_Err PluginHandleSmartRenderGPU(PF_InData* in_data, PF_OutData* out_data, void* extra);
 PF_Err PluginHandleLegacyRender(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output);
 
 extern "C" FLARESIM_AE_EXPORT PF_Err PluginDataEntryFunction2(

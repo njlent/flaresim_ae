@@ -199,14 +199,17 @@ Mask behavior:
 - Ray Grid
 - Threshold
 - Source Cap
+- Manual/offscreen source position + intensity/color
 - Max Sources
 - Downsample
 - Cluster Radius
 - Preview Mode + preview overrides
 - Bloom strength/radius/passes or equivalent original-bloom controls
 - Camera mode: direct FOV or sensor size + focal length
+- Anamorphic squeeze for anamorphic plate projection
 - Aperture blades + rotation
 - Spectral samples
+- Spectral jitter + seed
 - Ghost blur + passes
 - Haze gain/radius/passes
 - Starburst gain/scale
@@ -220,6 +223,8 @@ Do not start with 500 static checkbox params.
 Phase 1:
 - auto-filter pairs only
 - optional `Pair Mode`: All / Bright Only / Top N / Manual
+- `Pair Start` / `Pair Count` for AE-standard pair windowing
+- surface reflectance art direction with start/count/gain controls
 - ship without manual per-pair UI if needed
 
 Phase 2:

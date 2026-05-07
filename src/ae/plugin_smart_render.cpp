@@ -3,39 +3,42 @@
 #include "AEFX_SuiteHelper.h"
 #include "AE_EffectCBSuites.h"
 
-#include "asset_root.h"
 #include "builtin_lenses.h"
 #include "frame_bridge.h"
+#include "ghost_cuda.h"
 #include "param_schema.h"
-
-#ifdef AE_OS_WIN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <Windows.h>
-#endif
+#include "render_shared.h"
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
 namespace {
 
-constexpr A_long kSmartInputCheckoutId = 1;
-constexpr A_long kSmartMaskCheckoutId = 2;
-
-struct SmartRenderLayerRects
+int current_frame_seed(const PF_InData* in_data)
 {
-    PF_LRect input_rect {};
-    PF_LRect mask_rect {};
-    PF_Boolean has_mask = FALSE;
-};
+    if (!in_data) {
+        return 0;
+    }
 
-void delete_smart_render_layer_rects(void* data)
+    const long long frame =
+        in_data->time_step != 0
+            ? static_cast<long long>(in_data->current_time) / static_cast<long long>(in_data->time_step)
+            : static_cast<long long>(in_data->current_time);
+
+    return static_cast<int>(std::clamp(frame,
+                                       static_cast<long long>(std::numeric_limits<int>::min()),
+                                       static_cast<long long>(std::numeric_limits<int>::max())));
+}
+
+void resolve_auto_pupil_seed(const PF_InData* in_data, AeParameterState& state)
 {
-    auto* rects = reinterpret_cast<SmartRenderLayerRects*>(data);
-    delete rects;
+    if (state.pupil_jitter_auto_seed &&
+        state.pupil_jitter_mode == PupilJitterMode::Stratified) {
+        state.pupil_jitter_seed = current_frame_seed(in_data);
+    }
 }
 
 bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_state)
@@ -62,14 +65,29 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.sensor_width_mm = params[sensor_width_param()]->u.fs_d.value;
     out_state.sensor_height_mm = params[sensor_height_param()]->u.fs_d.value;
     out_state.focal_length_mm = params[focal_length_param()]->u.fs_d.value;
+    out_state.anamorphic_squeeze = params[anamorphic_squeeze_param()]->u.fs_d.value;
     out_state.aperture_blades = params[aperture_blades_param()]->u.sd.value;
     out_state.aperture_rotation_deg = params[aperture_rotation_param()]->u.fs_d.value;
     out_state.flare_gain = params[flare_gain_param()]->u.fs_d.value;
     out_state.sky_brightness = params[sky_brightness_param()]->u.fs_d.value;
     out_state.threshold = params[threshold_param()]->u.fs_d.value;
+    out_state.source_cap = params[source_cap_param()]->u.fs_d.value;
+    out_state.manual_source_enabled = params[manual_source_enabled_param()]->u.bd.value != 0;
+    out_state.manual_source_x = params[manual_source_x_param()]->u.fs_d.value;
+    out_state.manual_source_y = params[manual_source_y_param()]->u.fs_d.value;
+    out_state.manual_source_intensity = params[manual_source_intensity_param()]->u.fs_d.value;
+    out_state.manual_source_r = params[manual_source_r_param()]->u.fs_d.value;
+    out_state.manual_source_g = params[manual_source_g_param()]->u.fs_d.value;
+    out_state.manual_source_b = params[manual_source_b_param()]->u.fs_d.value;
     out_state.ray_grid = params[ray_grid_param()]->u.sd.value;
     out_state.downsample = params[downsample_param()]->u.sd.value;
     out_state.max_sources = params[max_sources_param()]->u.sd.value;
+    out_state.cluster_radius_px = params[cluster_radius_param()]->u.sd.value;
+    out_state.preview_mode = params[preview_mode_param()]->u.bd.value != 0;
+    out_state.preview_ray_grid = params[preview_ray_grid_param()]->u.sd.value;
+    out_state.preview_max_sources = params[preview_max_sources_param()]->u.sd.value;
+    out_state.preview_downsample = params[preview_downsample_param()]->u.sd.value;
+    out_state.preview_spectral_samples_index = params[preview_spectral_samples_param()]->u.pd.value;
     out_state.ghost_blur = params[ghost_blur_param()]->u.fs_d.value;
     out_state.ghost_blur_passes = params[ghost_blur_passes_param()]->u.sd.value;
     out_state.ghost_cleanup_mode_index = params[ghost_cleanup_mode_param()]->u.pd.value;
@@ -79,10 +97,21 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.starburst_gain = params[starburst_gain_param()]->u.fs_d.value;
     out_state.starburst_scale = params[starburst_scale_param()]->u.fs_d.value;
     out_state.spectral_samples_index = params[spectral_samples_param()]->u.pd.value;
+    out_state.spectral_jitter_mode_index = params[spectral_jitter_mode_param()]->u.pd.value;
+    out_state.spectral_jitter_seed = params[spectral_jitter_seed_param()]->u.sd.value;
+    out_state.adaptive_quality = params[adaptive_quality_param()]->u.fs_d.value;
     out_state.adaptive_sampling_strength = params[adaptive_sampling_strength_param()]->u.fs_d.value;
     out_state.footprint_radius_bias = params[footprint_radius_bias_param()]->u.fs_d.value;
     out_state.footprint_clamp = params[footprint_clamp_param()]->u.fs_d.value;
     out_state.max_adaptive_pair_grid = params[max_adaptive_pair_grid_param()]->u.sd.value;
+    out_state.pair_start = params[pair_start_param()]->u.sd.value;
+    out_state.pair_count = params[pair_count_param()]->u.sd.value;
+    out_state.surface_art_start = params[surface_art_start_param()]->u.sd.value;
+    out_state.surface_art_count = params[surface_art_count_param()]->u.sd.value;
+    out_state.surface_art_gain = params[surface_art_gain_param()]->u.fs_d.value;
+    out_state.pupil_jitter_mode_index = params[pupil_jitter_mode_param()]->u.pd.value;
+    out_state.pupil_jitter_seed = params[pupil_jitter_seed_param()]->u.sd.value;
+    out_state.pupil_jitter_auto_seed = params[pupil_jitter_auto_seed_param()]->u.bd.value != 0;
     out_state.projected_cells_mode_index = params[projected_cells_mode_param()]->u.pd.value;
     out_state.cell_coverage_bias = params[cell_coverage_bias_param()]->u.fs_d.value;
     out_state.cell_edge_inset = params[cell_edge_inset_param()]->u.fs_d.value;
@@ -104,65 +133,52 @@ void union_rects(const RectT& src, RectT& dst)
     dst.bottom = std::max(dst.bottom, src.bottom);
 }
 
-bool resolve_asset_root(std::string& out_asset_root)
+template <typename HostPixelT, typename BridgePixelT>
+void copy_world_to_bridge_pixels(const PF_EffectWorld& world, std::vector<BridgePixelT>& out_pixels)
 {
-    out_asset_root.clear();
-
-#ifdef FLARESIM_REPO_ROOT
-    if (is_flaresim_asset_root(FLARESIM_REPO_ROOT)) {
-        out_asset_root = FLARESIM_REPO_ROOT;
-        return true;
-    }
-#endif
-
-#ifdef AE_OS_WIN
-    HMODULE module = nullptr;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCSTR>(&PluginHandleSmartRender),
-                           &module)) {
-        char module_path[MAX_PATH] {};
-        const DWORD module_path_len = GetModuleFileNameA(module, module_path, MAX_PATH);
-        if (module_path_len > 0 &&
-            find_flaresim_asset_root(std::string(module_path, module_path_len), out_asset_root)) {
-            return true;
-        }
-    }
-#endif
-
-    return false;
-}
-
-template <typename PixelT>
-void copy_world_to_linear(const PF_EffectWorld& world, std::vector<PixelT>& out_pixels)
-{
+    static_assert(sizeof(HostPixelT) == sizeof(BridgePixelT));
     const int width = world.width;
     const int height = world.height;
-
     out_pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
 
     const char* row = reinterpret_cast<const char*>(world.data);
     for (int y = 0; y < height; ++y) {
-        const auto* src = reinterpret_cast<const PixelT*>(row);
+        const auto* src = reinterpret_cast<const HostPixelT*>(row);
         auto* dst = out_pixels.data() + (static_cast<size_t>(y) * static_cast<size_t>(width));
-        std::copy_n(src, width, dst);
+        std::memcpy(dst, src, static_cast<size_t>(width) * sizeof(BridgePixelT));
         row += world.rowbytes;
     }
 }
 
-template <typename PixelT>
-void copy_linear_to_world(const std::vector<PixelT>& pixels, PF_EffectWorld& world)
+template <typename HostPixelT, typename BridgePixelT>
+void copy_bridge_pixels_to_world(const std::vector<BridgePixelT>& pixels, PF_EffectWorld& world)
 {
+    static_assert(sizeof(HostPixelT) == sizeof(BridgePixelT));
     const int width = world.width;
     const int height = world.height;
 
     char* row = reinterpret_cast<char*>(world.data);
     for (int y = 0; y < height; ++y) {
         const auto* src = pixels.data() + (static_cast<size_t>(y) * static_cast<size_t>(width));
-        auto* dst = reinterpret_cast<PixelT*>(row);
-        std::copy_n(src, width, dst);
+        auto* dst = reinterpret_cast<HostPixelT*>(row);
+        std::memcpy(dst, src, static_cast<size_t>(width) * sizeof(BridgePixelT));
         row += world.rowbytes;
     }
+}
+
+template <typename PixelT>
+struct ThreadPixelWorldBuffers
+{
+    std::vector<PixelT> input;
+    std::vector<PixelT> output;
+    std::vector<PixelT> mask;
+};
+
+template <typename PixelT>
+ThreadPixelWorldBuffers<PixelT>& thread_pixel_world_buffers()
+{
+    static thread_local ThreadPixelWorldBuffers<PixelT> buffers;
+    return buffers;
 }
 
 template <typename HostPixelT, typename BridgePixelT>
@@ -232,42 +248,30 @@ bool render_world_pixels(const std::string& asset_root,
         return false;
     }
 
-    std::vector<HostPixelT> host_input;
-    copy_world_to_linear(input_world, host_input);
-
-    std::vector<BridgePixelT> bridge_input(host_input.size());
-    std::memcpy(bridge_input.data(),
-                host_input.data(),
-                bridge_input.size() * sizeof(BridgePixelT));
+    auto& buffers = thread_pixel_world_buffers<BridgePixelT>();
+    copy_world_to_bridge_pixels<HostPixelT, BridgePixelT>(input_world, buffers.input);
 
     const BridgePixelT* bridge_mask_pixels = nullptr;
-    std::vector<BridgePixelT> bridge_mask;
     if (mask_world &&
         mask_world->data &&
         expand_mask_world_to_bridge_pixels<HostPixelT, BridgePixelT>(
-            *mask_world, input_world.width, input_world.height, mask_rect, bridge_mask)) {
-        bridge_mask_pixels = bridge_mask.data();
+            *mask_world, input_world.width, input_world.height, mask_rect, buffers.mask)) {
+        bridge_mask_pixels = buffers.mask.data();
     }
 
-    std::vector<BridgePixelT> bridge_output(
-        static_cast<size_t>(input_world.width) * static_cast<size_t>(input_world.height));
+    buffers.output.resize(static_cast<size_t>(input_world.width) * static_cast<size_t>(input_world.height));
 
     if (!render_frame_to_pixels(asset_root,
                                 state,
-                                bridge_input.data(),
-                                bridge_output.data(),
+                                buffers.input.data(),
+                                buffers.output.data(),
                                 input_world.width,
                                 input_world.height,
                                 bridge_mask_pixels)) {
         return false;
     }
 
-    std::vector<HostPixelT> host_output(bridge_output.size());
-    std::memcpy(host_output.data(),
-                bridge_output.data(),
-                host_output.size() * sizeof(HostPixelT));
-
-    copy_linear_to_world(host_output, output_world);
+    copy_bridge_pixels_to_world<HostPixelT, BridgePixelT>(buffers.output, output_world);
     return true;
 }
 
@@ -284,7 +288,7 @@ PF_Err render_checked_out_worlds(PF_InData* in_data,
     }
 
     std::string asset_root;
-    if (!resolve_asset_root(asset_root)) {
+    if (!resolve_plugin_asset_root(reinterpret_cast<const void*>(&PluginHandleSmartRender), asset_root)) {
         return PF_COPY(input_world, output_world, nullptr, nullptr);
     }
 
@@ -341,14 +345,29 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef sensor_width_param_def;
     PF_ParamDef sensor_height_param_def;
     PF_ParamDef focal_length_param_def;
+    PF_ParamDef anamorphic_squeeze_param_def;
     PF_ParamDef aperture_blades_param_def;
     PF_ParamDef aperture_rotation_param_def;
     PF_ParamDef flare_gain_param_def;
     PF_ParamDef sky_brightness_param_def;
     PF_ParamDef threshold_param_def;
+    PF_ParamDef source_cap_param_def;
+    PF_ParamDef manual_source_enabled_param_def;
+    PF_ParamDef manual_source_x_param_def;
+    PF_ParamDef manual_source_y_param_def;
+    PF_ParamDef manual_source_intensity_param_def;
+    PF_ParamDef manual_source_r_param_def;
+    PF_ParamDef manual_source_g_param_def;
+    PF_ParamDef manual_source_b_param_def;
     PF_ParamDef ray_grid_param_def;
     PF_ParamDef downsample_param_def;
     PF_ParamDef max_sources_param_def;
+    PF_ParamDef cluster_radius_param_def;
+    PF_ParamDef preview_mode_param_def;
+    PF_ParamDef preview_ray_grid_param_def;
+    PF_ParamDef preview_max_sources_param_def;
+    PF_ParamDef preview_downsample_param_def;
+    PF_ParamDef preview_spectral_samples_param_def;
     PF_ParamDef ghost_blur_param_def;
     PF_ParamDef ghost_blur_passes_param_def;
     PF_ParamDef ghost_cleanup_mode_param_def;
@@ -358,10 +377,21 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef starburst_gain_param_def;
     PF_ParamDef starburst_scale_param_def;
     PF_ParamDef spectral_samples_param_def;
+    PF_ParamDef spectral_jitter_mode_param_def;
+    PF_ParamDef spectral_jitter_seed_param_def;
+    PF_ParamDef adaptive_quality_param_def;
     PF_ParamDef adaptive_sampling_strength_param_def;
     PF_ParamDef footprint_radius_bias_param_def;
     PF_ParamDef footprint_clamp_param_def;
     PF_ParamDef max_adaptive_pair_grid_param_def;
+    PF_ParamDef pair_start_param_def;
+    PF_ParamDef pair_count_param_def;
+    PF_ParamDef surface_art_start_param_def;
+    PF_ParamDef surface_art_count_param_def;
+    PF_ParamDef surface_art_gain_param_def;
+    PF_ParamDef pupil_jitter_mode_param_def;
+    PF_ParamDef pupil_jitter_seed_param_def;
+    PF_ParamDef pupil_jitter_auto_seed_param_def;
     PF_ParamDef projected_cells_mode_param_def;
     PF_ParamDef cell_coverage_bias_param_def;
     PF_ParamDef cell_edge_inset_param_def;
@@ -378,14 +408,29 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(sensor_width_param_def);
     AEFX_CLR_STRUCT(sensor_height_param_def);
     AEFX_CLR_STRUCT(focal_length_param_def);
+    AEFX_CLR_STRUCT(anamorphic_squeeze_param_def);
     AEFX_CLR_STRUCT(aperture_blades_param_def);
     AEFX_CLR_STRUCT(aperture_rotation_param_def);
     AEFX_CLR_STRUCT(flare_gain_param_def);
     AEFX_CLR_STRUCT(sky_brightness_param_def);
     AEFX_CLR_STRUCT(threshold_param_def);
+    AEFX_CLR_STRUCT(source_cap_param_def);
+    AEFX_CLR_STRUCT(manual_source_enabled_param_def);
+    AEFX_CLR_STRUCT(manual_source_x_param_def);
+    AEFX_CLR_STRUCT(manual_source_y_param_def);
+    AEFX_CLR_STRUCT(manual_source_intensity_param_def);
+    AEFX_CLR_STRUCT(manual_source_r_param_def);
+    AEFX_CLR_STRUCT(manual_source_g_param_def);
+    AEFX_CLR_STRUCT(manual_source_b_param_def);
     AEFX_CLR_STRUCT(ray_grid_param_def);
     AEFX_CLR_STRUCT(downsample_param_def);
     AEFX_CLR_STRUCT(max_sources_param_def);
+    AEFX_CLR_STRUCT(cluster_radius_param_def);
+    AEFX_CLR_STRUCT(preview_mode_param_def);
+    AEFX_CLR_STRUCT(preview_ray_grid_param_def);
+    AEFX_CLR_STRUCT(preview_max_sources_param_def);
+    AEFX_CLR_STRUCT(preview_downsample_param_def);
+    AEFX_CLR_STRUCT(preview_spectral_samples_param_def);
     AEFX_CLR_STRUCT(ghost_blur_param_def);
     AEFX_CLR_STRUCT(ghost_blur_passes_param_def);
     AEFX_CLR_STRUCT(ghost_cleanup_mode_param_def);
@@ -395,10 +440,21 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(starburst_gain_param_def);
     AEFX_CLR_STRUCT(starburst_scale_param_def);
     AEFX_CLR_STRUCT(spectral_samples_param_def);
+    AEFX_CLR_STRUCT(spectral_jitter_mode_param_def);
+    AEFX_CLR_STRUCT(spectral_jitter_seed_param_def);
+    AEFX_CLR_STRUCT(adaptive_quality_param_def);
     AEFX_CLR_STRUCT(adaptive_sampling_strength_param_def);
     AEFX_CLR_STRUCT(footprint_radius_bias_param_def);
     AEFX_CLR_STRUCT(footprint_clamp_param_def);
     AEFX_CLR_STRUCT(max_adaptive_pair_grid_param_def);
+    AEFX_CLR_STRUCT(pair_start_param_def);
+    AEFX_CLR_STRUCT(pair_count_param_def);
+    AEFX_CLR_STRUCT(surface_art_start_param_def);
+    AEFX_CLR_STRUCT(surface_art_count_param_def);
+    AEFX_CLR_STRUCT(surface_art_gain_param_def);
+    AEFX_CLR_STRUCT(pupil_jitter_mode_param_def);
+    AEFX_CLR_STRUCT(pupil_jitter_seed_param_def);
+    AEFX_CLR_STRUCT(pupil_jitter_auto_seed_param_def);
     AEFX_CLR_STRUCT(projected_cells_mode_param_def);
     AEFX_CLR_STRUCT(cell_coverage_bias_param_def);
     AEFX_CLR_STRUCT(cell_edge_inset_param_def);
@@ -416,14 +472,29 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool sensor_width_checked_out = false;
     bool sensor_height_checked_out = false;
     bool focal_length_checked_out = false;
+    bool anamorphic_squeeze_checked_out = false;
     bool aperture_blades_checked_out = false;
     bool aperture_rotation_checked_out = false;
     bool flare_gain_checked_out = false;
     bool sky_brightness_checked_out = false;
     bool threshold_checked_out = false;
+    bool source_cap_checked_out = false;
+    bool manual_source_enabled_checked_out = false;
+    bool manual_source_x_checked_out = false;
+    bool manual_source_y_checked_out = false;
+    bool manual_source_intensity_checked_out = false;
+    bool manual_source_r_checked_out = false;
+    bool manual_source_g_checked_out = false;
+    bool manual_source_b_checked_out = false;
     bool ray_grid_checked_out = false;
     bool downsample_checked_out = false;
     bool max_sources_checked_out = false;
+    bool cluster_radius_checked_out = false;
+    bool preview_mode_checked_out = false;
+    bool preview_ray_grid_checked_out = false;
+    bool preview_max_sources_checked_out = false;
+    bool preview_downsample_checked_out = false;
+    bool preview_spectral_samples_checked_out = false;
     bool ghost_blur_checked_out = false;
     bool ghost_blur_passes_checked_out = false;
     bool ghost_cleanup_mode_checked_out = false;
@@ -433,10 +504,21 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool starburst_gain_checked_out = false;
     bool starburst_scale_checked_out = false;
     bool spectral_samples_checked_out = false;
+    bool spectral_jitter_mode_checked_out = false;
+    bool spectral_jitter_seed_checked_out = false;
+    bool adaptive_quality_checked_out = false;
     bool adaptive_sampling_strength_checked_out = false;
     bool footprint_radius_bias_checked_out = false;
     bool footprint_clamp_checked_out = false;
     bool max_adaptive_pair_grid_checked_out = false;
+    bool pair_start_checked_out = false;
+    bool pair_count_checked_out = false;
+    bool surface_art_start_checked_out = false;
+    bool surface_art_count_checked_out = false;
+    bool surface_art_gain_checked_out = false;
+    bool pupil_jitter_mode_checked_out = false;
+    bool pupil_jitter_seed_checked_out = false;
+    bool pupil_jitter_auto_seed_checked_out = false;
     bool projected_cells_mode_checked_out = false;
     bool cell_coverage_bias_checked_out = false;
     bool cell_edge_inset_checked_out = false;
@@ -538,6 +620,14 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     focal_length_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          anamorphic_squeeze_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &anamorphic_squeeze_param_def));
+    anamorphic_squeeze_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           aperture_blades_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -578,6 +668,70 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     threshold_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          source_cap_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &source_cap_param_def));
+    source_cap_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_enabled_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_enabled_param_def));
+    manual_source_enabled_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_x_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_x_param_def));
+    manual_source_x_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_y_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_y_param_def));
+    manual_source_y_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_intensity_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_intensity_param_def));
+    manual_source_intensity_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_r_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_r_param_def));
+    manual_source_r_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_g_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_g_param_def));
+    manual_source_g_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          manual_source_b_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &manual_source_b_param_def));
+    manual_source_b_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           ray_grid_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -600,6 +754,54 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
                           in_data->time_scale,
                           &max_sources_param_def));
     max_sources_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          cluster_radius_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &cluster_radius_param_def));
+    cluster_radius_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_mode_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_mode_param_def));
+    preview_mode_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_ray_grid_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_ray_grid_param_def));
+    preview_ray_grid_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_max_sources_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_max_sources_param_def));
+    preview_max_sources_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_downsample_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_downsample_param_def));
+    preview_downsample_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          preview_spectral_samples_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &preview_spectral_samples_param_def));
+    preview_spectral_samples_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
                           ghost_blur_param(),
@@ -674,6 +876,30 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     spectral_samples_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          spectral_jitter_mode_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &spectral_jitter_mode_param_def));
+    spectral_jitter_mode_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          spectral_jitter_seed_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &spectral_jitter_seed_param_def));
+    spectral_jitter_seed_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          adaptive_quality_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &adaptive_quality_param_def));
+    adaptive_quality_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           adaptive_sampling_strength_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -704,6 +930,70 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
                           in_data->time_scale,
                           &max_adaptive_pair_grid_param_def));
     max_adaptive_pair_grid_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          pair_start_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &pair_start_param_def));
+    pair_start_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          pair_count_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &pair_count_param_def));
+    pair_count_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          surface_art_start_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &surface_art_start_param_def));
+    surface_art_start_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          surface_art_count_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &surface_art_count_param_def));
+    surface_art_count_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          surface_art_gain_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &surface_art_gain_param_def));
+    surface_art_gain_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          pupil_jitter_mode_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &pupil_jitter_mode_param_def));
+    pupil_jitter_mode_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          pupil_jitter_seed_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &pupil_jitter_seed_param_def));
+    pupil_jitter_seed_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
+                          pupil_jitter_auto_seed_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &pupil_jitter_auto_seed_param_def));
+    pupil_jitter_auto_seed_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
                           projected_cells_mode_param(),
@@ -758,14 +1048,29 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.sensor_width_mm = sensor_width_param_def.u.fs_d.value;
         ui_state.sensor_height_mm = sensor_height_param_def.u.fs_d.value;
         ui_state.focal_length_mm = focal_length_param_def.u.fs_d.value;
+        ui_state.anamorphic_squeeze = anamorphic_squeeze_param_def.u.fs_d.value;
         ui_state.aperture_blades = aperture_blades_param_def.u.sd.value;
         ui_state.aperture_rotation_deg = aperture_rotation_param_def.u.fs_d.value;
         ui_state.flare_gain = flare_gain_param_def.u.fs_d.value;
         ui_state.sky_brightness = sky_brightness_param_def.u.fs_d.value;
         ui_state.threshold = threshold_param_def.u.fs_d.value;
+        ui_state.source_cap = source_cap_param_def.u.fs_d.value;
+        ui_state.manual_source_enabled = manual_source_enabled_param_def.u.bd.value != 0;
+        ui_state.manual_source_x = manual_source_x_param_def.u.fs_d.value;
+        ui_state.manual_source_y = manual_source_y_param_def.u.fs_d.value;
+        ui_state.manual_source_intensity = manual_source_intensity_param_def.u.fs_d.value;
+        ui_state.manual_source_r = manual_source_r_param_def.u.fs_d.value;
+        ui_state.manual_source_g = manual_source_g_param_def.u.fs_d.value;
+        ui_state.manual_source_b = manual_source_b_param_def.u.fs_d.value;
         ui_state.ray_grid = ray_grid_param_def.u.sd.value;
         ui_state.downsample = downsample_param_def.u.sd.value;
         ui_state.max_sources = max_sources_param_def.u.sd.value;
+        ui_state.cluster_radius_px = cluster_radius_param_def.u.sd.value;
+        ui_state.preview_mode = preview_mode_param_def.u.bd.value != 0;
+        ui_state.preview_ray_grid = preview_ray_grid_param_def.u.sd.value;
+        ui_state.preview_max_sources = preview_max_sources_param_def.u.sd.value;
+        ui_state.preview_downsample = preview_downsample_param_def.u.sd.value;
+        ui_state.preview_spectral_samples_index = preview_spectral_samples_param_def.u.pd.value;
         ui_state.ghost_blur = ghost_blur_param_def.u.fs_d.value;
         ui_state.ghost_blur_passes = ghost_blur_passes_param_def.u.sd.value;
         ui_state.ghost_cleanup_mode_index = ghost_cleanup_mode_param_def.u.pd.value;
@@ -775,10 +1080,21 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.starburst_gain = starburst_gain_param_def.u.fs_d.value;
         ui_state.starburst_scale = starburst_scale_param_def.u.fs_d.value;
         ui_state.spectral_samples_index = spectral_samples_param_def.u.pd.value;
+        ui_state.spectral_jitter_mode_index = spectral_jitter_mode_param_def.u.pd.value;
+        ui_state.spectral_jitter_seed = spectral_jitter_seed_param_def.u.sd.value;
+        ui_state.adaptive_quality = adaptive_quality_param_def.u.fs_d.value;
         ui_state.adaptive_sampling_strength = adaptive_sampling_strength_param_def.u.fs_d.value;
         ui_state.footprint_radius_bias = footprint_radius_bias_param_def.u.fs_d.value;
         ui_state.footprint_clamp = footprint_clamp_param_def.u.fs_d.value;
         ui_state.max_adaptive_pair_grid = max_adaptive_pair_grid_param_def.u.sd.value;
+        ui_state.pair_start = pair_start_param_def.u.sd.value;
+        ui_state.pair_count = pair_count_param_def.u.sd.value;
+        ui_state.surface_art_start = surface_art_start_param_def.u.sd.value;
+        ui_state.surface_art_count = surface_art_count_param_def.u.sd.value;
+        ui_state.surface_art_gain = surface_art_gain_param_def.u.fs_d.value;
+        ui_state.pupil_jitter_mode_index = pupil_jitter_mode_param_def.u.pd.value;
+        ui_state.pupil_jitter_seed = pupil_jitter_seed_param_def.u.sd.value;
+        ui_state.pupil_jitter_auto_seed = pupil_jitter_auto_seed_param_def.u.bd.value != 0;
         ui_state.projected_cells_mode_index = projected_cells_mode_param_def.u.pd.value;
         ui_state.cell_coverage_bias = cell_coverage_bias_param_def.u.fs_d.value;
         ui_state.cell_edge_inset = cell_edge_inset_param_def.u.fs_d.value;
@@ -786,6 +1102,8 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
 
         if (!apply_ui_parameter_state(ui_state, out_state)) {
             err = PF_Err_BAD_CALLBACK_PARAM;
+        } else {
+            resolve_auto_pupil_seed(in_data, out_state);
         }
     }
 
@@ -797,6 +1115,30 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (max_adaptive_pair_grid_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &max_adaptive_pair_grid_param_def));
+    }
+    if (pair_count_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &pair_count_param_def));
+    }
+    if (surface_art_gain_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &surface_art_gain_param_def));
+    }
+    if (surface_art_count_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &surface_art_count_param_def));
+    }
+    if (surface_art_start_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &surface_art_start_param_def));
+    }
+    if (pair_start_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &pair_start_param_def));
+    }
+    if (pupil_jitter_seed_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &pupil_jitter_seed_param_def));
+    }
+    if (pupil_jitter_auto_seed_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &pupil_jitter_auto_seed_param_def));
+    }
+    if (pupil_jitter_mode_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &pupil_jitter_mode_param_def));
     }
     if (projected_cells_mode_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &projected_cells_mode_param_def));
@@ -816,8 +1158,17 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     if (adaptive_sampling_strength_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &adaptive_sampling_strength_param_def));
     }
+    if (adaptive_quality_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &adaptive_quality_param_def));
+    }
     if (spectral_samples_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &spectral_samples_param_def));
+    }
+    if (spectral_jitter_seed_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &spectral_jitter_seed_param_def));
+    }
+    if (spectral_jitter_mode_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &spectral_jitter_mode_param_def));
     }
     if (starburst_scale_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &starburst_scale_param_def));
@@ -849,11 +1200,53 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     if (max_sources_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &max_sources_param_def));
     }
+    if (cluster_radius_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &cluster_radius_param_def));
+    }
+    if (preview_spectral_samples_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_spectral_samples_param_def));
+    }
+    if (preview_downsample_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_downsample_param_def));
+    }
+    if (preview_max_sources_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_max_sources_param_def));
+    }
+    if (preview_ray_grid_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_ray_grid_param_def));
+    }
+    if (preview_mode_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &preview_mode_param_def));
+    }
     if (ray_grid_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &ray_grid_param_def));
     }
     if (threshold_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &threshold_param_def));
+    }
+    if (source_cap_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &source_cap_param_def));
+    }
+    if (manual_source_b_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_b_param_def));
+    }
+    if (manual_source_g_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_g_param_def));
+    }
+    if (manual_source_r_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_r_param_def));
+    }
+    if (manual_source_intensity_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_intensity_param_def));
+    }
+    if (manual_source_y_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_y_param_def));
+    }
+    if (manual_source_x_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_x_param_def));
+    }
+    if (manual_source_enabled_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &manual_source_enabled_param_def));
     }
     if (sky_brightness_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &sky_brightness_param_def));
@@ -869,6 +1262,9 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     }
     if (focal_length_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &focal_length_param_def));
+    }
+    if (anamorphic_squeeze_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &anamorphic_squeeze_param_def));
     }
     if (sensor_height_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &sensor_height_param_def));
@@ -958,14 +1354,21 @@ PF_Err PluginHandleSmartPreRender(PF_InData* in_data, PF_OutData*, void* extra)
     union_rects(input_result.result_rect, render_extra->output->result_rect);
     union_rects(input_result.max_result_rect, render_extra->output->max_result_rect);
 
-    auto* rects = new SmartRenderLayerRects {};
+    auto* rects = new SmartRenderContextData {};
     rects->input_rect = input_result.result_rect;
     if (mask_err == PF_Err_NONE) {
         rects->mask_rect = mask_result.result_rect;
         rects->has_mask = TRUE;
     }
+    rects->state = state;
+    rects->has_state = TRUE;
+    if (cuda_ghost_renderer_compiled() &&
+        render_extra->input->what_gpu == PF_GPU_Framework_CUDA &&
+        render_extra->input->bitdepth == 32) {
+        render_extra->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+    }
     render_extra->output->pre_render_data = rects;
-    render_extra->output->delete_pre_render_data_func = delete_smart_render_layer_rects;
+    render_extra->output->delete_pre_render_data_func = delete_smart_render_context_data;
     return PF_Err_NONE;
 }
 
@@ -979,11 +1382,15 @@ PF_Err PluginHandleSmartRender(PF_InData* in_data, PF_OutData* out_data, void* e
     PF_Err err = PF_Err_NONE;
     PF_Err err2 = PF_Err_NONE;
     const auto* rects =
-        reinterpret_cast<const SmartRenderLayerRects*>(render_extra->input->pre_render_data);
+        reinterpret_cast<const SmartRenderContextData*>(render_extra->input->pre_render_data);
     const PF_LRect* mask_rect = (rects && rects->has_mask) ? &rects->mask_rect : nullptr;
 
     AeParameterState state {};
-    ERR(build_render_state_from_checked_out_params(in_data, state));
+    if (rects && rects->has_state) {
+        state = rects->state;
+    } else {
+        ERR(build_render_state_from_checked_out_params(in_data, state));
+    }
 
     PF_EffectWorld* input_world = nullptr;
     PF_EffectWorld* mask_world = nullptr;
@@ -1037,6 +1444,7 @@ PF_Err PluginHandleLegacyRender(PF_InData* in_data,
     if (!apply_ui_parameter_state(ui_state, state)) {
         return PF_COPY(&params[PARAM_INPUT]->u.ld, output, nullptr, nullptr);
     }
+    resolve_auto_pupil_seed(in_data, state);
 
     PF_EffectWorld* mask_world = nullptr;
     if (params[mask_layer_param()]) {

@@ -54,6 +54,7 @@ Notes:
 | Sensor Width (mm) | slider `1`-`100` | `36` | Used when `Use Sensor Size` is on and preset is `Custom`. |
 | Sensor Height (mm) | slider `1`-`100` | `24` | Used when `Use Sensor Size` is on and preset is `Custom`. |
 | Focal Length (mm) | slider `1`-`200` | `50` | Used with sensor-size camera mode. |
+| Anamorphic Squeeze | slider `1`-`4`; manual values allowed above slider max | `1` | Horizontally desqueezes ghost projection. `2` approximates a 2x anamorphic look; this does not add proprietary cylindrical lens prescriptions. |
 
 ### Aperture
 
@@ -67,12 +68,24 @@ Notes:
 | Setting | Values / range | Default | Notes |
 | --- | --- | --- | --- |
 | Adaptive Sampling | `Disabled`, `Enabled` | `Disabled` | Enables projected-cell reconstruction. Faster than brute-force grid increases, but more stylized/experimental. |
+| Adaptive Quality | slider `0.25`-`2` | `1` | Scales adaptive per-pair ray grids. Lower values bound complex-lens render spikes; `1` keeps the `Ray Grid` baseline. |
 | Flare Gain | slider `0`-`5000`; manual values allowed above slider max | `4000` | Global flare brightness multiplier. |
 | Sky Brightness | slider `0`-`4`; manual higher values allowed | `1` | Scales sub-threshold scene values before source extraction. |
 | Threshold | slider `0`-`64` | `8` | Bright-pixel cutoff for source detection. Lower = more sources/noise. |
+| Source Cap | slider `0`-`64`; manual higher values allowed | `0` | Clamps individual source luminance before thresholding and flare contribution. `0` disables the cap. |
+| Manual Source | `Off`, `On` | `Off` | Adds one artist-placed source in addition to detected HDR sources. |
+| Source X / Source Y | slider `-1`-`2`; manual values allowed outside slider range | `0.5`, `0.5` | Manual source position in normalized frame space. `0..1` is on-frame; outside values create offscreen sources. |
+| Source Intensity | slider `0`-`256`; manual higher values allowed | `16` | Manual source brightness. |
+| Source Red / Green / Blue | slider `0`-`4`; manual higher values allowed | `1`, `1`, `1` | Manual source color multipliers. |
 | Ray Grid | `1`-`2048` | `128` | Base ray density for ghost tracing. Main quality/perf lever. |
 | Downsample | `1`-`12` | `2` | Source extraction block size. Higher = faster, fewer detected highlights. |
 | Max Sources | `0`-`2048` | `256` | `0` means unlimited. Otherwise keeps only the brightest detected sources. |
+| Cluster Radius | `0`-`256` | `0` | Merges nearby detected sources before ghost tracing. `0` disables clustering. |
+| Preview Mode | `Off`, `On` | `Off` | Overrides quality controls below for faster interactive previews. |
+| Preview Ray Grid | `1`-`128` | `16` | Ray grid used while Preview Mode is on. |
+| Preview Max Sources | `0`-`512` | `100` | Source cap used while Preview Mode is on. |
+| Preview Downsample | `1`-`24` | `8` | Source extraction stride used while Preview Mode is on. |
+| Preview Spectral Samples | `3`, `5`, `7`, `9`, `11`, `15`, `21`, `31` | `3` | Spectral sample count used while Preview Mode is on. |
 
 ### Post-processing
 
@@ -85,7 +98,9 @@ Notes:
 | Haze Blur Passes | `0`-`8` | `3` | Additional haze blur passes. |
 | Starburst Gain | slider `0`-`10` | `0` | Enables diffraction-style starburst. `0` disables starburst. |
 | Starburst Scale | slider `0`-`0.5` | `0.15` | Starburst size. Shape follows aperture blades/rotation. |
-| Spectral Samples | `3`, `5`, `7`, `9`, `11` | `3` | Wavelength samples per ghost trace. Higher = better dispersion/color, slower render. |
+| Spectral Samples | `3`, `5`, `7`, `9`, `11`, `15`, `21`, `31` | `3` | Wavelength samples per ghost trace. Higher = better dispersion/color, slower render. |
+| Spectral Jitter | `Off`, `Stratified`, `Halton` | `Off` | Jitters expanded-spectrum wavelength bins to reduce banding in high-dispersion renders. Applies when spectral samples are above 3. |
+| Spectral Seed | `0`-`1000000` | `0` | Seed for spectral jitter. |
 | Ghost Cleanup | `Legacy Blur`, `Sharp Adaptive`, `Sharp + Blur` | `Sharp Adaptive` | Reconstruction mode for ghost artifacts. `Legacy Blur`: old soft cleanup. `Sharp Adaptive`: sharper footprint-based reconstruction. `Sharp + Blur`: sharp reconstruction plus post blur. |
 
 Notes:
@@ -102,14 +117,25 @@ These only matter when chasing ghost artifacts/perf tradeoffs. Most shots should
 | Footprint Bias | slider `0.25`-`2` | `1` | Multiplier for adaptive splat footprint radius. Lower = sharper/riskier. Higher = smoother/softer. |
 | Footprint Clamp | slider `0.5`-`4` | `1.15` | Caps adaptive footprint expansion. Prevents extremely wide splats. |
 | Max Pair Grid | `0`-`512` | `0` | `0` keeps automatic limits. Non-zero hard-caps adaptive per-pair ray grids. |
+| Pair Start | `0`-`512` | `0` | Skips this many active ghost pairs after physical filtering. |
+| Pair Count | `0`-`512` | `0` | Limits active ghost pairs after `Pair Start`. `0` keeps all remaining pairs. |
+| Surface Start | `0`-`512` | `0` | First lens surface receiving the Surface Gain art override. |
+| Surface Count | `0`-`512` | `0` | Number of surfaces to affect. `0` affects all surfaces from Surface Start onward. |
+| Surface Gain | slider `0`-`4`; manual higher values allowed | `1` | Multiplies selected surface reflectance before ghost tracing. `0` suppresses selected reflective surfaces; values above `1` exaggerate them. |
+| Pupil Jitter | `Off`, `Stratified`, `Halton` | `Off` | Entrance-pupil sampling pattern. Stratified and Halton break up regular grid dots. |
+| Jitter Seed | `0`-`1000000` | `0` | Fixed seed for Stratified jitter when `Auto Seed` is off. |
+| Auto Seed | `Off`, `On` | `On` | Uses the current frame as the Stratified jitter seed for animated noise variation. |
 | Cell Coverage | slider `0.5`-`2.5` | `1` | Expands or contracts projected-cell coverage. Higher can fill missing lobes; too high can bloat shapes. |
 | Cell Edge Inset | slider `0`-`0.45` | `0.1` | Pulls risky cell corners inward near aperture boundaries. Higher can stabilize edge cells but may introduce gaps. |
 
 Guidance:
 - grid/lattice artifacts first: try `Ghost Cleanup = Sharp Adaptive`, then raise `Ray Grid`
+- complex-lens stalls: lower `Adaptive Quality` before lowering `Ray Grid`
+- interactive setup: enable `Preview Mode`; brightness is compensated for preview downsample changes, not for a lower preview source cap
 - over-smooth ghosts: lower `Footprint Bias` a bit before touching `Ghost Blur`
 - missing projected-cell coverage: raise `Cell Coverage` slightly, then adjust `Cell Edge Inset`
 - perf spikes in hard shots: keep `Adaptive Sampling` disabled, or cap `Max Pair Grid`
+- pair isolation: raise `Pair Start`, then set `Pair Count = 1` to inspect one active pair at a time
 
 ### View + AE-only controls
 

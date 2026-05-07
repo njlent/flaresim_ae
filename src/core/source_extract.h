@@ -12,10 +12,18 @@ std::vector<BrightPixel> extract_bright_pixels(
     int downsample,
     float fov_h,
     float fov_v,
+    float source_cap = 0.0f,
     const MonoImageView* mask = nullptr
 );
 
 void limit_bright_pixels(
     std::vector<BrightPixel>& pixels,
     std::size_t max_sources
+);
+
+void cluster_bright_pixels(
+    std::vector<BrightPixel>& pixels,
+    int radius_px,
+    int image_width,
+    float tan_half_fov_h
 );

@@ -3,7 +3,73 @@
 #include "lens_resolution.h"
 #include "output_view.h"
 
+#include <filesystem>
+
 namespace {
+
+namespace fs = std::filesystem;
+
+struct ThreadRenderContext
+{
+    FrameRenderCache cache;
+    GpuFrameRenderCache gpu_cache;
+    LensSystem lens;
+    std::string asset_root;
+    std::string lens_path;
+    fs::file_time_type lens_mtime {};
+    FloatImageBuffer input_image;
+    FloatImageBuffer mask_image;
+    FloatImageBuffer output_image;
+    FrameRenderOutputs outputs;
+    std::vector<float> detection_mask_values;
+    bool lens_loaded = false;
+    bool lens_mtime_valid = false;
+};
+
+ThreadRenderContext& thread_render_context()
+{
+    static thread_local ThreadRenderContext context;
+    return context;
+}
+
+bool resolve_cached_lens(const std::string& asset_root,
+                         const AeLensSelection& selection,
+                         ThreadRenderContext& context,
+                         const LensSystem*& out_lens)
+{
+    std::string lens_path;
+    if (!resolve_lens_path(selection, asset_root, lens_path)) {
+        return false;
+    }
+
+    std::error_code ec;
+    const fs::file_time_type current_mtime = fs::last_write_time(fs::path(lens_path), ec);
+    const bool mtime_valid = !ec;
+
+    bool need_reload = !context.lens_loaded ||
+                       context.asset_root != asset_root ||
+                       context.lens_path != lens_path ||
+                       context.lens_mtime_valid != mtime_valid;
+    if (!need_reload && mtime_valid) {
+        need_reload = context.lens_mtime != current_mtime;
+    }
+
+    if (need_reload) {
+        if (!load_selected_lens(selection, asset_root, context.lens, &lens_path)) {
+            return false;
+        }
+        context.asset_root = asset_root;
+        context.lens_path = std::move(lens_path);
+        context.lens_loaded = true;
+        context.lens_mtime_valid = mtime_valid;
+        if (mtime_valid) {
+            context.lens_mtime = current_mtime;
+        }
+    }
+
+    out_lens = &context.lens;
+    return true;
+}
 
 bool allocate_image(int width, int height, FloatImageBuffer& image)
 {
@@ -105,6 +171,32 @@ bool unpack_image_impl(const PixelT* pixels, int width, int height, FloatImageBu
     return true;
 }
 
+bool unpack_bgra128_image_impl(const float* pixels,
+                               int width,
+                               int height,
+                               int row_floats,
+                               FloatImageBuffer& out_image)
+{
+    if (!pixels || row_floats < width * 4 || !allocate_image(width, height, out_image)) {
+        return false;
+    }
+
+    for (int y = 0; y < height; ++y) {
+        const float* row = pixels + (static_cast<std::size_t>(y) * static_cast<std::size_t>(row_floats));
+        for (int x = 0; x < width; ++x) {
+            const float* src = row + (static_cast<std::size_t>(x) * 4u);
+            const std::size_t i =
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+            out_image.b[i] = src[0];
+            out_image.g[i] = src[1];
+            out_image.r[i] = src[2];
+            out_image.alpha[i] = src[3];
+        }
+    }
+
+    return true;
+}
+
 template <typename PixelT, typename PackFn>
 bool pack_image_impl(const FloatImageBuffer& image, PixelT* out_pixels, PackFn pack_pixel)
 {
@@ -124,6 +216,30 @@ bool pack_image_impl(const FloatImageBuffer& image, PixelT* out_pixels, PackFn p
     return true;
 }
 
+bool pack_bgra128_image_impl(const FloatImageBuffer& image,
+                             float* out_pixels,
+                             int row_floats)
+{
+    if (!out_pixels || row_floats < image.width * 4 || !validate_image(image)) {
+        return false;
+    }
+
+    for (int y = 0; y < image.height; ++y) {
+        float* row = out_pixels + (static_cast<std::size_t>(y) * static_cast<std::size_t>(row_floats));
+        for (int x = 0; x < image.width; ++x) {
+            const std::size_t i =
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) + static_cast<std::size_t>(x);
+            float* dst = row + (static_cast<std::size_t>(x) * 4u);
+            dst[0] = image.b[i];
+            dst[1] = image.g[i];
+            dst[2] = image.r[i];
+            dst[3] = image.alpha[i];
+        }
+    }
+
+    return true;
+}
+
 template <typename PixelT>
 bool render_frame_to_pixels_impl(const std::string& asset_root,
                                  const AeParameterState& state,
@@ -133,26 +249,29 @@ bool render_frame_to_pixels_impl(const std::string& asset_root,
                                  int height,
                                  const PixelT* mask_pixels)
 {
-    FloatImageBuffer input;
-    if (!unpack_image_impl(input_pixels, width, height, input)) {
+    ThreadRenderContext& context = thread_render_context();
+
+    if (!unpack_image_impl(input_pixels, width, height, context.input_image)) {
         return false;
     }
 
-    FloatImageBuffer mask;
     const FloatImageBuffer* detection_mask = nullptr;
     if (mask_pixels) {
-        if (!unpack_image_impl(mask_pixels, width, height, mask)) {
+        if (!unpack_image_impl(mask_pixels, width, height, context.mask_image)) {
             return false;
         }
-        detection_mask = &mask;
+        detection_mask = &context.mask_image;
     }
 
-    FloatImageBuffer output;
-    if (!render_frame_to_float_image(asset_root, state, input, output, detection_mask)) {
+    if (!render_frame_to_float_image(asset_root,
+                                     state,
+                                     context.input_image,
+                                     context.output_image,
+                                     detection_mask)) {
         return false;
     }
 
-    return pack_image(output, output_pixels);
+    return pack_image(context.output_image, output_pixels);
 }
 
 } // namespace
@@ -198,8 +317,10 @@ bool render_frame_to_float_image(
         return false;
     }
 
-    LensSystem lens;
-    if (!load_selected_lens(state.lens, asset_root, lens)) {
+    ThreadRenderContext& context = thread_render_context();
+
+    const LensSystem* lens = nullptr;
+    if (!resolve_cached_lens(asset_root, state.lens, context, lens) || !lens) {
         return false;
     }
 
@@ -215,25 +336,26 @@ bool render_frame_to_float_image(
     const bool use_detection_mask = detection_mask && validate_image(*detection_mask) &&
                                     detection_mask->width == input.width &&
                                     detection_mask->height == input.height;
-    std::vector<float> detection_mask_values;
+    context.detection_mask_values.clear();
     if (use_detection_mask) {
-        build_detection_mask_values(*detection_mask, detection_mask_values);
+        build_detection_mask_values(*detection_mask, context.detection_mask_values);
     }
     const MonoImageView detection_mask_view = {
-        detection_mask_values.data(),
+        context.detection_mask_values.data(),
         input.width,
         input.height,
     };
 
-    thread_local FrameRenderCache cache;
-    FrameRenderOutputs outputs;
-    if (!render_frame(lens,
+    FrameRenderOutputs& outputs = context.outputs;
+    if (!render_frame(*lens,
                       input_view,
                       settings,
                       outputs,
                       plan,
-                      &cache,
-                      use_detection_mask && !detection_mask_values.empty() ? &detection_mask_view : nullptr)) {
+                      &context.cache,
+                      use_detection_mask && !context.detection_mask_values.empty()
+                          ? &detection_mask_view
+                          : nullptr)) {
         return false;
     }
 
@@ -287,4 +409,92 @@ bool render_frame_to_pixels(
 {
     return render_frame_to_pixels_impl(
         asset_root, state, input_pixels, output_pixels, width, height, mask_pixels);
+}
+
+bool render_frame_to_bgra128_host_buffer(
+    const std::string& asset_root,
+    const AeParameterState& state,
+    const float* input_pixels,
+    float* output_pixels,
+    int width,
+    int height,
+    int input_row_floats,
+    int output_row_floats,
+    const float* mask_pixels,
+    int mask_row_floats)
+{
+    ThreadRenderContext& context = thread_render_context();
+
+    if (!unpack_bgra128_image_impl(input_pixels,
+                                   width,
+                                   height,
+                                   input_row_floats,
+                                   context.input_image)) {
+        return false;
+    }
+
+    const FloatImageBuffer* detection_mask = nullptr;
+    if (mask_pixels) {
+        if (!unpack_bgra128_image_impl(mask_pixels,
+                                       width,
+                                       height,
+                                       mask_row_floats > 0 ? mask_row_floats : input_row_floats,
+                                       context.mask_image)) {
+            return false;
+        }
+        detection_mask = &context.mask_image;
+    }
+
+    if (!render_frame_to_float_image(asset_root,
+                                     state,
+                                     context.input_image,
+                                     context.output_image,
+                                     detection_mask)) {
+        return false;
+    }
+
+    return pack_bgra128_image_impl(context.output_image, output_pixels, output_row_floats);
+}
+
+bool render_frame_to_bgra128_device_buffer(
+    const std::string& asset_root,
+    const AeParameterState& state,
+    const float* input_pixels,
+    float* output_pixels,
+    int width,
+    int height,
+    int input_row_floats,
+    int output_row_floats,
+    const float* mask_pixels,
+    int mask_row_floats)
+{
+    if (!input_pixels || !output_pixels || width <= 0 || height <= 0 || asset_root.empty()) {
+        return false;
+    }
+
+    ThreadRenderContext& context = thread_render_context();
+    const LensSystem* lens = nullptr;
+    if (!resolve_cached_lens(asset_root, state.lens, context, lens) || !lens) {
+        return false;
+    }
+
+    GhostRenderBackend backend = GhostRenderBackend::CPU;
+    std::string render_error;
+    const bool ok = render_frame_cuda_bgra128(
+        *lens,
+        build_frame_render_settings(state),
+        state.view,
+        input_pixels,
+        output_pixels,
+        width,
+        height,
+        input_row_floats,
+        output_row_floats,
+        mask_pixels,
+        mask_row_floats,
+        context.gpu_cache,
+        &backend,
+        &render_error);
+    (void)backend;
+    return ok;
 }

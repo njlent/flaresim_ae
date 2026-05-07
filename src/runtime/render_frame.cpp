@@ -131,6 +131,7 @@ std::uint64_t hash_lens(const LensSystem& lens)
         hash_append_value(hash, surface.semi_aperture);
         hash_append_value(hash, surface.coating);
         hash_append_value(hash, surface.is_stop);
+        hash_append_value(hash, surface.reflectance_scale);
         hash_append_value(hash, surface.z);
     }
 
@@ -156,8 +157,18 @@ std::uint64_t make_source_key(std::uint64_t scene_key, const FrameRenderSettings
     hash_append_value(hash, settings.sensor_width_mm);
     hash_append_value(hash, settings.sensor_height_mm);
     hash_append_value(hash, settings.focal_length_mm);
+    hash_append_value(hash, settings.anamorphic_squeeze);
     hash_append_value(hash, settings.downsample);
+    hash_append_value(hash, settings.source_cap);
+    hash_append_value(hash, settings.manual_source_enabled);
+    hash_append_value(hash, settings.manual_source_x);
+    hash_append_value(hash, settings.manual_source_y);
+    hash_append_value(hash, settings.manual_source_intensity);
+    hash_append_value(hash, settings.manual_source_r);
+    hash_append_value(hash, settings.manual_source_g);
+    hash_append_value(hash, settings.manual_source_b);
     hash_append_value(hash, settings.max_sources);
+    hash_append_value(hash, settings.cluster_radius_px);
     return hash;
 }
 
@@ -182,17 +193,64 @@ std::uint64_t make_ghost_key(std::uint64_t source_key,
     hash_append_value(hash, settings.min_ghost);
     hash_append_value(hash, settings.flare_gain);
     hash_append_value(hash, settings.spectral_samples);
+    hash_append_value(hash, settings.anamorphic_squeeze);
     hash_append_value(hash, settings.aperture_blades);
     hash_append_value(hash, settings.aperture_rotation_deg);
     hash_append_value(hash, settings.ghost_normalize);
     hash_append_value(hash, settings.max_area_boost);
     hash_append_value(hash, settings.ghost_cleanup_mode);
+    hash_append_value(hash, settings.adaptive_quality);
     hash_append_value(hash, settings.adaptive_sampling_strength);
     hash_append_value(hash, settings.footprint_radius_bias);
     hash_append_value(hash, settings.footprint_clamp);
     hash_append_value(hash, settings.max_adaptive_pair_grid);
+    hash_append_value(hash, settings.pair_start);
+    hash_append_value(hash, settings.pair_count);
+    hash_append_value(hash, settings.surface_art_start);
+    hash_append_value(hash, settings.surface_art_count);
+    hash_append_value(hash, settings.surface_art_gain);
     hash_append_value(hash, settings.projected_cells_mode);
+    hash_append_value(hash, settings.pupil_jitter_mode);
+    hash_append_value(hash, settings.pupil_jitter_seed);
+    hash_append_value(hash, settings.spectral_jitter_mode);
+    hash_append_value(hash, settings.spectral_jitter_seed);
     hash_append_value(hash, settings.cell_coverage_bias);
+    hash_append_value(hash, settings.cell_edge_inset);
+    return hash;
+}
+
+std::uint64_t make_ghost_setup_key(std::uint64_t lens_key,
+                                   float fov_h,
+                                   float fov_v,
+                                   int width,
+                                   int height,
+                                   const FrameRenderSettings& settings)
+{
+    std::uint64_t hash = kFnvOffset;
+    hash_append_value(hash, lens_key);
+    hash_append_value(hash, fov_h);
+    hash_append_value(hash, fov_v);
+    hash_append_value(hash, width);
+    hash_append_value(hash, height);
+    hash_append_value(hash, settings.ray_grid);
+    hash_append_value(hash, settings.min_ghost);
+    hash_append_value(hash, settings.anamorphic_squeeze);
+    hash_append_value(hash, settings.aperture_blades);
+    hash_append_value(hash, settings.aperture_rotation_deg);
+    hash_append_value(hash, settings.ghost_normalize);
+    hash_append_value(hash, settings.max_area_boost);
+    hash_append_value(hash, settings.ghost_cleanup_mode);
+    hash_append_value(hash, settings.adaptive_quality);
+    hash_append_value(hash, settings.adaptive_sampling_strength);
+    hash_append_value(hash, settings.max_adaptive_pair_grid);
+    hash_append_value(hash, settings.pair_start);
+    hash_append_value(hash, settings.pair_count);
+    hash_append_value(hash, settings.surface_art_start);
+    hash_append_value(hash, settings.surface_art_count);
+    hash_append_value(hash, settings.surface_art_gain);
+    hash_append_value(hash, settings.projected_cells_mode);
+    hash_append_value(hash, settings.pupil_jitter_mode);
+    hash_append_value(hash, settings.pupil_jitter_seed);
     hash_append_value(hash, settings.cell_edge_inset);
     return hash;
 }
@@ -308,6 +366,52 @@ void rasterize_sources(const std::vector<BrightPixel>& sources,
     }
 }
 
+bool build_manual_source(const FrameRenderSettings& settings,
+                         float fov_h,
+                         float fov_v,
+                         BrightPixel& out_source)
+{
+    const float intensity = std::max(settings.manual_source_intensity, 0.0f);
+    const float r = std::max(settings.manual_source_r, 0.0f) * intensity;
+    const float g = std::max(settings.manual_source_g, 0.0f) * intensity;
+    const float b = std::max(settings.manual_source_b, 0.0f) * intensity;
+    if (!settings.manual_source_enabled ||
+        intensity <= 0.0f ||
+        !(r > 0.0f || g > 0.0f || b > 0.0f)) {
+        return false;
+    }
+
+    const float tan_half_h = std::tan(fov_h * 0.5f);
+    const float tan_half_v = std::tan(fov_v * 0.5f);
+    out_source.angle_x = std::atan((settings.manual_source_x - 0.5f) * 2.0f * tan_half_h);
+    out_source.angle_y = std::atan((settings.manual_source_y - 0.5f) * 2.0f * tan_half_v);
+    out_source.r = r;
+    out_source.g = g;
+    out_source.b = b;
+    return true;
+}
+
+const LensSystem& select_art_directed_lens(const LensSystem& lens,
+                                           const FrameRenderSettings& settings,
+                                           LensSystem& adjusted_lens)
+{
+    if (std::abs(settings.surface_art_gain - 1.0f) <= 1.0e-6f ||
+        settings.surface_art_start >= lens.num_surfaces()) {
+        return lens;
+    }
+
+    adjusted_lens = lens;
+    const int start = std::clamp(settings.surface_art_start, 0, adjusted_lens.num_surfaces());
+    const int end = settings.surface_art_count > 0
+                        ? std::min(adjusted_lens.num_surfaces(), start + settings.surface_art_count)
+                        : adjusted_lens.num_surfaces();
+    const float gain = std::clamp(settings.surface_art_gain, 0.0f, 16.0f);
+    for (int i = start; i < end; ++i) {
+        adjusted_lens.surfaces[static_cast<std::size_t>(i)].reflectance_scale *= gain;
+    }
+    return adjusted_lens;
+}
+
 } // namespace
 
 void FrameRenderCache::clear()
@@ -323,9 +427,14 @@ void FrameRenderCache::clear()
     detected_sources.clear();
     sources.clear();
 
+    ghost_setup_key = 0;
+    has_ghost_setup = false;
+    ghost_setup = {};
+
     ghost_key = 0;
     has_ghosts = false;
     ghost_backend = GhostRenderBackend::CPU;
+    ghost_gpu_cache.release();
     flare_r.clear();
     flare_g.clear();
     flare_b.clear();
@@ -466,10 +575,21 @@ bool render_frame(
                 settings.downsample,
                 fov_h,
                 fov_v,
+                settings.source_cap,
                 active_detection_mask);
 
             outputs.sources = outputs.detected_sources;
+            cluster_bright_pixels(outputs.sources,
+                                  settings.cluster_radius_px,
+                                  input.width,
+                                  std::tan(fov_h * 0.5f));
             limit_bright_pixels(outputs.sources, static_cast<std::size_t>(settings.max_sources));
+
+            BrightPixel manual_source {};
+            if (build_manual_source(settings, fov_h, fov_v, manual_source)) {
+                outputs.detected_sources.push_back(manual_source);
+                outputs.sources.push_back(manual_source);
+            }
             outputs.stats.recomputed_sources = true;
 
             if (cache) {
@@ -481,7 +601,9 @@ bool render_frame(
         }
     }
 
-    const std::uint64_t lens_key = hash_lens(lens);
+    LensSystem adjusted_lens;
+    const LensSystem& render_lens = select_art_directed_lens(lens, settings, adjusted_lens);
+    const std::uint64_t lens_key = hash_lens(render_lens);
 
     if (plan.need_flare) {
         const std::uint64_t ghost_key = make_ghost_key(source_key, lens_key, settings);
@@ -503,21 +625,63 @@ bool render_frame(
                 ghost.min_intensity = settings.min_ghost;
                 ghost.gain = settings.flare_gain;
                 ghost.spectral_samples = settings.spectral_samples;
+                ghost.anamorphic_squeeze = settings.anamorphic_squeeze;
                 ghost.aperture_blades = settings.aperture_blades;
                 ghost.aperture_rotation_deg = settings.aperture_rotation_deg;
                 ghost.ghost_normalize = settings.ghost_normalize;
                 ghost.max_area_boost = settings.max_area_boost;
                 ghost.cleanup_mode = settings.ghost_cleanup_mode;
+                ghost.adaptive_quality = settings.adaptive_quality;
                 ghost.adaptive_sampling_strength = settings.adaptive_sampling_strength;
                 ghost.footprint_radius_bias = settings.footprint_radius_bias;
                 ghost.footprint_clamp = settings.footprint_clamp;
                 ghost.max_adaptive_pair_grid = settings.max_adaptive_pair_grid;
+                ghost.pair_start_index = settings.pair_start;
+                ghost.pair_count = settings.pair_count;
                 ghost.projected_cells_mode = settings.projected_cells_mode;
+                ghost.pupil_jitter = settings.pupil_jitter_mode;
+                ghost.pupil_jitter_seed = settings.pupil_jitter_seed;
+                ghost.spectral_jitter = settings.spectral_jitter_mode;
+                ghost.spectral_jitter_seed = settings.spectral_jitter_seed;
                 ghost.cell_coverage_bias = settings.cell_coverage_bias;
                 ghost.cell_edge_inset = settings.cell_edge_inset;
 
+                const std::uint64_t ghost_setup_key = make_ghost_setup_key(
+                    lens_key,
+                    fov_h,
+                    fov_v,
+                    input.width,
+                    input.height,
+                    settings);
+
+                GhostRenderSetup local_ghost_setup;
+                const bool ghost_setup_cache_hit =
+                    cache && cache->has_ghost_setup && cache->ghost_setup_key == ghost_setup_key;
+                const GhostRenderSetup* ghost_setup = nullptr;
+                if (ghost_setup_cache_hit) {
+                    ghost_setup = &cache->ghost_setup;
+                } else {
+                    build_ghost_render_setup(render_lens,
+                                             fov_h,
+                                             fov_v,
+                                             input.width,
+                                             input.height,
+                                             ghost,
+                                             local_ghost_setup);
+                    outputs.stats.recomputed_ghost_setup = true;
+
+                    if (cache) {
+                        cache->ghost_setup_key = ghost_setup_key;
+                        cache->has_ghost_setup = true;
+                        cache->ghost_setup = std::move(local_ghost_setup);
+                        ghost_setup = &cache->ghost_setup;
+                    } else {
+                        ghost_setup = &local_ghost_setup;
+                    }
+                }
+
                 render_ghosts(
-                    lens,
+                    render_lens,
                     outputs.sources,
                     fov_h,
                     fov_v,
@@ -527,6 +691,8 @@ bool render_frame(
                     input.width,
                     input.height,
                     ghost,
+                    ghost_setup,
+                    cache ? &cache->ghost_gpu_cache : nullptr,
                     &outputs.ghost_backend);
             }
 
@@ -574,8 +740,10 @@ bool render_frame(
             outputs.haze_g.assign(np, 0.0f);
             outputs.haze_b.assign(np, 0.0f);
 
-            if (!outputs.sources.empty() && settings.haze_gain > 0.0f) {
-                rasterize_sources(outputs.sources,
+            if (!outputs.detected_sources.empty() && settings.haze_gain > 0.0f) {
+                std::vector<BrightPixel> haze_sources = outputs.detected_sources;
+                limit_bright_pixels(haze_sources, static_cast<std::size_t>(settings.max_sources));
+                rasterize_sources(haze_sources,
                                   settings,
                                   input.width,
                                   input.height,

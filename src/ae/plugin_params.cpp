@@ -23,7 +23,9 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_samples_popup = build_spectral_samples_popup_string();
+    const std::string spectral_jitter_popup = build_spectral_jitter_mode_popup_string();
     const std::string ghost_cleanup_popup = build_ghost_cleanup_mode_popup_string();
+    const std::string pupil_jitter_popup = build_pupil_jitter_mode_popup_string();
     const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
 
@@ -175,6 +177,18 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                          PARAM_ID_FOCAL_LENGTH);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Anamorphic Squeeze",
+                         0.1f,
+                         kManualFloatMax,
+                         1.0f,
+                         4.0f,
+                         defaults.anamorphic_squeeze,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_ANAMORPHIC_SQUEEZE);
+
+    AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_CAMERA_SECTION_END);
 
     AEFX_CLR_STRUCT(def);
@@ -220,6 +234,18 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PARAM_ID_PROJECTED_CELLS_MODE);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Adaptive Quality",
+                         0.25f,
+                         kManualFloatMax,
+                         0.25f,
+                         2.0f,
+                         defaults.adaptive_quality,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_ADAPTIVE_QUALITY);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Flare Gain",
                          0.0f,
                          kManualFloatMax,
@@ -256,6 +282,96 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                          PARAM_ID_THRESHOLD);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Cap",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         64.0f,
+                         defaults.source_cap,
+                         4,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_SOURCE_CAP);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("Manual Source",
+                     defaults.manual_source_enabled,
+                     PF_ParamFlag_NONE,
+                     PARAM_ID_MANUAL_SOURCE_ENABLED);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source X",
+                         -kManualFloatMax,
+                         kManualFloatMax,
+                         -1.0f,
+                         2.0f,
+                         defaults.manual_source_x,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_X);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Y",
+                         -kManualFloatMax,
+                         kManualFloatMax,
+                         -1.0f,
+                         2.0f,
+                         defaults.manual_source_y,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_Y);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Intensity",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         256.0f,
+                         defaults.manual_source_intensity,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_INTENSITY);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Red",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.manual_source_r,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_R);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Green",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.manual_source_g,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_G);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Source Blue",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.manual_source_b,
+                         3,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_MANUAL_SOURCE_B);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Ray Grid",
                   1,
                   kManualIntMax,
@@ -281,6 +397,56 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   512,
                   defaults.max_sources,
                   PARAM_ID_MAX_SOURCES);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Cluster Radius",
+                  0,
+                  kManualIntMax,
+                  0,
+                  256,
+                  defaults.cluster_radius_px,
+                  PARAM_ID_CLUSTER_RADIUS);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("Preview Mode",
+                     defaults.preview_mode,
+                     PF_ParamFlag_NONE,
+                     PARAM_ID_PREVIEW_MODE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Preview Ray Grid",
+                  1,
+                  kManualIntMax,
+                  1,
+                  128,
+                  defaults.preview_ray_grid,
+                  PARAM_ID_PREVIEW_RAY_GRID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Preview Max Sources",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.preview_max_sources,
+                  PARAM_ID_PREVIEW_MAX_SOURCES);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Preview Downsample",
+                  1,
+                  kManualIntMax,
+                  1,
+                  24,
+                  defaults.preview_downsample,
+                  PARAM_ID_PREVIEW_DOWNSAMPLE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Preview Spectral Samples",
+                  static_cast<A_short>(spectral_samples_popup_count()),
+                  static_cast<A_short>(defaults.preview_spectral_samples_index),
+                  spectral_samples_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_PREVIEW_SPECTRAL_SAMPLES);
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_FLARE_SECTION_END);
@@ -376,6 +542,23 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   PF_ParamFlag_NONE,
                   PARAM_ID_SPECTRAL_SAMPLES);
 
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Spectral Jitter",
+                  static_cast<A_short>(spectral_jitter_mode_popup_count()),
+                  static_cast<A_short>(defaults.spectral_jitter_mode_index),
+                  spectral_jitter_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_SPECTRAL_JITTER_MODE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Spectral Seed",
+                  0,
+                  kManualIntMax,
+                  0,
+                  1000000,
+                  defaults.spectral_jitter_seed,
+                  PARAM_ID_SPECTRAL_JITTER_SEED);
+
     // Keep disk IDs stable for saved comps; only the UI order changes here.
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX("Ghost Cleanup",
@@ -434,6 +617,77 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
                   512,
                   defaults.max_adaptive_pair_grid,
                   PARAM_ID_MAX_ADAPTIVE_PAIR_GRID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Pair Start",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.pair_start,
+                  PARAM_ID_PAIR_START);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Pair Count",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.pair_count,
+                  PARAM_ID_PAIR_COUNT);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Surface Start",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.surface_art_start,
+                  PARAM_ID_SURFACE_ART_START);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Surface Count",
+                  0,
+                  kManualIntMax,
+                  0,
+                  512,
+                  defaults.surface_art_count,
+                  PARAM_ID_SURFACE_ART_COUNT);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Surface Gain",
+                         0.0f,
+                         kManualFloatMax,
+                         0.0f,
+                         4.0f,
+                         defaults.surface_art_gain,
+                         2,
+                         PF_ValueDisplayFlag_NONE,
+                         PF_ParamFlag_NONE,
+                         PARAM_ID_SURFACE_ART_GAIN);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Pupil Jitter",
+                  static_cast<A_short>(pupil_jitter_mode_popup_count()),
+                  static_cast<A_short>(defaults.pupil_jitter_mode_index),
+                  pupil_jitter_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_PUPIL_JITTER_MODE);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Jitter Seed",
+                  0,
+                  kManualIntMax,
+                  0,
+                  1000000,
+                  defaults.pupil_jitter_seed,
+                  PARAM_ID_PUPIL_JITTER_SEED);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("Auto Seed",
+                     defaults.pupil_jitter_auto_seed,
+                     PF_ParamFlag_NONE,
+                     PARAM_ID_PUPIL_JITTER_AUTO_SEED);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Cell Coverage",

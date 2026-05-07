@@ -20,9 +20,9 @@
 #include <algorithm>
 #include <vector>
 #include <chrono>
-#include <random>
 #include <atomic>
 #include <array>
+#include <cstdint>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -57,6 +57,7 @@ const char* ghost_render_backend_name(GhostRenderBackend backend)
 int select_ghost_pair_ray_grid(int base_ray_grid,
                                float estimated_extent_px,
                                float distortion_score,
+                               float adaptive_quality,
                                float adaptive_sampling_strength,
                                int max_adaptive_pair_grid)
 {
@@ -64,19 +65,21 @@ int select_ghost_pair_ray_grid(int base_ray_grid,
         return 0;
     }
 
+    const float quality = std::clamp(adaptive_quality, 0.25f, 2.0f);
     const float strength = std::clamp(adaptive_sampling_strength, 0.0f, 2.0f);
-    const int min_grid = std::max(4, base_ray_grid / 2);
-    const int auto_max_grid = std::max(base_ray_grid, base_ray_grid * 2);
+    const int quality_grid = std::max(4, static_cast<int>(std::lround(base_ray_grid * quality)));
+    const int min_grid = std::max(4, quality_grid / 2);
+    const int auto_max_grid = std::max(quality_grid, static_cast<int>(std::lround(base_ray_grid * quality * 2.0f)));
     const int max_grid = max_adaptive_pair_grid > 0
-        ? std::max(base_ray_grid, max_adaptive_pair_grid)
+        ? std::max(quality_grid, max_adaptive_pair_grid)
         : auto_max_grid;
-    const float approx_valid_samples = std::max(0.78539816339f * base_ray_grid * base_ray_grid, 1.0f);
+    const float approx_valid_samples = std::max(0.78539816339f * quality_grid * quality_grid, 1.0f);
     const float linear_density = std::sqrt(approx_valid_samples);
     const float sample_spacing_px = estimated_extent_px / linear_density;
-    const float promote_spacing = std::max(1.5f, 3.5f - strength * 1.25f);
-    const float demote_spacing = std::max(0.75f, 1.25f + (1.0f - strength) * 0.4f);
-    const float promote_distortion = std::max(0.02f, 0.12f - strength * 0.04f);
-    const float demote_distortion = std::max(0.0f, 0.03f + (1.0f - strength) * 0.02f);
+    const float promote_spacing = std::max(1.5f, 3.5f - strength * 1.25f) / std::sqrt(quality);
+    const float demote_spacing = std::max(0.75f, 1.25f + (1.0f - strength) * 0.4f) * std::sqrt(quality);
+    const float promote_distortion = std::max(0.02f, 0.12f - strength * 0.04f) / quality;
+    const float demote_distortion = std::max(0.0f, 0.03f + (1.0f - strength) * 0.02f) * quality;
 
     if (strength > 0.0f && (sample_spacing_px > promote_spacing || distortion_score > promote_distortion)) {
         return max_grid;
@@ -84,24 +87,15 @@ int select_ghost_pair_ray_grid(int base_ray_grid,
     if (strength < 1.75f && sample_spacing_px < demote_spacing && distortion_score < demote_distortion) {
         return min_grid;
     }
-    return base_ray_grid;
+    return quality_grid;
 }
 
 // ---------------------------------------------------------------------------
 // Bilinear splat: distribute a contribution to 4 neighbouring pixels.
 // ---------------------------------------------------------------------------
 
-struct GridSample
-{
-    float u, v;
-};
-
-struct GridCell
-{
-    float u0, v0;
-    float u1, v1;
-    float uc, vc;
-};
+using GridSample = GhostGridSample;
+using GridCell = GhostGridCell;
 
 struct PixelPoint
 {
@@ -119,6 +113,116 @@ struct GhostSampleFootprint
     float anisotropy = 1.0f;
     bool valid = false;
 };
+
+struct SpectralSample
+{
+    float lambda = 550.0f;
+    float rw = 0.0f;
+    float gw = 0.0f;
+    float bw = 0.0f;
+};
+
+static std::uint32_t wang_hash(std::uint32_t value)
+{
+    value = (value ^ 61u) ^ (value >> 16u);
+    value *= 9u;
+    value ^= value >> 4u;
+    value *= 0x27d4eb2du;
+    value ^= value >> 15u;
+    return value;
+}
+
+static float unit_from_hash(std::uint32_t value)
+{
+    return static_cast<float>(wang_hash(value)) * (1.0f / 4294967296.0f);
+}
+
+static float halton2(std::uint32_t value)
+{
+    value = (value << 16u) | (value >> 16u);
+    value = ((value & 0x00ff00ffu) << 8u) | ((value & 0xff00ff00u) >> 8u);
+    value = ((value & 0x0f0f0f0fu) << 4u) | ((value & 0xf0f0f0f0u) >> 4u);
+    value = ((value & 0x33333333u) << 2u) | ((value & 0xccccccccu) >> 2u);
+    value = ((value & 0x55555555u) << 1u) | ((value & 0xaaaaaaaau) >> 1u);
+    return static_cast<float>(value) * (1.0f / 4294967296.0f);
+}
+
+static float cie_r_weight(float lambda)
+{
+    const float a = (lambda - 600.0f) / 70.0f;
+    const float b = (lambda - 450.0f) / 30.0f;
+    return std::max(0.0f, 0.63f * std::exp(-0.5f * a * a) +
+                               0.22f * std::exp(-0.5f * b * b));
+}
+
+static float cie_g_weight(float lambda)
+{
+    const float a = (lambda - 545.0f) / 55.0f;
+    return std::max(0.0f, std::exp(-0.5f * a * a));
+}
+
+static float cie_b_weight(float lambda)
+{
+    const float a = (lambda - 445.0f) / 45.0f;
+    return std::max(0.0f, std::exp(-0.5f * a * a));
+}
+
+static std::vector<SpectralSample> build_spectral_samples(const GhostConfig& config)
+{
+    const int sample_count = std::max(3, config.spectral_samples);
+    std::vector<SpectralSample> samples(static_cast<std::size_t>(sample_count));
+
+    if (sample_count == 3) {
+        samples[0] = {config.wavelengths[0], 1.0f, 0.0f, 0.0f};
+        samples[1] = {config.wavelengths[1], 0.0f, 1.0f, 0.0f};
+        samples[2] = {config.wavelengths[2], 0.0f, 0.0f, 1.0f};
+        return samples;
+    }
+
+    const std::uint32_t seed_offset =
+        static_cast<std::uint32_t>(std::max(config.spectral_jitter_seed, 0)) * 1000003u;
+    const bool jitter = config.spectral_jitter != SpectralJitterMode::Off;
+
+    float sum_r = 0.0f;
+    float sum_g = 0.0f;
+    float sum_b = 0.0f;
+    for (int i = 0; i < sample_count; ++i) {
+        float lambda = 400.0f + (300.0f * i) / (sample_count - 1);
+        if (jitter) {
+            const float j =
+                config.spectral_jitter == SpectralJitterMode::Halton
+                    ? halton2(static_cast<std::uint32_t>(i + 1) + seed_offset)
+                    : unit_from_hash(static_cast<std::uint32_t>(i) + seed_offset);
+            lambda = 400.0f + 300.0f * (static_cast<float>(i) + j) / sample_count;
+        }
+
+        SpectralSample sample {};
+        sample.lambda = std::clamp(lambda, 400.0f, 700.0f);
+        sample.rw = cie_r_weight(sample.lambda);
+        sample.gw = cie_g_weight(sample.lambda);
+        sample.bw = cie_b_weight(sample.lambda);
+        sum_r += sample.rw;
+        sum_g += sample.gw;
+        sum_b += sample.bw;
+        samples[static_cast<std::size_t>(i)] = sample;
+    }
+
+    for (SpectralSample& sample : samples) {
+        if (sum_r > 1.0e-9f) sample.rw /= sum_r;
+        if (sum_g > 1.0e-9f) sample.gw /= sum_g;
+        if (sum_b > 1.0e-9f) sample.bw /= sum_b;
+    }
+
+    return samples;
+}
+
+static float effective_sensor_half_w(const LensSystem& lens,
+                                     float fov_h,
+                                     const GhostConfig& config)
+{
+    const float squeeze = std::clamp(config.anamorphic_squeeze, 0.1f, 8.0f);
+    return lens.focal_length * std::tan(fov_h * 0.5f) / squeeze;
+}
 
 static bool is_valid_pupil_sample(float u,
                                   float v,
@@ -624,18 +728,63 @@ static float estimate_ghost_spread(const LensSystem &lens,
 
 static std::vector<GridSample> build_grid_samples(int ray_grid,
                                                   int aperture_blades,
-                                                  float aperture_rotation_deg)
+                                                  float aperture_rotation_deg,
+                                                  PupilJitterMode jitter_mode,
+                                                  int jitter_seed)
 {
     std::vector<GridSample> grid_samples;
     grid_samples.reserve(ray_grid * ray_grid);
 
-    for (int gy = 0; gy < ray_grid; ++gy) {
-        for (int gx = 0; gx < ray_grid; ++gx) {
-            const float u = ((gx + 0.5f) / ray_grid) * 2.0f - 1.0f;
-            const float v = ((gy + 0.5f) / ray_grid) * 2.0f - 1.0f;
-            if (is_valid_pupil_sample(u, v, aperture_blades, aperture_rotation_deg)) {
-                grid_samples.push_back({u, v});
-            }
+    auto wang_hash = [](std::uint32_t value) {
+        value = (value ^ 61u) ^ (value >> 16u);
+        value *= 9u;
+        value ^= value >> 4u;
+        value *= 0x27d4eb2du;
+        value ^= value >> 15u;
+        return value;
+    };
+    auto halton2 = [](std::uint32_t value) {
+        value = (value << 16u) | (value >> 16u);
+        value = ((value & 0x00ff00ffu) << 8u) | ((value & 0xff00ff00u) >> 8u);
+        value = ((value & 0x0f0f0f0fu) << 4u) | ((value & 0xf0f0f0f0u) >> 4u);
+        value = ((value & 0x33333333u) << 2u) | ((value & 0xccccccccu) >> 2u);
+        value = ((value & 0x55555555u) << 1u) | ((value & 0xaaaaaaaau) >> 1u);
+        return static_cast<float>(value) * (1.0f / 4294967296.0f);
+    };
+    auto halton3 = [](std::uint32_t value) {
+        float result = 0.0f;
+        float factor = 1.0f / 3.0f;
+        while (value > 0) {
+            result += static_cast<float>(value % 3u) * factor;
+            value /= 3u;
+            factor /= 3.0f;
+        }
+        return result;
+    };
+
+    const std::uint32_t seed_offset = static_cast<std::uint32_t>(std::max(jitter_seed, 0)) * 1000003u;
+    const int candidate_count = ray_grid * ray_grid;
+    for (int k = 0; k < candidate_count; ++k) {
+        const int gx = k % ray_grid;
+        const int gy = k / ray_grid;
+        float u = 0.0f;
+        float v = 0.0f;
+        if (jitter_mode == PupilJitterMode::Halton) {
+            u = halton2(static_cast<std::uint32_t>(k)) * 2.0f - 1.0f;
+            v = halton3(static_cast<std::uint32_t>(k)) * 2.0f - 1.0f;
+        } else {
+            const float ju = jitter_mode == PupilJitterMode::Stratified
+                ? static_cast<float>(wang_hash(static_cast<std::uint32_t>(k) + seed_offset)) * (1.0f / 4294967296.0f)
+                : 0.5f;
+            const float jv = jitter_mode == PupilJitterMode::Stratified
+                ? static_cast<float>(wang_hash(static_cast<std::uint32_t>(k + candidate_count) + seed_offset)) * (1.0f / 4294967296.0f)
+                : 0.5f;
+            u = ((gx + ju) / ray_grid) * 2.0f - 1.0f;
+            v = ((gy + jv) / ray_grid) * 2.0f - 1.0f;
+        }
+
+        if (is_valid_pupil_sample(u, v, aperture_blades, aperture_rotation_deg)) {
+            grid_samples.push_back({u, v});
         }
     }
 
@@ -678,6 +827,32 @@ static std::vector<GridCell> build_grid_cells(int ray_grid,
     }
 
     return cells;
+}
+
+static GhostGridBucket build_grid_bucket(int ray_grid, const GhostConfig& config)
+{
+    GhostGridBucket bucket;
+    bucket.ray_grid = ray_grid;
+    bucket.samples = build_grid_samples(ray_grid,
+                                        config.aperture_blades,
+                                        config.aperture_rotation_deg,
+                                        config.pupil_jitter,
+                                        config.pupil_jitter_seed);
+    bucket.cells = build_grid_cells(ray_grid,
+                                    config.aperture_blades,
+                                    config.aperture_rotation_deg,
+                                    config.cell_edge_inset);
+    return bucket;
+}
+
+static const GhostGridBucket* find_grid_bucket(const GhostRenderSetup& setup, int ray_grid)
+{
+    const auto it = std::find_if(setup.grid_buckets.begin(),
+                                 setup.grid_buckets.end(),
+                                 [&](const GhostGridBucket& bucket) {
+                                     return bucket.ray_grid == ray_grid;
+                                 });
+    return it != setup.grid_buckets.end() ? &(*it) : nullptr;
 }
 
 static float estimate_ghost_distortion(const LensSystem& lens,
@@ -878,7 +1053,7 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
     }
 
     const auto pairs = enumerate_ghost_pairs(lens);
-    const float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
+    const float sensor_half_w = effective_sensor_half_w(lens, fov_h, config);
     const float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
 
     for (const GhostPair& pair : pairs) {
@@ -946,6 +1121,7 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
         plan.ray_grid = select_ghost_pair_ray_grid(config.ray_grid,
                                                    plan.estimated_extent_px,
                                                    plan.distortion_score,
+                                                   config.adaptive_quality,
                                                    config.adaptive_sampling_strength,
                                                    config.max_adaptive_pair_grid);
 
@@ -962,7 +1138,60 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
         plans.push_back(plan);
     }
 
+    if ((!plans.empty()) && (config.pair_start_index > 0 || config.pair_count > 0)) {
+        const int start = std::clamp(config.pair_start_index, 0, static_cast<int>(plans.size()));
+        const int end = config.pair_count > 0
+                            ? std::min(static_cast<int>(plans.size()), start + config.pair_count)
+                            : static_cast<int>(plans.size());
+        if (start >= end) {
+            plans.clear();
+        } else {
+            plans = std::vector<GhostPairPlan>(plans.begin() + start, plans.begin() + end);
+        }
+    }
+
     return plans;
+}
+
+bool build_ghost_render_setup(const LensSystem& lens,
+                              float fov_h,
+                              float fov_v,
+                              int width,
+                              int height,
+                              const GhostConfig& config,
+                              GhostRenderSetup& out_setup)
+{
+    out_setup = {};
+    if (width <= 0 || height <= 0 || lens.num_surfaces() <= 0 || config.ray_grid <= 0) {
+        return false;
+    }
+
+    out_setup.active_pair_plans = plan_active_ghost_pairs(lens, fov_h, fov_v, width, height, config);
+    out_setup.min_pair_grid = config.ray_grid;
+    out_setup.max_pair_grid = config.ray_grid;
+
+    std::vector<int> unique_grids;
+    unique_grids.reserve(out_setup.active_pair_plans.size() + 1);
+    unique_grids.push_back(config.ray_grid);
+
+    for (const GhostPairPlan& pair_plan : out_setup.active_pair_plans) {
+        if (std::find(unique_grids.begin(), unique_grids.end(), pair_plan.ray_grid) == unique_grids.end()) {
+            unique_grids.push_back(pair_plan.ray_grid);
+        }
+        out_setup.min_pair_grid = std::min(out_setup.min_pair_grid, pair_plan.ray_grid);
+        out_setup.max_pair_grid = std::max(out_setup.max_pair_grid, pair_plan.ray_grid);
+    }
+
+    out_setup.grid_buckets.reserve(unique_grids.size());
+    for (int ray_grid : unique_grids) {
+        GhostGridBucket bucket = build_grid_bucket(ray_grid, config);
+        out_setup.max_valid_grid_count = std::max(out_setup.max_valid_grid_count,
+                                                  static_cast<int>(bucket.samples.size()));
+        out_setup.grid_buckets.push_back(std::move(bucket));
+    }
+
+    const GhostGridBucket* base_bucket = find_grid_bucket(out_setup, config.ray_grid);
+    return base_bucket && !base_bucket->samples.empty();
 }
 
 // ---------------------------------------------------------------------------
@@ -975,6 +1204,8 @@ void render_ghosts(const LensSystem &lens,
                    float *out_r, float *out_g, float *out_b,
                    int width, int height,
                    const GhostConfig &config,
+                   const GhostRenderSetup* setup,
+                   GpuBufferCache* gpu_cache,
                    GhostRenderBackend* out_backend)
 {
     if (out_backend) {
@@ -985,7 +1216,7 @@ void render_ghosts(const LensSystem &lens,
     printf("Total ghost pairs: %zu\n", pairs.size());
 
     // Sensor dimensions from focal length and FOV
-    float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
+    float sensor_half_w = effective_sensor_half_w(lens, fov_h, config);
     float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
 
     // Entrance pupil sampling setup
@@ -994,52 +1225,27 @@ void render_ghosts(const LensSystem &lens,
     int N = config.ray_grid;
     size_t num_px = (size_t)width * height;
 
-    const auto active_pair_plans = plan_active_ghost_pairs(lens, fov_h, fov_v, width, height, config);
-
-    std::vector<std::pair<int, std::vector<GridSample>>> grid_sample_cache;
-    grid_sample_cache.emplace_back(config.ray_grid,
-                                   build_grid_samples(config.ray_grid,
-                                                      config.aperture_blades,
-                                                      config.aperture_rotation_deg));
-    std::vector<std::pair<int, std::vector<GridCell>>> grid_cell_cache;
-    grid_cell_cache.emplace_back(config.ray_grid,
-                                 build_grid_cells(config.ray_grid,
-                                                  config.aperture_blades,
-                                                  config.aperture_rotation_deg,
-                                                  config.cell_edge_inset));
-    int max_valid_grid_count = static_cast<int>(grid_sample_cache.front().second.size());
-    int min_pair_grid = config.ray_grid;
-    int max_pair_grid = config.ray_grid;
-    for (const GhostPairPlan& pair_plan : active_pair_plans) {
-        const auto existing = std::find_if(grid_sample_cache.begin(),
-                                           grid_sample_cache.end(),
-                                           [&](const auto& entry) {
-                                               return entry.first == pair_plan.ray_grid;
-                                           });
-        if (existing == grid_sample_cache.end()) {
-            grid_sample_cache.emplace_back(pair_plan.ray_grid,
-                                           build_grid_samples(pair_plan.ray_grid,
-                                                              config.aperture_blades,
-                                                              config.aperture_rotation_deg));
-            grid_cell_cache.emplace_back(pair_plan.ray_grid,
-                                         build_grid_cells(pair_plan.ray_grid,
-                                                          config.aperture_blades,
-                                                          config.aperture_rotation_deg,
-                                                          config.cell_edge_inset));
-            max_valid_grid_count = std::max(max_valid_grid_count,
-                                            static_cast<int>(grid_sample_cache.back().second.size()));
-        }
-        min_pair_grid = std::min(min_pair_grid, pair_plan.ray_grid);
-        max_pair_grid = std::max(max_pair_grid, pair_plan.ray_grid);
+    GhostRenderSetup local_setup;
+    if (!setup) {
+        build_ghost_render_setup(lens, fov_h, fov_v, width, height, config, local_setup);
+        setup = &local_setup;
     }
 
-    if (grid_sample_cache.front().second.empty()) {
+    const GhostGridBucket* base_bucket = find_grid_bucket(*setup, config.ray_grid);
+    if (!base_bucket || base_bucket->samples.empty()) {
         fprintf(stderr, "WARNING: no valid entrance pupil samples\n");
         return;
     }
 
+    const auto& active_pair_plans = setup->active_pair_plans;
+    const int max_valid_grid_count = std::max(setup->max_valid_grid_count,
+                                              static_cast<int>(base_bucket->samples.size()));
+    const int min_pair_grid = setup->min_pair_grid;
+    const int max_pair_grid = setup->max_pair_grid;
+
+
     printf("Entrance pupil: %.2f mm radius, base %d×%d grid → %zu rays/source\n",
-           front_R, N, N, grid_sample_cache.front().second.size());
+           front_R, N, N, base_bucket->samples.size());
     printf("Bright sources: %zu\n", sources.size());
     printf("Sensor: %.2f × %.2f mm (at z = %.2f mm)\n",
            sensor_half_w * 2, sensor_half_h * 2, lens.sensor_z);
@@ -1059,11 +1265,12 @@ void render_ghosts(const LensSystem &lens,
     }
 
     if (!active_pair_plans.empty() && !sources.empty()) {
-        thread_local GpuBufferCache gpu_cache;
+        thread_local GpuBufferCache fallback_gpu_cache;
+        GpuBufferCache& cuda_cache = gpu_cache ? *gpu_cache : fallback_gpu_cache;
         std::string cuda_error;
 
         if (launch_ghost_cuda(lens,
-                              active_pair_plans,
+                              *setup,
                               sources,
                               sensor_half_w,
                               sensor_half_h,
@@ -1073,7 +1280,7 @@ void render_ghosts(const LensSystem &lens,
                               width,
                               height,
                               config,
-                              gpu_cache,
+                              cuda_cache,
                               &cuda_error)) {
             if (out_backend) {
                 *out_backend = GhostRenderBackend::CUDA;
@@ -1093,6 +1300,7 @@ void render_ghosts(const LensSystem &lens,
            config.cleanup_mode == GhostCleanupMode::LegacyBlur
                ? "legacy bilinear"
                : "sharp adaptive");
+    const std::vector<SpectralSample> spectral_samples = build_spectral_samples(config);
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -1151,21 +1359,12 @@ void render_ghosts(const LensSystem &lens,
         int a = pair_plan.pair.surf_a;
         int b = pair_plan.pair.surf_b;
         const float area_boost = pair_plan.area_boost;
-        const auto grid_it = std::find_if(grid_sample_cache.begin(),
-                                          grid_sample_cache.end(),
-                                          [&](const auto& entry) {
-                                              return entry.first == pair_plan.ray_grid;
-                                          });
-        const auto cell_it = std::find_if(grid_cell_cache.begin(),
-                                          grid_cell_cache.end(),
-                                          [&](const auto& entry) {
-                                              return entry.first == pair_plan.ray_grid;
-                                          });
-        if (grid_it == grid_sample_cache.end() || grid_it->second.empty()) {
+        const GhostGridBucket* pair_bucket = find_grid_bucket(*setup, pair_plan.ray_grid);
+        if (!pair_bucket || pair_bucket->samples.empty()) {
             continue;
         }
-        const auto& pair_grid_samples = grid_it->second;
-        const auto& pair_grid_cells = (cell_it != grid_cell_cache.end()) ? cell_it->second : grid_cell_cache.front().second;
+        const auto& pair_grid_samples = pair_bucket->samples;
+        const auto& pair_grid_cells = !pair_bucket->cells.empty() ? pair_bucket->cells : base_bucket->cells;
         const int valid_grid_count = static_cast<int>(pair_grid_samples.size());
         const float ray_weight = 1.0f / valid_grid_count;
         const float cell_size = 2.0f / pair_plan.ray_grid;
@@ -1176,14 +1375,13 @@ void render_ghosts(const LensSystem &lens,
         // Hit record for collect-then-splat
         struct SplatHit
         {
-            float px, py, value, radius;
-            int ch;
+            float px, py, r, g, b, radius;
         };
 
         // Pre-allocate hit buffer once per thread — max possible hits is
         // grid_samples × 3 channels.  Reused across sources without heap alloc.
         std::vector<SplatHit> hit_buf;
-        hit_buf.reserve((size_t)max_valid_grid_count * std::max(config.spectral_samples, 3));
+        hit_buf.reserve(static_cast<size_t>(max_valid_grid_count) * spectral_samples.size());
 
         // Process every bright source for this ghost pair
         for (int si = 0; si < (int)sources.size(); ++si)
@@ -1222,7 +1420,7 @@ void render_ghosts(const LensSystem &lens,
                                                cell_v11,
                                                cell_u01,
                                                cell_v01);
-                    for (int ch = 0; ch < 3; ++ch)
+                    for (const SpectralSample& sample : spectral_samples)
                     {
                         float p00x = 0.0f, p00y = 0.0f;
                         float p10x = 0.0f, p10y = 0.0f;
@@ -1233,19 +1431,19 @@ void render_ghosts(const LensSystem &lens,
                         float w11 = 0.0f;
                         float w01 = 0.0f;
                         if (!trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u00, cell_v00, config.wavelengths[ch],
+                                                            cell_u00, cell_v00, sample.lambda,
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p00x, p00y, &w00) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u10, cell_v10, config.wavelengths[ch],
+                                                            cell_u10, cell_v10, sample.lambda,
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p10x, p10y, &w10) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u11, cell_v11, config.wavelengths[ch],
+                                                            cell_u11, cell_v11, sample.lambda,
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p11x, p11y, &w11) ||
                             !trace_ghost_sensor_position_px(lens, a, b, beam_dir,
-                                                            cell_u01, cell_v01, config.wavelengths[ch],
+                                                            cell_u01, cell_v01, sample.lambda,
                                                             front_R, start_z, sensor_half_w, sensor_half_h,
                                                             width, height, p01x, p01y, &w01)) {
                             continue;
@@ -1279,7 +1477,6 @@ void render_ghosts(const LensSystem &lens,
                                                                                footprint.area_px2);
                         attempts += 4;
                         hits += 4;
-                        const float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g : src.b;
                         const float total_area =
                             std::abs(signed_triangle_area(p00, p10, p11)) +
                             std::abs(signed_triangle_area(p00, p11, p01));
@@ -1291,34 +1488,61 @@ void render_ghosts(const LensSystem &lens,
                         }
                         const float avg_weight = weighted_integral / total_area;
                         const float contribution =
-                            src_i * avg_weight * cell_weight * config.gain * density_boost;
+                            avg_weight * cell_weight * config.gain * density_boost;
                         if (contribution < 1.0e-12f) {
                             continue;
                         }
 
-                        auto& buf = (ch == 0) ? tbuf_r[tid] : (ch == 1) ? tbuf_g[tid] : tbuf_b[tid];
-                        rasterize_quad_linear(buf.data(),
-                                              width,
-                                              height,
-                                              p00,
-                                              p10,
-                                              p11,
-                                              p01,
-                                              w00,
-                                              w10,
-                                              w11,
-                                              w01,
-                                              contribution);
+                        const float cr = src.r * sample.rw * contribution;
+                        const float cg = src.g * sample.gw * contribution;
+                        const float cb = src.b * sample.bw * contribution;
+                        if (cr > 1.0e-12f) {
+                            rasterize_quad_linear(tbuf_r[tid].data(),
+                                                  width,
+                                                  height,
+                                                  p00,
+                                                  p10,
+                                                  p11,
+                                                  p01,
+                                                  w00,
+                                                  w10,
+                                                  w11,
+                                                  w01,
+                                                  cr);
+                        }
+                        if (cg > 1.0e-12f) {
+                            rasterize_quad_linear(tbuf_g[tid].data(),
+                                                  width,
+                                                  height,
+                                                  p00,
+                                                  p10,
+                                                  p11,
+                                                  p01,
+                                                  w00,
+                                                  w10,
+                                                  w11,
+                                                  w01,
+                                                  cg);
+                        }
+                        if (cb > 1.0e-12f) {
+                            rasterize_quad_linear(tbuf_b[tid].data(),
+                                                  width,
+                                                  height,
+                                                  p00,
+                                                  p10,
+                                                  p11,
+                                                  p01,
+                                                  w00,
+                                                  w10,
+                                                  w11,
+                                                  w01,
+                                                  cb);
+                        }
                     }
                 }
 
                 continue;
             }
-
-            // Per-source RNG for stratified jitter (seeded by source index
-            // and ghost pair to get different patterns per pair)
-            std::mt19937 rng((unsigned)(si * 7919 + a * 131 + b * 1031));
-            std::uniform_real_distribution<float> jitter(0.0f, 1.0f);
 
             // ---- Pass 1: trace all rays and collect hits ----
             hit_buf.clear(); // reuse capacity, no realloc
@@ -1331,12 +1555,8 @@ void render_ghosts(const LensSystem &lens,
 
             for (int gi = 0; gi < valid_grid_count; ++gi)
             {
-                // Stratified: jitter within cell, using pre-computed base (u,v)
-                float u = pair_grid_samples[gi].u + (jitter(rng) - 0.5f) * cell_size;
-                float v = pair_grid_samples[gi].v + (jitter(rng) - 0.5f) * cell_size;
-                if (!is_valid_pupil_sample(u, v, config.aperture_blades, config.aperture_rotation_deg)) {
-                    continue;
-                }
+                const float u = pair_grid_samples[gi].u;
+                const float v = pair_grid_samples[gi].v;
 
                 Ray ray;
                 ray.origin = Vec3f(u * front_R, v * front_R, start_z);
@@ -1373,11 +1593,11 @@ void render_ghosts(const LensSystem &lens,
                 }
 
                 // Trace each wavelength independently (chromatic dispersion)
-                for (int ch = 0; ch < 3; ++ch)
+                for (const SpectralSample& sample : spectral_samples)
                 {
                     ++attempts;
                     TraceResult res = trace_ghost_ray(ray, lens, a, b,
-                                                      config.wavelengths[ch]);
+                                                      sample.lambda);
                     if (!res.valid)
                         continue;
 
@@ -1387,18 +1607,20 @@ void render_ghosts(const LensSystem &lens,
                     float px = (res.position.x / (2.0f * sensor_half_w) + 0.5f) * width;
                     float py = (res.position.y / (2.0f * sensor_half_h) + 0.5f) * height;
 
-                    // Source intensity for this channel
-                    float src_i = (ch == 0) ? src.r : (ch == 1) ? src.g
-                                                                : src.b;
-                    float contribution = src_i * res.weight * ray_weight * config.gain * local_density_boost;
+                    float contribution = res.weight * ray_weight * config.gain * local_density_boost;
 
                     if (contribution < 1e-12f)
                         continue;
 
-                    hit_buf.push_back({px, py, contribution, local_radius_px, ch});
+                    hit_buf.push_back({px,
+                                       py,
+                                       src.r * sample.rw * contribution,
+                                       src.g * sample.gw * contribution,
+                                       src.b * sample.bw * contribution,
+                                       local_radius_px});
 
-                    // Update bounding box from green channel
-                    if (ch == 1)
+                    // Update bounding box from the green-weighted spectrum.
+                    if (sample.gw > 0.0f)
                     {
                         bbox_min_x = std::min(bbox_min_x, px);
                         bbox_max_x = std::max(bbox_max_x, px);
@@ -1434,19 +1656,33 @@ void render_ghosts(const LensSystem &lens,
             // ---- Pass 2: splat all collected hits ----
             for (auto &h : hit_buf)
             {
-               auto &buf = (h.ch == 0)   ? tbuf_r[tid]
-                            : (h.ch == 1) ? tbuf_g[tid]
-                                          : tbuf_b[tid];
                 if (config.cleanup_mode == GhostCleanupMode::LegacyBlur) {
-                    splat_bilinear(buf.data(), width, height, h.px, h.py, h.value);
+                    splat_bilinear(tbuf_r[tid].data(), width, height, h.px, h.py, h.r);
+                    splat_bilinear(tbuf_g[tid].data(), width, height, h.px, h.py, h.g);
+                    splat_bilinear(tbuf_b[tid].data(), width, height, h.px, h.py, h.b);
                 } else {
-                    splat_tent(buf.data(),
+                    const float radius = std::max(adaptive_r, h.radius);
+                    splat_tent(tbuf_r[tid].data(),
                                width,
                                height,
                                h.px,
                                h.py,
-                               h.value,
-                               std::max(adaptive_r, h.radius));
+                               h.r,
+                               radius);
+                    splat_tent(tbuf_g[tid].data(),
+                               width,
+                               height,
+                               h.px,
+                               h.py,
+                               h.g,
+                               radius);
+                    splat_tent(tbuf_b[tid].data(),
+                               width,
+                               height,
+                               h.px,
+                               h.py,
+                               h.b,
+                               radius);
                 }
             }
         }

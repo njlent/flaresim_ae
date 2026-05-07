@@ -28,6 +28,20 @@ enum class ProjectedCellsMode
     Force,
 };
 
+enum class PupilJitterMode
+{
+    Off,
+    Stratified,
+    Halton,
+};
+
+enum class SpectralJitterMode
+{
+    Off,
+    Stratified,
+    Halton,
+};
+
 // A ghost bounce pair: surfaces where light reflects instead of transmitting.
 struct GhostPair
 {
@@ -47,6 +61,38 @@ struct GhostPairPlan
     bool use_cell_rasterization = false;
 };
 
+struct GhostGridSample
+{
+    float u = 0.0f;
+    float v = 0.0f;
+};
+
+struct GhostGridCell
+{
+    float u0 = 0.0f;
+    float v0 = 0.0f;
+    float u1 = 0.0f;
+    float v1 = 0.0f;
+    float uc = 0.0f;
+    float vc = 0.0f;
+};
+
+struct GhostGridBucket
+{
+    int ray_grid = 0;
+    std::vector<GhostGridSample> samples;
+    std::vector<GhostGridCell> cells;
+};
+
+struct GhostRenderSetup
+{
+    std::vector<GhostPairPlan> active_pair_plans;
+    std::vector<GhostGridBucket> grid_buckets;
+    int max_valid_grid_count = 0;
+    int min_pair_grid = 0;
+    int max_pair_grid = 0;
+};
+
 // A bright pixel extracted from the input image.
 struct BrightPixel
 {
@@ -62,7 +108,8 @@ struct GhostConfig
     float min_intensity = 1e-7f;                     // skip ghost pairs dimmer than this
     float gain = 1000.0f;                            // ghost intensity multiplier
     float wavelengths[3] = {650.0f, 550.0f, 450.0f}; // R, G, B in nm
-    int spectral_samples = 3;                        // 3, 5, 7, 9, 11
+    int spectral_samples = 3;                        // 3, 5, 7, 9, 11, 15, 21, 31
+    float anamorphic_squeeze = 1.0f;                 // 1 = spherical, 2 = 2x horizontal desqueeze
     int aperture_blades = 0;                         // 0 = circular
     float aperture_rotation_deg = 0.0f;
 
@@ -71,11 +118,18 @@ struct GhostConfig
     bool ghost_normalize = true;   // enable per-pair area correction
     float max_area_boost = 100.0f; // clamp the correction factor
     GhostCleanupMode cleanup_mode = GhostCleanupMode::LegacyBlur;
+    float adaptive_quality = 1.0f;           // scales adaptive pair grids; 1.0 = ray_grid baseline
     float adaptive_sampling_strength = 1.0f; // 1.0 = auto baseline
     float footprint_radius_bias = 1.0f;      // 1.0 = traced footprint radius as-is
     float footprint_clamp = 1.15f;           // max multiplier over fallback radius
     int max_adaptive_pair_grid = 0;          // 0 = auto (2x base grid)
+    int pair_start_index = 0;                // active-pair index offset after physical filtering
+    int pair_count = 0;                      // 0 = all active pairs after pair_start_index
     ProjectedCellsMode projected_cells_mode = ProjectedCellsMode::Auto;
+    PupilJitterMode pupil_jitter = PupilJitterMode::Off;
+    int pupil_jitter_seed = 0;
+    SpectralJitterMode spectral_jitter = SpectralJitterMode::Off;
+    int spectral_jitter_seed = 0;
     float cell_coverage_bias = 1.0f;         // 1.0 = exact projected quad size
     float cell_edge_inset = 0.1f;            // inward inset before tracing cell corners
 };
@@ -87,6 +141,7 @@ const char* ghost_render_backend_name(GhostRenderBackend backend);
 int select_ghost_pair_ray_grid(int base_ray_grid,
                                float estimated_extent_px,
                                float distortion_score,
+                               float adaptive_quality,
                                float adaptive_sampling_strength,
                                int max_adaptive_pair_grid);
 float select_ghost_footprint_radius(float fallback_radius_px,
@@ -105,6 +160,13 @@ std::vector<GhostPairPlan> plan_active_ghost_pairs(const LensSystem& lens,
                                                    int width,
                                                    int height,
                                                    const GhostConfig& config);
+bool build_ghost_render_setup(const LensSystem& lens,
+                              float fov_h,
+                              float fov_v,
+                              int width,
+                              int height,
+                              const GhostConfig& config,
+                              GhostRenderSetup& out_setup);
 
 // Render all ghost reflections onto the output flare image.
 //
@@ -120,4 +182,6 @@ void render_ghosts(const LensSystem &lens,
                    float *out_r, float *out_g, float *out_b,
                    int width, int height,
                    const GhostConfig &config,
+                   const GhostRenderSetup* setup = nullptr,
+                   struct GpuBufferCache* gpu_cache = nullptr,
                    GhostRenderBackend* out_backend = nullptr);

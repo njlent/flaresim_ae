@@ -3,6 +3,8 @@
 #include "parameter_state.h"
 #include "pixel_convert.h"
 
+#include "frame_cuda.h"
+
 #include <string>
 #include <vector>
 
@@ -60,4 +62,30 @@ bool render_frame_to_pixels(
     int width,
     int height,
     const AePixel32Like* mask_pixels = nullptr
+);
+
+bool render_frame_to_bgra128_host_buffer(
+    const std::string& asset_root,
+    const AeParameterState& state,
+    const float* input_pixels,
+    float* output_pixels,
+    int width,
+    int height,
+    int input_row_floats,
+    int output_row_floats,
+    const float* mask_pixels = nullptr,
+    int mask_row_floats = 0
+);
+
+bool render_frame_to_bgra128_device_buffer(
+    const std::string& asset_root,
+    const AeParameterState& state,
+    const float* input_pixels,
+    float* output_pixels,
+    int width,
+    int height,
+    int input_row_floats,
+    int output_row_floats,
+    const float* mask_pixels = nullptr,
+    int mask_row_floats = 0
 );

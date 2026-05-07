@@ -30,6 +30,7 @@ With the Adobe SDK extracted locally:
 ```bash
 cmake -S . -B build-ae -DFLARESIM_AE_ENABLE_AE_PLUGIN=ON
 cmake --build build-ae --config Debug
+cmake --build build-ae --config Release
 ```
 
 `AE_SDK_ROOT` auto-detects `E:/projects/ae/SDK/AfterEffectsSDK_25.6_61_win` and resolves the inner Adobe SDK folder automatically when needed.
@@ -37,14 +38,20 @@ Set `-DAE_SDK_ROOT=...` if you want a different SDK root.
 
 Current output:
 - `build-ae/src/ae/Debug/FlareSimAE.aex`
+- `build-ae/src/ae/Release/FlareSimAE.aex`
 
 Current AE target coverage:
 - PiPL/resource generation
 - AE effect registration metadata
 - Smart Render + legacy render bridge into shared runtime
-- internal CUDA ghost rendering with CPU output back to AE worlds
+- AE GPU Smart Render F32 selector path for CUDA hosts (`PF_Cmd_GPU_DEVICE_SETUP`, `PF_Cmd_SMART_RENDER_GPU`, `PF_PixelFormat_GPU_BGRA128`)
+- device-resident CUDA flare/bloom/haze/starburst/composite path for AE GPU worlds
 - Camera / Aperture / Flare Settings / Post-processing AE sections
 - output `View` popup for Composite / Flare Only / Bloom Only / Sources / Diagnostics
+
+GPU Smart Render note:
+- current AE GPU path keeps full-frame image buffers on device end-to-end
+- bright-source extraction, clustering, ghosting, haze, starburst, bloom, and composite now stay on device during AE GPU renders
 
 Current host-validation status:
 - After Effects 2025 (`25.5x4`) is installed locally

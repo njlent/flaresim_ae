@@ -19,6 +19,13 @@
 #include <string>
 #include <vector>
 
+#if __has_include(<cuda_runtime.h>)
+#include <cuda_runtime.h>
+#define FLARESIM_TEST_HAS_CUDA_RUNTIME 1
+#else
+#define FLARESIM_TEST_HAS_CUDA_RUNTIME 0
+#endif
+
 namespace {
 
 std::string repo_path(const char* rel)
@@ -67,13 +74,38 @@ void test_source_extract()
     std::vector<float> mask(16, 0.0f);
     mask[5] = 1.0f;
     const MonoImageView mask_view {mask.data(), 4, 4};
-    const auto masked_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, &mask_view);
+    const auto masked_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, 0.0f, &mask_view);
     assert(masked_sources.size() == 1);
     assert(std::abs(masked_sources[0].r - 0.98f) < 1.0e-6f);
 
     mask[5] = 0.0f;
-    const auto rejected_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, &mask_view);
+    const auto rejected_sources = extract_bright_pixels(near_img, 0.9f, 2, 1.0f, 1.0f, 0.0f, &mask_view);
     assert(rejected_sources.empty());
+
+    const auto capped_sources = extract_bright_pixels(img, 1.0f, 1, 1.0f, 1.0f, 2.0f);
+    assert(capped_sources.size() == 1);
+    const float capped_luma =
+        0.2126f * capped_sources[0].r +
+        0.7152f * capped_sources[0].g +
+        0.0722f * capped_sources[0].b;
+    assert(std::abs(capped_luma - 2.0f) < 1.0e-5f);
+
+    const auto cap_rejected_sources = extract_bright_pixels(img, 2.5f, 1, 1.0f, 1.0f, 2.0f);
+    assert(cap_rejected_sources.empty());
+
+    std::vector<BrightPixel> clustered_sources = {
+        {.angle_x = 0.0f, .angle_y = 0.0f, .r = 4.0f, .g = 4.0f, .b = 4.0f},
+        {.angle_x = 0.005f, .angle_y = 0.002f, .r = 2.0f, .g = 2.0f, .b = 2.0f},
+        {.angle_x = 0.25f, .angle_y = 0.1f, .r = 1.0f, .g = 1.0f, .b = 1.0f},
+    };
+    cluster_bright_pixels(clustered_sources,
+                          10,
+                          1920,
+                          std::tan(60.0f * 0.5f * 3.14159265358979323846f / 180.0f));
+    assert(clustered_sources.size() == 2);
+    assert(clustered_sources[0].r > 5.9f);
+    assert(clustered_sources[0].angle_x > 0.0f);
+    assert(clustered_sources[0].angle_x < 0.005f);
 }
 
 void test_source_limit()
@@ -130,11 +162,13 @@ void test_bloom()
 
 void test_ghost_pair_planning()
 {
-    assert(select_ghost_pair_ray_grid(16, 4.0f, 0.0f, 1.0f, 0) == 8);
-    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 0) == 32);
-    assert(select_ghost_pair_ray_grid(16, 12.0f, 0.2f, 1.0f, 0) == 32);
-    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 24) == 24);
-    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 0.0f, 0) == 16);
+    assert(select_ghost_pair_ray_grid(16, 4.0f, 0.0f, 1.0f, 1.0f, 0) == 8);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 1.0f, 0) == 32);
+    assert(select_ghost_pair_ray_grid(16, 12.0f, 0.2f, 1.0f, 1.0f, 0) == 32);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 1.0f, 24) == 24);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 1.0f, 0.0f, 0) == 16);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 0.5f, 1.0f, 0) == 16);
+    assert(select_ghost_pair_ray_grid(16, 64.0f, 0.0f, 0.25f, 0.0f, 0) == 4);
     assert(select_ghost_footprint_radius(4.0f, 1.0f, 1.0f, 1.0f, 1.15f) <= 2.0f);
     assert(select_ghost_footprint_radius(4.0f, 49.0f, 1.0f, 1.0f, 1.15f) >= 4.0f);
     assert(select_ghost_footprint_radius(4.0f, 49.0f, 4.0f, 1.0f, 1.15f) <
@@ -214,6 +248,65 @@ void test_ghost_pair_planning()
     for (const GhostPairPlan& plan : force_plans) {
         assert(plan.use_cell_rasterization);
     }
+
+    GhostConfig pair_window_config = config;
+    pair_window_config.pair_start_index = 1;
+    pair_window_config.pair_count = 2;
+    const auto pair_window_plans = plan_active_ghost_pairs(
+        lens,
+        60.0f * 3.14159265358979323846f / 180.0f,
+        40.0f * 3.14159265358979323846f / 180.0f,
+        1920,
+        1080,
+        pair_window_config);
+    assert(pair_window_plans.size() == 2);
+    assert(pair_window_plans[0].pair.surf_a == plans[1].pair.surf_a);
+    assert(pair_window_plans[0].pair.surf_b == plans[1].pair.surf_b);
+
+    GhostConfig jitter_off = config;
+    jitter_off.pupil_jitter = PupilJitterMode::Off;
+    GhostRenderSetup off_setup;
+    assert(build_ghost_render_setup(lens,
+                                    60.0f * 3.14159265358979323846f / 180.0f,
+                                    40.0f * 3.14159265358979323846f / 180.0f,
+                                    1920,
+                                    1080,
+                                    jitter_off,
+                                    off_setup));
+
+    GhostConfig jitter_stratified = jitter_off;
+    jitter_stratified.pupil_jitter = PupilJitterMode::Stratified;
+    jitter_stratified.pupil_jitter_seed = 7;
+    GhostRenderSetup stratified_setup;
+    assert(build_ghost_render_setup(lens,
+                                    60.0f * 3.14159265358979323846f / 180.0f,
+                                    40.0f * 3.14159265358979323846f / 180.0f,
+                                    1920,
+                                    1080,
+                                    jitter_stratified,
+                                    stratified_setup));
+
+    GhostConfig jitter_halton = jitter_off;
+    jitter_halton.pupil_jitter = PupilJitterMode::Halton;
+    GhostRenderSetup halton_setup;
+    assert(build_ghost_render_setup(lens,
+                                    60.0f * 3.14159265358979323846f / 180.0f,
+                                    40.0f * 3.14159265358979323846f / 180.0f,
+                                    1920,
+                                    1080,
+                                    jitter_halton,
+                                    halton_setup));
+
+    const auto& off_samples = off_setup.grid_buckets.front().samples;
+    const auto& stratified_samples = stratified_setup.grid_buckets.front().samples;
+    const auto& halton_samples = halton_setup.grid_buckets.front().samples;
+    assert(!off_samples.empty());
+    assert(!stratified_samples.empty());
+    assert(!halton_samples.empty());
+    assert(std::abs(off_samples.front().u - stratified_samples.front().u) > 1.0e-4f ||
+           std::abs(off_samples.front().v - stratified_samples.front().v) > 1.0e-4f);
+    assert(std::abs(off_samples.front().u - halton_samples.front().u) > 1.0e-4f ||
+           std::abs(off_samples.front().v - halton_samples.front().v) > 1.0e-4f);
 }
 
 void test_render_frame()
@@ -495,10 +588,11 @@ void test_cuda_cell_rasterization_launch()
 
     const float fov_h = 60.0f * 3.14159265358979323846f / 180.0f;
     const float fov_v = 40.0f * 3.14159265358979323846f / 180.0f;
-    auto plans = plan_active_ghost_pairs(lens, fov_h, fov_v, 1920, 1080, config);
-    assert(!plans.empty());
-    plans.resize(1);
-    plans[0].use_cell_rasterization = true;
+    GhostRenderSetup setup;
+    assert(build_ghost_render_setup(lens, fov_h, fov_v, 1920, 1080, config, setup));
+    assert(!setup.active_pair_plans.empty());
+    setup.active_pair_plans.resize(1);
+    setup.active_pair_plans[0].use_cell_rasterization = true;
 
     const float sensor_half_w = lens.focal_length * std::tan(fov_h * 0.5f);
     const float sensor_half_h = lens.focal_length * std::tan(fov_v * 0.5f);
@@ -511,7 +605,23 @@ void test_cuda_cell_rasterization_launch()
     GpuBufferCache cache;
     std::string error;
     assert(launch_ghost_cuda(lens,
-                             plans,
+                             setup,
+                             sources,
+                             sensor_half_w,
+                             sensor_half_h,
+                             out_r.data(),
+                             out_g.data(),
+                             out_b.data(),
+                             32,
+                             32,
+                             config,
+                             cache,
+                             &error));
+
+    sources[0].angle_x = 0.05f;
+    sources[0].r = 4.0f;
+    assert(launch_ghost_cuda(lens,
+                             setup,
                              sources,
                              sensor_half_w,
                              sensor_half_h,
@@ -543,14 +653,24 @@ void test_ae_adapter_bits()
     state.sensor_width_mm = 36.0f;
     state.sensor_height_mm = 24.0f;
     state.focal_length_mm = 50.0f;
+    state.anamorphic_squeeze = 2.0f;
     state.threshold = 2.5f;
     state.downsample = 2;
     state.ray_grid = 8;
     state.max_sources = 123;
+    state.cluster_radius_px = 12;
     state.aperture_blades = 7;
     state.aperture_rotation_deg = 15.0f;
     state.flare_gain = 250.0f;
     state.sky_brightness = 0.25f;
+    state.source_cap = 6.0f;
+    state.manual_source_enabled = true;
+    state.manual_source_x = 1.25f;
+    state.manual_source_y = 0.4f;
+    state.manual_source_intensity = 12.0f;
+    state.manual_source_r = 1.0f;
+    state.manual_source_g = 0.5f;
+    state.manual_source_b = 0.25f;
     state.ghost_blur = 0.01f;
     state.ghost_blur_passes = 2;
     state.ghost_cleanup_mode = GhostCleanupMode::SharpAdaptivePlusBlur;
@@ -560,11 +680,19 @@ void test_ae_adapter_bits()
     state.starburst_gain = 0.3f;
     state.starburst_scale = 0.2f;
     state.spectral_samples = 9;
+    state.adaptive_quality = 0.75f;
     state.adaptive_sampling_strength = 1.25f;
     state.footprint_radius_bias = 0.9f;
     state.footprint_clamp = 1.4f;
     state.max_adaptive_pair_grid = 48;
+    state.surface_art_start = 1;
+    state.surface_art_count = 2;
+    state.surface_art_gain = 0.5f;
     state.projected_cells_mode = ProjectedCellsMode::Off;
+    state.pupil_jitter_mode = PupilJitterMode::Halton;
+    state.pupil_jitter_seed = 42;
+    state.spectral_jitter_mode = SpectralJitterMode::Stratified;
+    state.spectral_jitter_seed = 43;
     state.cell_coverage_bias = 1.2f;
     state.cell_edge_inset = 0.15f;
     state.bloom.strength = 0.75f;
@@ -578,14 +706,24 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.sensor_width_mm - 36.0f) < 1e-6f);
     assert(std::abs(settings.sensor_height_mm - 24.0f) < 1e-6f);
     assert(std::abs(settings.focal_length_mm - 50.0f) < 1e-6f);
+    assert(std::abs(settings.anamorphic_squeeze - 2.0f) < 1e-6f);
     assert(std::abs(settings.threshold - 2.5f) < 1e-6f);
     assert(settings.downsample == 2);
     assert(settings.ray_grid == 8);
     assert(settings.max_sources == 123);
+    assert(settings.cluster_radius_px == 12);
     assert(settings.aperture_blades == 7);
     assert(std::abs(settings.aperture_rotation_deg - 15.0f) < 1e-6f);
     assert(std::abs(settings.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(settings.sky_brightness - 0.25f) < 1e-6f);
+    assert(std::abs(settings.source_cap - 6.0f) < 1e-6f);
+    assert(settings.manual_source_enabled);
+    assert(std::abs(settings.manual_source_x - 1.25f) < 1e-6f);
+    assert(std::abs(settings.manual_source_y - 0.4f) < 1e-6f);
+    assert(std::abs(settings.manual_source_intensity - 12.0f) < 1e-6f);
+    assert(std::abs(settings.manual_source_r - 1.0f) < 1e-6f);
+    assert(std::abs(settings.manual_source_g - 0.5f) < 1e-6f);
+    assert(std::abs(settings.manual_source_b - 0.25f) < 1e-6f);
     assert(std::abs(settings.ghost_blur - 0.01f) < 1e-6f);
     assert(settings.ghost_blur_passes == 2);
     assert(settings.ghost_cleanup_mode == GhostCleanupMode::SharpAdaptivePlusBlur);
@@ -595,11 +733,19 @@ void test_ae_adapter_bits()
     assert(std::abs(settings.starburst_gain - 0.3f) < 1e-6f);
     assert(std::abs(settings.starburst_scale - 0.2f) < 1e-6f);
     assert(settings.spectral_samples == 9);
+    assert(std::abs(settings.adaptive_quality - 0.75f) < 1e-6f);
     assert(std::abs(settings.adaptive_sampling_strength - 1.25f) < 1e-6f);
     assert(std::abs(settings.footprint_radius_bias - 0.9f) < 1e-6f);
     assert(std::abs(settings.footprint_clamp - 1.4f) < 1e-6f);
     assert(settings.max_adaptive_pair_grid == 48);
+    assert(settings.surface_art_start == 1);
+    assert(settings.surface_art_count == 2);
+    assert(std::abs(settings.surface_art_gain - 0.5f) < 1e-6f);
     assert(settings.projected_cells_mode == ProjectedCellsMode::Off);
+    assert(settings.pupil_jitter_mode == PupilJitterMode::Halton);
+    assert(settings.pupil_jitter_seed == 42);
+    assert(settings.spectral_jitter_mode == SpectralJitterMode::Stratified);
+    assert(settings.spectral_jitter_seed == 43);
     assert(std::abs(settings.cell_coverage_bias - 1.2f) < 1e-6f);
     assert(std::abs(settings.cell_edge_inset - 0.15f) < 1e-6f);
     assert(std::abs(settings.bloom.strength - 0.75f) < 1e-6f);
@@ -686,6 +832,41 @@ void test_output_views()
     assert(source_sum > 0.0f);
 }
 
+void test_manual_offscreen_source()
+{
+    LensSystem lens;
+    const std::string path = repo_path("assets/lenses/space55/doublegauss.lens");
+    assert(lens.load(path.c_str()));
+
+    std::vector<float> src_r(64, 0.0f);
+    std::vector<float> src_g(64, 0.0f);
+    std::vector<float> src_b(64, 0.0f);
+    const RgbImageView input {src_r.data(), src_g.data(), src_b.data(), 8, 8};
+
+    FrameRenderSettings settings {};
+    settings.fov_h_deg = 60.0f;
+    settings.threshold = 100.0f;
+    settings.downsample = 1;
+    settings.max_sources = 0;
+    settings.manual_source_enabled = true;
+    settings.manual_source_x = 1.25f;
+    settings.manual_source_y = 0.5f;
+    settings.manual_source_intensity = 10.0f;
+    settings.manual_source_r = 1.0f;
+    settings.manual_source_g = 0.5f;
+    settings.manual_source_b = 0.25f;
+
+    FrameRenderOutputs outputs;
+    const FrameRenderPlan sources_plan = build_output_view_render_plan(AeOutputView::Sources);
+    assert(render_frame(lens, input, settings, outputs, sources_plan, nullptr));
+    assert(outputs.detected_sources.size() == 1);
+    assert(outputs.sources.size() == 1);
+    assert(outputs.sources[0].angle_x > settings.fov_h_deg * 3.14159265358979323846f / 360.0f);
+    assert(std::abs(outputs.sources[0].r - 10.0f) < 1.0e-6f);
+    assert(std::abs(outputs.sources[0].g - 5.0f) < 1.0e-6f);
+    assert(std::abs(outputs.sources[0].b - 2.5f) < 1.0e-6f);
+}
+
 void test_render_plan_cache()
 {
     LensSystem lens;
@@ -730,10 +911,13 @@ void test_render_plan_cache()
     assert(render_frame(lens, input, settings, first_outputs, composite_plan, &cache));
     assert(first_outputs.stats.recomputed_scene);
     assert(first_outputs.stats.recomputed_sources);
+    assert(first_outputs.stats.recomputed_ghost_setup);
     assert(first_outputs.stats.recomputed_ghosts);
     assert(first_outputs.stats.recomputed_bloom);
     assert(first_outputs.stats.recomputed_haze);
     assert(first_outputs.stats.recomputed_starburst);
+    assert(cache.has_ghost_setup);
+    assert(!cache.ghost_setup.active_pair_plans.empty());
 
     float first_peak = 0.0f;
     for (float v : first_outputs.flare_r) {
@@ -749,6 +933,7 @@ void test_render_plan_cache()
     assert(render_frame(lens, input, blurred_settings, blurred_outputs, composite_plan, &cache));
     assert(!blurred_outputs.stats.recomputed_scene);
     assert(!blurred_outputs.stats.recomputed_sources);
+    assert(!blurred_outputs.stats.recomputed_ghost_setup);
     assert(!blurred_outputs.stats.recomputed_ghosts);
     assert(!blurred_outputs.stats.recomputed_bloom);
     assert(!blurred_outputs.stats.recomputed_haze);
@@ -760,6 +945,22 @@ void test_render_plan_cache()
     }
     assert(blurred_peak > 0.0f);
     assert(blurred_peak <= first_peak);
+
+    std::vector<float> shifted_r(64, 0.0f);
+    std::vector<float> shifted_g(64, 0.0f);
+    std::vector<float> shifted_b(64, 0.0f);
+    shifted_r[18] = 9.0f;
+    shifted_g[18] = 7.0f;
+    shifted_b[18] = 5.0f;
+    const RgbImageView shifted_input {shifted_r.data(), shifted_g.data(), shifted_b.data(), 8, 8};
+
+    FrameRenderOutputs shifted_outputs;
+    assert(render_frame(lens, shifted_input, settings, shifted_outputs, composite_plan, &cache));
+    assert(shifted_outputs.stats.recomputed_scene);
+    assert(shifted_outputs.stats.recomputed_sources);
+    assert(!shifted_outputs.stats.recomputed_ghost_setup);
+    assert(shifted_outputs.stats.recomputed_ghosts);
+    assert(!shifted_outputs.flare_r.empty());
 
     FrameRenderOutputs source_outputs;
     assert(render_frame(lens, input, settings, source_outputs, sources_plan, nullptr));
@@ -817,6 +1018,7 @@ void test_frame_bridge()
     AeParameterState state {};
     state.threshold = 0.25f;
     state.downsample = 1;
+    state.max_sources = 0;
     state.ray_grid = 4;
     state.flare_gain = 100.0f;
     state.sky_brightness = 0.5f;
@@ -826,6 +1028,42 @@ void test_frame_bridge()
     state.bloom.passes = 1;
     state.bloom.octaves = 1;
     state.bloom.chromatic = false;
+
+    {
+        constexpr int bgra_width = 2;
+        constexpr int bgra_height = 2;
+        constexpr int bgra_row_floats = 12;
+        std::vector<float> bgra_input(bgra_row_floats * bgra_height, 0.0f);
+        std::vector<float> bgra_output(bgra_row_floats * bgra_height, -1.0f);
+        float* hot_pixel = bgra_input.data() + 4;
+        hot_pixel[0] = 4.0f;
+        hot_pixel[1] = 8.0f;
+        hot_pixel[2] = 12.0f;
+        hot_pixel[3] = 1.0f;
+
+        assert(render_frame_to_bgra128_host_buffer(asset_root,
+                                                   state,
+                                                   bgra_input.data(),
+                                                   bgra_output.data(),
+                                                   bgra_width,
+                                                   bgra_height,
+                                                   bgra_row_floats,
+                                                   bgra_row_floats));
+
+        float bgra_energy = 0.0f;
+        for (int y = 0; y < bgra_height; ++y) {
+            const float* row = bgra_output.data() + (y * bgra_row_floats);
+            for (int x = 0; x < bgra_width; ++x) {
+                const float* pixel = row + (x * 4);
+                bgra_energy += pixel[0] + pixel[1] + pixel[2];
+                assert(pixel[3] >= 0.0f);
+            }
+            for (int i = bgra_width * 4; i < bgra_row_floats; ++i) {
+                assert(row[i] == -1.0f);
+            }
+        }
+        assert(bgra_energy > 0.0f);
+    }
 
     assert(render_frame_to_pixels(asset_root, state, src8.data(), dst8.data(), 8, 8));
     assert(render_frame_to_pixels(asset_root, state, src16.data(), dst16.data(), 8, 8));
@@ -981,25 +1219,151 @@ void test_frame_bridge()
     assert(source_hits <= 9);
 }
 
+void test_frame_bridge_cuda_device()
+{
+    if (!cuda_ghost_renderer_compiled()) {
+        return;
+    }
+
+    std::string reason;
+    if (!cuda_ghost_renderer_available(&reason)) {
+        return;
+    }
+
+#if !FLARESIM_TEST_HAS_CUDA_RUNTIME
+    return;
+#else
+    std::string asset_root;
+    assert(find_flaresim_asset_root(FLARESIM_REPO_ROOT, asset_root));
+
+    constexpr int width = 8;
+    constexpr int height = 8;
+    constexpr int row_floats = 40;
+    std::vector<float> input(row_floats * height, 0.0f);
+    std::vector<float> expected(row_floats * height, -7.0f);
+    std::vector<float> actual(row_floats * height, -7.0f);
+    float* hot = input.data() + row_floats * 3 + 4 * 4;
+    hot[0] = 4.0f;
+    hot[1] = 8.0f;
+    hot[2] = 12.0f;
+    hot[3] = 1.0f;
+
+    AeParameterState state {};
+    state.threshold = 0.25f;
+    state.downsample = 1;
+    state.ray_grid = 4;
+    state.flare_gain = 100.0f;
+    state.sky_brightness = 0.5f;
+    state.haze_gain = 0.1f;
+    state.haze_radius = 0.05f;
+    state.haze_blur_passes = 1;
+    state.starburst_gain = 0.1f;
+    state.starburst_scale = 0.08f;
+    state.bloom.threshold = 0.25f;
+    state.bloom.strength = 0.2f;
+    state.bloom.radius = 0.08f;
+    state.bloom.passes = 1;
+    state.bloom.octaves = 1;
+    state.bloom.chromatic = false;
+    state.view = AeOutputView::Composite;
+
+    assert(render_frame_to_bgra128_host_buffer(
+        asset_root, state, input.data(), expected.data(), width, height, row_floats, row_floats));
+
+    float* d_input = nullptr;
+    float* d_output = nullptr;
+    assert(cudaMalloc(&d_input, input.size() * sizeof(float)) == cudaSuccess);
+    assert(cudaMalloc(&d_output, actual.size() * sizeof(float)) == cudaSuccess);
+    assert(cudaMemcpy(d_input,
+                      input.data(),
+                      input.size() * sizeof(float),
+                      cudaMemcpyHostToDevice) == cudaSuccess);
+    assert(cudaMemcpy(d_output,
+                      actual.data(),
+                      actual.size() * sizeof(float),
+                      cudaMemcpyHostToDevice) == cudaSuccess);
+
+    const bool ok = render_frame_to_bgra128_device_buffer(
+        asset_root, state, d_input, d_output, width, height, row_floats, row_floats);
+    assert(ok);
+
+    assert(cudaMemcpy(actual.data(),
+                      d_output,
+                      actual.size() * sizeof(float),
+                      cudaMemcpyDeviceToHost) == cudaSuccess);
+    cudaFree(d_input);
+    cudaFree(d_output);
+
+    for (int y = 0; y < height; ++y) {
+        const int used = width * 4;
+        for (int i = used; i < row_floats; ++i) {
+            assert(actual[y * row_floats + i] == -7.0f);
+        }
+    }
+
+    float expected_energy = 0.0f;
+    float actual_energy = 0.0f;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width * 4; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y) * row_floats + static_cast<std::size_t>(x);
+            expected_energy += std::abs(expected[i]);
+            actual_energy += std::abs(actual[i]);
+        }
+    }
+    assert(expected_energy > 0.0f);
+    assert(actual_energy > 0.0f);
+    assert(std::abs(expected_energy - actual_energy) / expected_energy < 0.25f);
+#endif
+}
+
 void test_param_schema()
 {
     assert(parameter_count() > 100);
     assert(lens_section_start_param() == PARAM_LENS_SECTION_START);
     assert(lens_section_end_param() + 1 == camera_section_start_param());
+    assert(focal_length_param() + 1 == anamorphic_squeeze_param());
+    assert(anamorphic_squeeze_param() + 1 == camera_section_end_param());
     assert(camera_section_end_param() + 1 == aperture_section_start_param());
     assert(aperture_section_end_param() + 1 == flare_section_start_param());
     assert(flare_section_start_param() + 1 == projected_cells_mode_param());
-    assert(projected_cells_mode_param() + 1 == flare_gain_param());
+    assert(projected_cells_mode_param() + 1 == adaptive_quality_param());
+    assert(adaptive_quality_param() + 1 == flare_gain_param());
     assert(flare_gain_param() + 1 == sky_brightness_param());
     assert(sky_brightness_param() + 1 == threshold_param());
+    assert(threshold_param() + 1 == source_cap_param());
+    assert(source_cap_param() + 1 == manual_source_enabled_param());
+    assert(manual_source_enabled_param() + 1 == manual_source_x_param());
+    assert(manual_source_x_param() + 1 == manual_source_y_param());
+    assert(manual_source_y_param() + 1 == manual_source_intensity_param());
+    assert(manual_source_intensity_param() + 1 == manual_source_r_param());
+    assert(manual_source_r_param() + 1 == manual_source_g_param());
+    assert(manual_source_g_param() + 1 == manual_source_b_param());
+    assert(manual_source_b_param() + 1 == ray_grid_param());
+    assert(max_sources_param() + 1 == cluster_radius_param());
+    assert(cluster_radius_param() + 1 == preview_mode_param());
+    assert(preview_mode_param() + 1 == preview_ray_grid_param());
+    assert(preview_ray_grid_param() + 1 == preview_max_sources_param());
+    assert(preview_max_sources_param() + 1 == preview_downsample_param());
+    assert(preview_downsample_param() + 1 == preview_spectral_samples_param());
+    assert(preview_spectral_samples_param() + 1 == flare_section_end_param());
     assert(flare_section_end_param() + 1 == post_section_start_param());
-    assert(spectral_samples_param() + 1 == ghost_cleanup_mode_param());
+    assert(spectral_samples_param() + 1 == spectral_jitter_mode_param());
+    assert(spectral_jitter_mode_param() + 1 == spectral_jitter_seed_param());
+    assert(spectral_jitter_seed_param() + 1 == ghost_cleanup_mode_param());
     assert(ghost_cleanup_mode_param() + 1 == advanced_ghosts_section_start_param());
     assert(advanced_ghosts_section_start_param() + 1 == adaptive_sampling_strength_param());
     assert(adaptive_sampling_strength_param() + 1 == footprint_radius_bias_param());
     assert(footprint_radius_bias_param() + 1 == footprint_clamp_param());
     assert(footprint_clamp_param() + 1 == max_adaptive_pair_grid_param());
-    assert(max_adaptive_pair_grid_param() + 1 == cell_coverage_bias_param());
+    assert(max_adaptive_pair_grid_param() + 1 == pair_start_param());
+    assert(pair_start_param() + 1 == pair_count_param());
+    assert(pair_count_param() + 1 == surface_art_start_param());
+    assert(surface_art_start_param() + 1 == surface_art_count_param());
+    assert(surface_art_count_param() + 1 == surface_art_gain_param());
+    assert(surface_art_gain_param() + 1 == pupil_jitter_mode_param());
+    assert(pupil_jitter_mode_param() + 1 == pupil_jitter_seed_param());
+    assert(pupil_jitter_seed_param() + 1 == pupil_jitter_auto_seed_param());
+    assert(pupil_jitter_auto_seed_param() + 1 == cell_coverage_bias_param());
     assert(cell_coverage_bias_param() + 1 == cell_edge_inset_param());
     assert(cell_edge_inset_param() + 1 == advanced_ghosts_section_end_param());
     assert(advanced_ghosts_section_end_param() + 1 == post_section_end_param());
@@ -1018,6 +1382,32 @@ void test_param_schema()
     assert(PARAM_ID_PROJECTED_CELLS_MODE == 33);
     assert(PARAM_ID_CELL_COVERAGE_BIAS == 34);
     assert(PARAM_ID_CELL_EDGE_INSET == 35);
+    assert(PARAM_ID_CLUSTER_RADIUS == 36);
+    assert(PARAM_ID_PUPIL_JITTER_MODE == 37);
+    assert(PARAM_ID_PUPIL_JITTER_SEED == 38);
+    assert(PARAM_ID_ADAPTIVE_QUALITY == 39);
+    assert(PARAM_ID_SOURCE_CAP == 40);
+    assert(PARAM_ID_PUPIL_JITTER_AUTO_SEED == 41);
+    assert(PARAM_ID_PREVIEW_MODE == 42);
+    assert(PARAM_ID_PREVIEW_RAY_GRID == 43);
+    assert(PARAM_ID_PREVIEW_MAX_SOURCES == 44);
+    assert(PARAM_ID_PREVIEW_DOWNSAMPLE == 45);
+    assert(PARAM_ID_PREVIEW_SPECTRAL_SAMPLES == 46);
+    assert(PARAM_ID_PAIR_START == 47);
+    assert(PARAM_ID_PAIR_COUNT == 48);
+    assert(PARAM_ID_SPECTRAL_JITTER_MODE == 49);
+    assert(PARAM_ID_SPECTRAL_JITTER_SEED == 50);
+    assert(PARAM_ID_MANUAL_SOURCE_ENABLED == 51);
+    assert(PARAM_ID_MANUAL_SOURCE_X == 52);
+    assert(PARAM_ID_MANUAL_SOURCE_Y == 53);
+    assert(PARAM_ID_MANUAL_SOURCE_INTENSITY == 54);
+    assert(PARAM_ID_MANUAL_SOURCE_R == 55);
+    assert(PARAM_ID_MANUAL_SOURCE_G == 56);
+    assert(PARAM_ID_MANUAL_SOURCE_B == 57);
+    assert(PARAM_ID_ANAMORPHIC_SQUEEZE == 58);
+    assert(PARAM_ID_SURFACE_ART_START == 59);
+    assert(PARAM_ID_SURFACE_ART_COUNT == 60);
+    assert(PARAM_ID_SURFACE_ART_GAIN == 61);
 
     const std::string legacy_lens_popup = build_lens_preset_popup_string();
     const std::string manufacturer_popup = build_lens_manufacturer_popup_string();
@@ -1025,14 +1415,18 @@ void test_param_schema()
     const std::string sensor_preset_popup = build_sensor_preset_popup_string();
     const std::string spectral_popup = build_spectral_samples_popup_string();
     const std::string cleanup_popup = build_ghost_cleanup_mode_popup_string();
+    const std::string jitter_popup = build_pupil_jitter_mode_popup_string();
+    const std::string spectral_jitter_popup = build_spectral_jitter_mode_popup_string();
     const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
     assert(legacy_lens_popup.find("Double Gauss") != std::string::npos);
     assert(manufacturer_popup.find("Canon") != std::string::npos);
     assert(grouped_lens_popup.find("Double Gauss") != std::string::npos);
     assert(sensor_preset_popup.find("Full Frame") != std::string::npos);
-    assert(spectral_popup.find("11") != std::string::npos);
+    assert(spectral_popup.find("31") != std::string::npos);
     assert(cleanup_popup.find("Sharp Adaptive") != std::string::npos);
+    assert(jitter_popup.find("Halton") != std::string::npos);
+    assert(spectral_jitter_popup.find("Stratified") != std::string::npos);
     assert(projected_cells_popup.find("Disabled") != std::string::npos);
     assert(projected_cells_popup.find("Enabled") != std::string::npos);
     assert(view_popup.find("Flare Only") != std::string::npos);
@@ -1050,15 +1444,30 @@ void test_param_schema()
     ui.sensor_width_mm = 12.0f;
     ui.sensor_height_mm = 8.0f;
     ui.focal_length_mm = 75.0f;
+    ui.anamorphic_squeeze = 1.75f;
     ui.aperture_blades = 8;
     ui.aperture_rotation_deg = 12.0f;
     ui.view_mode_index = output_view_popup_index(AeOutputView::Diagnostics);
     ui.flare_gain = 250.0f;
     ui.sky_brightness = 0.25f;
     ui.threshold = 1.5f;
+    ui.source_cap = 6.0f;
+    ui.manual_source_enabled = true;
+    ui.manual_source_x = -0.25f;
+    ui.manual_source_y = 1.25f;
+    ui.manual_source_intensity = 24.0f;
+    ui.manual_source_r = 0.75f;
+    ui.manual_source_g = 0.5f;
+    ui.manual_source_b = 0.25f;
     ui.ray_grid = 8;
     ui.downsample = 2;
     ui.max_sources = 222;
+    ui.cluster_radius_px = 18;
+    ui.preview_mode = false;
+    ui.preview_ray_grid = 16;
+    ui.preview_max_sources = 100;
+    ui.preview_downsample = 8;
+    ui.preview_spectral_samples_index = spectral_samples_popup_index(3);
     ui.ghost_blur = 0.02f;
     ui.ghost_blur_passes = 2;
     ui.ghost_cleanup_mode_index = ghost_cleanup_mode_popup_index(GhostCleanupMode::SharpAdaptive);
@@ -1067,11 +1476,22 @@ void test_param_schema()
     ui.haze_blur_passes = 2;
     ui.starburst_gain = 0.2f;
     ui.starburst_scale = 0.1f;
-    ui.spectral_samples_index = spectral_samples_popup_index(11);
+    ui.spectral_samples_index = spectral_samples_popup_index(31);
+    ui.adaptive_quality = 0.65f;
     ui.adaptive_sampling_strength = 1.5f;
     ui.footprint_radius_bias = 0.85f;
     ui.footprint_clamp = 1.8f;
     ui.max_adaptive_pair_grid = 40;
+    ui.pair_start = 3;
+    ui.pair_count = 7;
+    ui.surface_art_start = 4;
+    ui.surface_art_count = 5;
+    ui.surface_art_gain = 1.5f;
+    ui.pupil_jitter_mode_index = pupil_jitter_mode_popup_index(PupilJitterMode::Halton);
+    ui.pupil_jitter_seed = 55;
+    ui.pupil_jitter_auto_seed = false;
+    ui.spectral_jitter_mode_index = spectral_jitter_mode_popup_index(SpectralJitterMode::Halton);
+    ui.spectral_jitter_seed = 56;
     ui.projected_cells_mode_index = projected_cells_mode_popup_index(ProjectedCellsMode::Off);
     ui.cell_coverage_bias = 1.35f;
     ui.cell_edge_inset = 0.2f;
@@ -1088,14 +1508,24 @@ void test_param_schema()
     assert(std::abs(state.sensor_width_mm - 36.0f) < 1e-6f);
     assert(std::abs(state.sensor_height_mm - 24.0f) < 1e-6f);
     assert(std::abs(state.focal_length_mm - 75.0f) < 1e-6f);
+    assert(std::abs(state.anamorphic_squeeze - 1.75f) < 1e-6f);
     assert(state.aperture_blades == 8);
     assert(std::abs(state.aperture_rotation_deg - 12.0f) < 1e-6f);
     assert(std::abs(state.flare_gain - 250.0f) < 1e-6f);
     assert(std::abs(state.sky_brightness - 0.25f) < 1e-6f);
     assert(std::abs(state.threshold - 1.5f) < 1e-6f);
+    assert(std::abs(state.source_cap - 6.0f) < 1e-6f);
+    assert(state.manual_source_enabled);
+    assert(std::abs(state.manual_source_x + 0.25f) < 1e-6f);
+    assert(std::abs(state.manual_source_y - 1.25f) < 1e-6f);
+    assert(std::abs(state.manual_source_intensity - 24.0f) < 1e-6f);
+    assert(std::abs(state.manual_source_r - 0.75f) < 1e-6f);
+    assert(std::abs(state.manual_source_g - 0.5f) < 1e-6f);
+    assert(std::abs(state.manual_source_b - 0.25f) < 1e-6f);
     assert(state.ray_grid == 8);
     assert(state.downsample == 2);
     assert(state.max_sources == 222);
+    assert(state.cluster_radius_px == 18);
     assert(std::abs(state.ghost_blur - 0.02f) < 1e-6f);
     assert(state.ghost_blur_passes == 2);
     assert(state.ghost_cleanup_mode == GhostCleanupMode::SharpAdaptive);
@@ -1104,14 +1534,39 @@ void test_param_schema()
     assert(state.haze_blur_passes == 2);
     assert(std::abs(state.starburst_gain - 0.2f) < 1e-6f);
     assert(std::abs(state.starburst_scale - 0.1f) < 1e-6f);
-    assert(state.spectral_samples == 11);
+    assert(state.spectral_samples == 31);
+    assert(std::abs(state.adaptive_quality - 0.65f) < 1e-6f);
     assert(std::abs(state.adaptive_sampling_strength - 1.5f) < 1e-6f);
     assert(std::abs(state.footprint_radius_bias - 0.85f) < 1e-6f);
     assert(std::abs(state.footprint_clamp - 1.8f) < 1e-6f);
     assert(state.max_adaptive_pair_grid == 40);
+    assert(state.pair_start == 3);
+    assert(state.pair_count == 7);
+    assert(state.surface_art_start == 4);
+    assert(state.surface_art_count == 5);
+    assert(std::abs(state.surface_art_gain - 1.5f) < 1e-6f);
     assert(state.projected_cells_mode == ProjectedCellsMode::Off);
+    assert(state.pupil_jitter_mode == PupilJitterMode::Halton);
+    assert(state.pupil_jitter_seed == 55);
+    assert(!state.pupil_jitter_auto_seed);
+    assert(state.spectral_jitter_mode == SpectralJitterMode::Halton);
+    assert(state.spectral_jitter_seed == 56);
     assert(std::abs(state.cell_coverage_bias - 1.35f) < 1e-6f);
     assert(std::abs(state.cell_edge_inset - 0.2f) < 1e-6f);
+
+    AeUiParameterState preview_ui = ui;
+    preview_ui.preview_mode = true;
+    preview_ui.preview_ray_grid = 4;
+    preview_ui.preview_max_sources = 12;
+    preview_ui.preview_downsample = 8;
+    preview_ui.preview_spectral_samples_index = spectral_samples_popup_index(5);
+    AeParameterState preview_state {};
+    assert(apply_ui_parameter_state(preview_ui, preview_state));
+    assert(preview_state.ray_grid == 4);
+    assert(preview_state.max_sources == 12);
+    assert(preview_state.downsample == 8);
+    assert(preview_state.spectral_samples == 5);
+    assert(std::abs(preview_state.flare_gain - (250.0f * 16.0f)) < 1e-4f);
 
     AeUiParameterState legacy_ui {};
     legacy_ui.legacy_lens_preset_index = lens_popup_index_for_builtin("cooke-triplet");
@@ -1140,9 +1595,11 @@ int main()
     test_cuda_cell_rasterization_launch();
     test_ae_adapter_bits();
     test_output_views();
+    test_manual_offscreen_source();
     test_render_plan_cache();
     test_pixel_convert();
     test_frame_bridge();
+    test_frame_bridge_cuda_device();
     test_param_schema();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;

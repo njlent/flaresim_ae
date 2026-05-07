@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -335,7 +337,10 @@ __device__ __forceinline__ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
         const float n1 = current_ior;
         const float n2 = d_ior_at(surfaces[s], lambda_nm);
         const float cos_i = fabsf(dv_dot(normal, ray.dir));
-        const float R = d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm);
+        const float R = fminf(fmaxf(d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm) *
+                                    surfaces[s].reflectance_scale,
+                                    0.0f),
+                              1.0f);
 
         if (s == bounce_b) {
             DVec3 reflected;
@@ -368,7 +373,10 @@ __device__ __forceinline__ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
         const float n1 = current_ior;
         const float n2 = d_ior_before(surfaces, s, lambda_nm);
         const float cos_i = fabsf(dv_dot(normal, ray.dir));
-        const float R = d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm);
+        const float R = fminf(fmaxf(d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm) *
+                                    surfaces[s].reflectance_scale,
+                                    0.0f),
+                              1.0f);
 
         if (s == bounce_a) {
             DVec3 reflected;
@@ -402,7 +410,10 @@ __device__ __forceinline__ DTraceResult d_trace_ghost_ray(const DRay& ray_in,
         const float n1 = current_ior;
         const float n2 = d_ior_at(surfaces[s], lambda_nm);
         const float cos_i = fabsf(dv_dot(normal, ray.dir));
-        const float R = d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm);
+        const float R = fminf(fmaxf(d_surface_reflectance(cos_i, n1, n2, surfaces[s].coating, lambda_nm) *
+                                    surfaces[s].reflectance_scale,
+                                    0.0f),
+                              1.0f);
 
         DVec3 refracted;
         if (!d_refract(ray.dir, normal, n1 / n2, refracted)) {
@@ -646,6 +657,17 @@ struct GPUSource
     float b;
 };
 
+__global__ void pack_sources_kernel(const BrightPixel* src, GPUSource* dst, int count)
+{
+    const int i = static_cast<int>(blockIdx.x) * blockDim.x + static_cast<int>(threadIdx.x);
+    if (i >= count) {
+        return;
+    }
+
+    const BrightPixel source = src[i];
+    dst[i] = {source.angle_x, source.angle_y, source.r, source.g, source.b};
+}
+
 struct GPUSample
 {
     float u;
@@ -661,6 +683,9 @@ struct GPUCell
     float uc;
     float vc;
 };
+
+static_assert(sizeof(GPUSample) == sizeof(GhostGridSample));
+static_assert(sizeof(GPUCell) == sizeof(GhostGridCell));
 
 struct DPixelPoint
 {
@@ -895,6 +920,9 @@ __global__ void ghost_kernel(const Surface* surfaces,
     }
 
     const GPUSource& source = sources[source_index];
+    if (!(source.r > 0.0f || source.g > 0.0f || source.b > 0.0f)) {
+        return;
+    }
     const GPUSample& grid_sample = grid_samples[grid_index];
     if (!d_is_valid_pupil_sample(grid_sample.u, grid_sample.v, aperture_blades, aperture_rotation_rad)) {
         return;
@@ -1012,6 +1040,9 @@ __global__ void ghost_cell_kernel(const Surface* surfaces,
     }
 
     const GPUSource& source = sources[source_index];
+    if (!(source.r > 0.0f || source.g > 0.0f || source.b > 0.0f)) {
+        return;
+    }
     const GPUCell& cell = grid_cells[cell_index];
     const DVec3 beam_dir = dv_normalize(dv(tanf(source.angle_x), tanf(source.angle_y), 1.0f));
     const float inset = fminf(fmaxf(cell_edge_inset, 0.0f), 0.45f);
@@ -1113,9 +1144,9 @@ void report_cuda_error(cudaError_t error, const char* site, std::string* out_err
     }
 }
 
-std::vector<GPUSample> build_gpu_grid_samples(int ray_grid,
-                                              int aperture_blades,
-                                              float aperture_rotation_deg)
+[[maybe_unused]] std::vector<GPUSample> build_gpu_grid_samples(int ray_grid,
+                                                               int aperture_blades,
+                                                               float aperture_rotation_deg)
 {
     std::vector<GPUSample> grid_samples;
     grid_samples.reserve(static_cast<std::size_t>(ray_grid) * static_cast<std::size_t>(ray_grid));
@@ -1154,10 +1185,10 @@ std::vector<GPUSample> build_gpu_grid_samples(int ray_grid,
     return grid_samples;
 }
 
-std::vector<GPUCell> build_gpu_grid_cells(int ray_grid,
-                                          int aperture_blades,
-                                          float aperture_rotation_deg,
-                                          float cell_edge_inset)
+[[maybe_unused]] std::vector<GPUCell> build_gpu_grid_cells(int ray_grid,
+                                                           int aperture_blades,
+                                                           float aperture_rotation_deg,
+                                                           float cell_edge_inset)
 {
     std::vector<GPUCell> grid_cells;
     grid_cells.reserve(static_cast<std::size_t>(ray_grid) * static_cast<std::size_t>(ray_grid));
@@ -1211,31 +1242,240 @@ std::vector<GPUCell> build_gpu_grid_cells(int ray_grid,
     return grid_cells;
 }
 
+constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
+constexpr std::uint64_t kFnvPrime = 1099511628211ull;
+
+void hash_append_bytes(std::uint64_t& hash, const void* data, std::size_t size)
+{
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (std::size_t i = 0; i < size; ++i) {
+        hash ^= static_cast<std::uint64_t>(bytes[i]);
+        hash *= kFnvPrime;
+    }
+}
+
+template <typename T>
+void hash_append_value(std::uint64_t& hash, const T& value)
+{
+    hash_append_bytes(hash, &value, sizeof(T));
+}
+
+std::uint64_t hash_lens_surfaces(const LensSystem& lens)
+{
+    std::uint64_t hash = kFnvOffset;
+    const int surface_count = lens.num_surfaces();
+    hash_append_value(hash, surface_count);
+    if (surface_count > 0) {
+        hash_append_bytes(hash,
+                          lens.surfaces.data(),
+                          static_cast<std::size_t>(surface_count) * sizeof(Surface));
+    }
+    return hash;
+}
+
+std::uint64_t hash_spectral_config(const GhostConfig& config)
+{
+    std::uint64_t hash = kFnvOffset;
+    const int spectral_samples = std::max(3, config.spectral_samples);
+    hash_append_value(hash, spectral_samples);
+    hash_append_bytes(hash, config.wavelengths, sizeof(config.wavelengths));
+    hash_append_value(hash, config.spectral_jitter);
+    hash_append_value(hash, config.spectral_jitter_seed);
+    return hash;
+}
+
+std::uint64_t hash_setup_payload(const GhostRenderSetup& setup)
+{
+    std::uint64_t hash = kFnvOffset;
+    const std::size_t pair_count = setup.active_pair_plans.size();
+    hash_append_value(hash, pair_count);
+    if (!setup.active_pair_plans.empty()) {
+        hash_append_bytes(hash,
+                          setup.active_pair_plans.data(),
+                          setup.active_pair_plans.size() * sizeof(GhostPairPlan));
+    }
+
+    const std::size_t bucket_count = setup.grid_buckets.size();
+    hash_append_value(hash, bucket_count);
+    for (const GhostGridBucket& bucket : setup.grid_buckets) {
+        hash_append_value(hash, bucket.ray_grid);
+
+        const std::size_t sample_count = bucket.samples.size();
+        hash_append_value(hash, sample_count);
+        if (!bucket.samples.empty()) {
+            hash_append_bytes(hash,
+                              bucket.samples.data(),
+                              bucket.samples.size() * sizeof(GhostGridSample));
+        }
+
+        const std::size_t cell_count = bucket.cells.size();
+        hash_append_value(hash, cell_count);
+        if (!bucket.cells.empty()) {
+            hash_append_bytes(hash,
+                              bucket.cells.data(),
+                              bucket.cells.size() * sizeof(GhostGridCell));
+        }
+    }
+    return hash;
+}
+
+void reset_launch_bucket(GpuLaunchBucketCache& bucket)
+{
+    cudaFree(bucket.d_splat_pairs);
+    cudaFree(bucket.d_splat_grid);
+    cudaFree(bucket.d_cell_pairs);
+    cudaFree(bucket.d_cell_grid);
+
+    bucket = {};
+}
+
+int fill_spectral_samples(const GhostConfig& config, GPUSpectralSampleDev* out_samples)
+{
+    const int num_spectral_samples = std::max(3, config.spectral_samples);
+    if (!out_samples) {
+        return 0;
+    }
+
+    auto cie_r = [](float lambda) {
+        const float a = (lambda - 600.0f) / 70.0f;
+        const float b = (lambda - 450.0f) / 30.0f;
+        return std::max(0.0f, 0.63f * std::exp(-0.5f * a * a) +
+                                   0.22f * std::exp(-0.5f * b * b));
+    };
+    auto cie_g = [](float lambda) {
+        const float a = (lambda - 545.0f) / 55.0f;
+        return std::max(0.0f, std::exp(-0.5f * a * a));
+    };
+    auto cie_b = [](float lambda) {
+        const float a = (lambda - 445.0f) / 45.0f;
+        return std::max(0.0f, std::exp(-0.5f * a * a));
+    };
+
+    if (num_spectral_samples == 3) {
+        out_samples[0] = {config.wavelengths[0], 1.0f, 0.0f, 0.0f};
+        out_samples[1] = {config.wavelengths[1], 0.0f, 1.0f, 0.0f};
+        out_samples[2] = {config.wavelengths[2], 0.0f, 0.0f, 1.0f};
+        return num_spectral_samples;
+    }
+
+    auto wang_hash = [](std::uint32_t value) {
+        value = (value ^ 61u) ^ (value >> 16u);
+        value *= 9u;
+        value ^= value >> 4u;
+        value *= 0x27d4eb2du;
+        value ^= value >> 15u;
+        return value;
+    };
+    auto unit_from_hash = [&](std::uint32_t value) {
+        return static_cast<float>(wang_hash(value)) * (1.0f / 4294967296.0f);
+    };
+    auto halton2 = [](std::uint32_t value) {
+        value = (value << 16u) | (value >> 16u);
+        value = ((value & 0x00ff00ffu) << 8u) | ((value & 0xff00ff00u) >> 8u);
+        value = ((value & 0x0f0f0f0fu) << 4u) | ((value & 0xf0f0f0f0u) >> 4u);
+        value = ((value & 0x33333333u) << 2u) | ((value & 0xccccccccu) >> 2u);
+        value = ((value & 0x55555555u) << 1u) | ((value & 0xaaaaaaaau) >> 1u);
+        return static_cast<float>(value) * (1.0f / 4294967296.0f);
+    };
+
+    const std::uint32_t seed_offset =
+        static_cast<std::uint32_t>(std::max(config.spectral_jitter_seed, 0)) * 1000003u;
+    const bool jitter = config.spectral_jitter != SpectralJitterMode::Off;
+
+    float sum_r = 0.0f;
+    float sum_g = 0.0f;
+    float sum_b = 0.0f;
+    for (int i = 0; i < num_spectral_samples; ++i) {
+        float lambda = 400.0f + (300.0f * i) / (num_spectral_samples - 1);
+        if (jitter) {
+            const float j =
+                config.spectral_jitter == SpectralJitterMode::Halton
+                    ? halton2(static_cast<std::uint32_t>(i + 1) + seed_offset)
+                    : unit_from_hash(static_cast<std::uint32_t>(i) + seed_offset);
+            lambda = 400.0f + 300.0f * (static_cast<float>(i) + j) / num_spectral_samples;
+        }
+        lambda = std::clamp(lambda, 400.0f, 700.0f);
+        out_samples[i].lambda = lambda;
+        out_samples[i].rw = cie_r(lambda);
+        out_samples[i].gw = cie_g(lambda);
+        out_samples[i].bw = cie_b(lambda);
+        sum_r += out_samples[i].rw;
+        sum_g += out_samples[i].gw;
+        sum_b += out_samples[i].bw;
+    }
+
+    for (int i = 0; i < num_spectral_samples; ++i) {
+        if (sum_r > 1.0e-9f) out_samples[i].rw /= sum_r;
+        if (sum_g > 1.0e-9f) out_samples[i].gw /= sum_g;
+        if (sum_b > 1.0e-9f) out_samples[i].bw /= sum_b;
+    }
+
+    return num_spectral_samples;
+}
+
 } // namespace
 
 void GpuBufferCache::release()
 {
+    for (GpuLaunchBucketCache& bucket : launch_buckets) {
+        reset_launch_bucket(bucket);
+    }
+    launch_buckets.clear();
+
+    if (graph_exec) {
+        cudaGraphExecDestroy(static_cast<cudaGraphExec_t>(graph_exec));
+    }
+    if (graph) {
+        cudaGraphDestroy(static_cast<cudaGraph_t>(graph));
+    }
+    if (stream) {
+        cudaStreamDestroy(static_cast<cudaStream_t>(stream));
+    }
+
     cudaFree(d_surfs);
     cudaFree(d_pairs);
     cudaFree(d_src);
     cudaFree(d_grid);
+    cudaFree(d_spec);
     cudaFree(d_out_r);
     cudaFree(d_out_g);
     cudaFree(d_out_b);
+    cudaFreeHost(h_src);
+    cudaFreeHost(h_spec);
+    cudaFreeHost(h_out_r);
+    cudaFreeHost(h_out_g);
+    cudaFreeHost(h_out_b);
 
     d_surfs = nullptr;
     d_pairs = nullptr;
     d_src = nullptr;
     d_grid = nullptr;
+    d_spec = nullptr;
     d_out_r = nullptr;
     d_out_g = nullptr;
     d_out_b = nullptr;
+    h_src = nullptr;
+    h_spec = nullptr;
+    h_out_r = nullptr;
+    h_out_g = nullptr;
+    h_out_b = nullptr;
+    stream = nullptr;
+    graph = nullptr;
+    graph_exec = nullptr;
 
     surfs_bytes = 0;
     pairs_bytes = 0;
     src_bytes = 0;
     grid_bytes = 0;
+    spec_bytes = 0;
     out_floats = 0;
+    h_src_bytes = 0;
+    h_spec_bytes = 0;
+    host_out_floats = 0;
+    lens_key = 0;
+    spec_key = 0;
+    setup_key = 0;
+    graph_key = 0;
 }
 
 bool cuda_ghost_renderer_compiled()
@@ -1268,29 +1508,39 @@ bool cuda_ghost_renderer_available(std::string* reason)
     return false;
 }
 
-bool launch_ghost_cuda(const LensSystem& lens,
-                       const std::vector<GhostPairPlan>& active_pair_plans,
-                       const std::vector<BrightPixel>& sources,
-                       float sensor_half_w,
-                       float sensor_half_h,
-                       float* out_r,
-                       float* out_g,
-                       float* out_b,
-                       int width,
-                       int height,
-                       const GhostConfig& config,
-                       GpuBufferCache& cache,
-                       std::string* out_error)
+bool launch_ghost_cuda_impl(const LensSystem& lens,
+                            const GhostRenderSetup& setup,
+                            const std::vector<BrightPixel>* host_sources,
+                            const BrightPixel* device_sources,
+                            int source_count,
+                            float sensor_half_w,
+                            float sensor_half_h,
+                            float* out_r,
+                            float* out_g,
+                            float* out_b,
+                            int width,
+                            int height,
+                            const GhostConfig& config,
+                            GpuBufferCache& cache,
+                            bool copy_to_host,
+                            std::string* out_error)
 {
-    if (!out_r || !out_g || !out_b || width <= 0 || height <= 0) {
+    if ((copy_to_host && (!out_r || !out_g || !out_b)) || width <= 0 || height <= 0) {
         if (out_error) {
             *out_error = "Invalid output buffers for CUDA ghost render.";
         }
         return false;
     }
 
-    if (active_pair_plans.empty() || sources.empty()) {
+    const auto& active_pair_plans = setup.active_pair_plans;
+    if (active_pair_plans.empty() || source_count <= 0) {
         return true;
+    }
+    if (!host_sources && !device_sources) {
+        if (out_error) {
+            *out_error = "Invalid CUDA source buffer.";
+        }
+        return false;
     }
 
     if (!cuda_ghost_renderer_available(out_error)) {
@@ -1302,66 +1552,12 @@ bool launch_ghost_cuda(const LensSystem& lens,
         return true;
     }
 
-    std::vector<GPUSpectralSampleDev> spectral_samples;
-    {
-        const int num_spectral_samples = std::max(3, config.spectral_samples);
-        spectral_samples.resize(num_spectral_samples);
-
-        auto cie_r = [](float lambda) {
-            const float a = (lambda - 600.0f) / 70.0f;
-            const float b = (lambda - 450.0f) / 30.0f;
-            return std::max(0.0f, 0.63f * std::exp(-0.5f * a * a) +
-                                       0.22f * std::exp(-0.5f * b * b));
-        };
-        auto cie_g = [](float lambda) {
-            const float a = (lambda - 545.0f) / 55.0f;
-            return std::max(0.0f, std::exp(-0.5f * a * a));
-        };
-        auto cie_b = [](float lambda) {
-            const float a = (lambda - 445.0f) / 45.0f;
-            return std::max(0.0f, std::exp(-0.5f * a * a));
-        };
-
-        if (num_spectral_samples == 3) {
-            spectral_samples[0] = {config.wavelengths[0], 1.0f, 0.0f, 0.0f};
-            spectral_samples[1] = {config.wavelengths[1], 0.0f, 1.0f, 0.0f};
-            spectral_samples[2] = {config.wavelengths[2], 0.0f, 0.0f, 1.0f};
-        } else {
-            float sum_r = 0.0f;
-            float sum_g = 0.0f;
-            float sum_b = 0.0f;
-            for (int i = 0; i < num_spectral_samples; ++i) {
-                const float lambda = 400.0f + (300.0f * i) / (num_spectral_samples - 1);
-                spectral_samples[i].lambda = lambda;
-                spectral_samples[i].rw = cie_r(lambda);
-                spectral_samples[i].gw = cie_g(lambda);
-                spectral_samples[i].bw = cie_b(lambda);
-                sum_r += spectral_samples[i].rw;
-                sum_g += spectral_samples[i].gw;
-                sum_b += spectral_samples[i].bw;
-            }
-            for (auto& sample : spectral_samples) {
-                if (sum_r > 1.0e-9f) sample.rw /= sum_r;
-                if (sum_g > 1.0e-9f) sample.gw /= sum_g;
-                if (sum_b > 1.0e-9f) sample.bw /= sum_b;
-            }
-        }
-    }
-
-    std::vector<GPUSource> gpu_sources(sources.size());
-    for (std::size_t i = 0; i < sources.size(); ++i) {
-        gpu_sources[i] = {
-            sources[i].angle_x,
-            sources[i].angle_y,
-            sources[i].r,
-            sources[i].g,
-            sources[i].b,
-        };
-    }
-
     const std::size_t num_pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    const std::uint64_t lens_key = hash_lens_surfaces(lens);
+    const std::uint64_t spec_key = hash_spectral_config(config);
+    const std::uint64_t setup_key = hash_setup_payload(setup);
 
-    auto ensure_buffer = [&](void*& ptr, std::size_t& cap, std::size_t need, const char* label) -> bool {
+    auto ensure_device_buffer = [&](void*& ptr, std::size_t& cap, std::size_t need, const char* label) -> bool {
         if (need <= cap) {
             return true;
         }
@@ -1380,10 +1576,46 @@ bool launch_ghost_cuda(const LensSystem& lens,
         return true;
     };
 
-    if (!ensure_buffer(cache.d_surfs, cache.surfs_bytes, static_cast<std::size_t>(num_surfaces) * sizeof(Surface), "d_surfs")) {
+    auto ensure_host_buffer = [&](void*& ptr, std::size_t& cap, std::size_t need, const char* label) -> bool {
+        if (need <= cap) {
+            return true;
+        }
+
+        cudaFreeHost(ptr);
+        ptr = nullptr;
+        cap = 0;
+
+        const cudaError_t error = cudaMallocHost(&ptr, need);
+        if (error != cudaSuccess) {
+            report_cuda_error(error, label, out_error);
+            return false;
+        }
+
+        cap = need;
+        return true;
+    };
+
+    if (!cache.stream) {
+        const cudaError_t error = cudaStreamCreateWithFlags(
+            reinterpret_cast<cudaStream_t*>(&cache.stream),
+            cudaStreamNonBlocking);
+        if (error != cudaSuccess) {
+            report_cuda_error(error, "cudaStreamCreateWithFlags", out_error);
+            return false;
+        }
+    }
+    cudaStream_t stream = static_cast<cudaStream_t>(cache.stream);
+
+    if (!ensure_device_buffer(cache.d_surfs,
+                              cache.surfs_bytes,
+                              static_cast<std::size_t>(num_surfaces) * sizeof(Surface),
+                              "d_surfs")) {
         return false;
     }
-    if (!ensure_buffer(cache.d_src, cache.src_bytes, gpu_sources.size() * sizeof(GPUSource), "d_src")) {
+    if (!ensure_device_buffer(cache.d_src,
+                              cache.src_bytes,
+                              static_cast<std::size_t>(source_count) * sizeof(GPUSource),
+                              "d_src")) {
         return false;
     }
 
@@ -1417,6 +1649,53 @@ bool launch_ghost_cuda(const LensSystem& lens,
         cache.out_floats = num_pixels;
     }
 
+    if (host_sources) {
+        if (!ensure_host_buffer(cache.h_src,
+                                cache.h_src_bytes,
+                                static_cast<std::size_t>(source_count) * sizeof(GPUSource),
+                                "h_src")) {
+            return false;
+        }
+    }
+    if (!ensure_host_buffer(cache.h_spec,
+                            cache.h_spec_bytes,
+                            static_cast<std::size_t>(std::max(3, config.spectral_samples)) *
+                                sizeof(GPUSpectralSampleDev),
+                            "h_spec")) {
+        return false;
+    }
+
+    if (copy_to_host) {
+        const std::size_t host_output_bytes = num_pixels * sizeof(float);
+        if (host_output_bytes > cache.host_out_floats) {
+            cudaFreeHost(cache.h_out_r);
+            cudaFreeHost(cache.h_out_g);
+            cudaFreeHost(cache.h_out_b);
+            cache.h_out_r = nullptr;
+            cache.h_out_g = nullptr;
+            cache.h_out_b = nullptr;
+            cache.host_out_floats = 0;
+
+            cudaError_t error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_r), host_output_bytes);
+            if (error != cudaSuccess) {
+                report_cuda_error(error, "h_out_r", out_error);
+                return false;
+            }
+            error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_g), host_output_bytes);
+            if (error != cudaSuccess) {
+                report_cuda_error(error, "h_out_g", out_error);
+                return false;
+            }
+            error = cudaMallocHost(reinterpret_cast<void**>(&cache.h_out_b), host_output_bytes);
+            if (error != cudaSuccess) {
+                report_cuda_error(error, "h_out_b", out_error);
+                return false;
+            }
+
+            cache.host_out_floats = host_output_bytes;
+        }
+    }
+
 #define GPU_CHECK(call)                                                                 \
     do {                                                                                \
         const cudaError_t error__ = (call);                                             \
@@ -1426,95 +1705,227 @@ bool launch_ghost_cuda(const LensSystem& lens,
         }                                                                               \
     } while (0)
 
-    GPU_CHECK(cudaMemcpy(cache.d_surfs,
-                         lens.surfaces.data(),
-                         static_cast<std::size_t>(num_surfaces) * sizeof(Surface),
-                         cudaMemcpyHostToDevice));
-    GPU_CHECK(cudaMemcpy(cache.d_src,
-                         gpu_sources.data(),
-                         gpu_sources.size() * sizeof(GPUSource),
-                         cudaMemcpyHostToDevice));
+    if (cache.lens_key != lens_key) {
+        GPU_CHECK(cudaMemcpy(cache.d_surfs,
+                             lens.surfaces.data(),
+                             static_cast<std::size_t>(num_surfaces) * sizeof(Surface),
+                             cudaMemcpyHostToDevice));
+        cache.lens_key = lens_key;
+    }
 
-    GPU_CHECK(cudaMemset(cache.d_out_r, 0, num_pixels * sizeof(float)));
-    GPU_CHECK(cudaMemset(cache.d_out_g, 0, num_pixels * sizeof(float)));
-    GPU_CHECK(cudaMemset(cache.d_out_b, 0, num_pixels * sizeof(float)));
+    const int spectral_count = std::max(3, config.spectral_samples);
+    if (!ensure_device_buffer(cache.d_spec,
+                              cache.spec_bytes,
+                              static_cast<std::size_t>(spectral_count) * sizeof(GPUSpectralSampleDev),
+                              "d_spec")) {
+        return false;
+    }
+    if (cache.spec_key != spec_key) {
+        const int populated_spectral_count =
+            fill_spectral_samples(config, static_cast<GPUSpectralSampleDev*>(cache.h_spec));
+        GPU_CHECK(cudaMemcpyAsync(cache.d_spec,
+                                  cache.h_spec,
+                                  static_cast<std::size_t>(populated_spectral_count) * sizeof(GPUSpectralSampleDev),
+                                  cudaMemcpyHostToDevice,
+                                  stream));
+        cache.spec_key = spec_key;
+    }
 
-    GPUSpectralSampleDev* d_spectral_samples = nullptr;
-    GPU_CHECK(cudaMalloc(&d_spectral_samples, spectral_samples.size() * sizeof(GPUSpectralSampleDev)));
-    GPU_CHECK(cudaMemcpy(d_spectral_samples,
-                         spectral_samples.data(),
-                         spectral_samples.size() * sizeof(GPUSpectralSampleDev),
-                         cudaMemcpyHostToDevice));
+    if (cache.setup_key != setup_key) {
+        for (GpuLaunchBucketCache& bucket : cache.launch_buckets) {
+            reset_launch_bucket(bucket);
+        }
+        cache.launch_buckets.clear();
+        cache.setup_key = 0;
 
-    std::vector<int> bucket_grids;
-    for (const GhostPairPlan& pair_plan : active_pair_plans) {
-        if (std::find(bucket_grids.begin(), bucket_grids.end(), pair_plan.ray_grid) == bucket_grids.end()) {
-            bucket_grids.push_back(pair_plan.ray_grid);
+        cache.launch_buckets.reserve(setup.grid_buckets.size());
+        for (const GhostGridBucket& bucket : setup.grid_buckets) {
+            GpuLaunchBucketCache uploaded {};
+            uploaded.ray_grid = bucket.ray_grid;
+
+            std::vector<GPUPair> splat_pairs;
+            std::vector<GPUPair> cell_pairs;
+            splat_pairs.reserve(active_pair_plans.size());
+            cell_pairs.reserve(active_pair_plans.size());
+
+            for (const GhostPairPlan& pair_plan : active_pair_plans) {
+                if (pair_plan.ray_grid != bucket.ray_grid) {
+                    continue;
+                }
+
+                GPUPair gpu_pair {
+                    pair_plan.pair.surf_a,
+                    pair_plan.pair.surf_b,
+                    pair_plan.area_boost,
+                    pair_plan.splat_radius_px,
+                    pair_plan.reference_footprint_area_px2,
+                };
+
+                if (pair_plan.use_cell_rasterization) {
+                    cell_pairs.push_back(gpu_pair);
+                } else {
+                    splat_pairs.push_back(gpu_pair);
+                }
+            }
+
+            if (!splat_pairs.empty() && !bucket.samples.empty()) {
+                uploaded.splat_pair_count = static_cast<int>(splat_pairs.size());
+                uploaded.splat_grid_count = static_cast<int>(bucket.samples.size());
+                const std::size_t pair_bytes = splat_pairs.size() * sizeof(GPUPair);
+                const std::size_t grid_bytes = bucket.samples.size() * sizeof(GhostGridSample);
+
+                const cudaError_t pair_error = cudaMalloc(&uploaded.d_splat_pairs, pair_bytes);
+                if (pair_error != cudaSuccess) {
+                    reset_launch_bucket(uploaded);
+                    report_cuda_error(pair_error, "d_splat_pairs", out_error);
+                    return false;
+                }
+                const cudaError_t grid_error = cudaMalloc(&uploaded.d_splat_grid, grid_bytes);
+                if (grid_error != cudaSuccess) {
+                    reset_launch_bucket(uploaded);
+                    report_cuda_error(grid_error, "d_splat_grid", out_error);
+                    return false;
+                }
+
+                GPU_CHECK(cudaMemcpy(uploaded.d_splat_pairs,
+                                     splat_pairs.data(),
+                                     pair_bytes,
+                                     cudaMemcpyHostToDevice));
+                GPU_CHECK(cudaMemcpy(uploaded.d_splat_grid,
+                                     bucket.samples.data(),
+                                     grid_bytes,
+                                     cudaMemcpyHostToDevice));
+
+                uploaded.splat_pairs_bytes = pair_bytes;
+                uploaded.splat_grid_bytes = grid_bytes;
+            }
+
+            if (!cell_pairs.empty() && !bucket.cells.empty()) {
+                uploaded.cell_pair_count = static_cast<int>(cell_pairs.size());
+                uploaded.cell_grid_count = static_cast<int>(bucket.cells.size());
+                const std::size_t pair_bytes = cell_pairs.size() * sizeof(GPUPair);
+                const std::size_t grid_bytes = bucket.cells.size() * sizeof(GhostGridCell);
+
+                const cudaError_t pair_error = cudaMalloc(&uploaded.d_cell_pairs, pair_bytes);
+                if (pair_error != cudaSuccess) {
+                    reset_launch_bucket(uploaded);
+                    report_cuda_error(pair_error, "d_cell_pairs", out_error);
+                    return false;
+                }
+                const cudaError_t grid_error = cudaMalloc(&uploaded.d_cell_grid, grid_bytes);
+                if (grid_error != cudaSuccess) {
+                    reset_launch_bucket(uploaded);
+                    report_cuda_error(grid_error, "d_cell_grid", out_error);
+                    return false;
+                }
+
+                GPU_CHECK(cudaMemcpy(uploaded.d_cell_pairs,
+                                     cell_pairs.data(),
+                                     pair_bytes,
+                                     cudaMemcpyHostToDevice));
+                GPU_CHECK(cudaMemcpy(uploaded.d_cell_grid,
+                                     bucket.cells.data(),
+                                     grid_bytes,
+                                     cudaMemcpyHostToDevice));
+
+                uploaded.cell_pairs_bytes = pair_bytes;
+                uploaded.cell_grid_bytes = grid_bytes;
+            }
+
+            cache.launch_buckets.push_back(uploaded);
+        }
+
+        cache.setup_key = setup_key;
+    }
+
+    if (host_sources) {
+        auto* packed_sources = static_cast<GPUSource*>(cache.h_src);
+        for (int i = 0; i < source_count; ++i) {
+            packed_sources[i] = {
+                (*host_sources)[static_cast<std::size_t>(i)].angle_x,
+                (*host_sources)[static_cast<std::size_t>(i)].angle_y,
+                (*host_sources)[static_cast<std::size_t>(i)].r,
+                (*host_sources)[static_cast<std::size_t>(i)].g,
+                (*host_sources)[static_cast<std::size_t>(i)].b,
+            };
         }
     }
-    std::sort(bucket_grids.begin(), bucket_grids.end());
+    std::uint64_t graph_key = kFnvOffset;
+    hash_append_value(graph_key, lens_key);
+    hash_append_value(graph_key, spec_key);
+    hash_append_value(graph_key, setup_key);
+    hash_append_value(graph_key, source_count);
+    hash_append_value(graph_key, width);
+    hash_append_value(graph_key, height);
+    hash_append_value(graph_key, sensor_half_w);
+    hash_append_value(graph_key, sensor_half_h);
+    hash_append_value(graph_key, config.gain);
+    hash_append_value(graph_key, config.aperture_blades);
+    hash_append_value(graph_key, config.aperture_rotation_deg);
+    hash_append_value(graph_key, config.footprint_radius_bias);
+    hash_append_value(graph_key, config.footprint_clamp);
+    hash_append_value(graph_key, config.cell_edge_inset);
+    hash_append_value(graph_key, config.cell_coverage_bias);
 
-    for (int bucket_grid : bucket_grids) {
-        std::vector<GPUPair> gpu_splat_pairs;
-        std::vector<GPUPair> gpu_cell_pairs;
-        gpu_splat_pairs.reserve(active_pair_plans.size());
-        gpu_cell_pairs.reserve(active_pair_plans.size());
-        for (const GhostPairPlan& pair_plan : active_pair_plans) {
-            if (pair_plan.ray_grid != bucket_grid) {
-                continue;
+    auto enqueue_render_commands = [&](cudaStream_t target_stream) -> bool {
+        if (host_sources) {
+            const cudaError_t src_copy_error = cudaMemcpyAsync(cache.d_src,
+                                                               cache.h_src,
+                                                               static_cast<std::size_t>(source_count) * sizeof(GPUSource),
+                                                               cudaMemcpyHostToDevice,
+                                                               target_stream);
+            if (src_copy_error != cudaSuccess) {
+                report_cuda_error(src_copy_error, "cudaMemcpyAsync(d_src)", out_error);
+                return false;
             }
-            GPUPair gpu_pair {
-                pair_plan.pair.surf_a,
-                pair_plan.pair.surf_b,
-                pair_plan.area_boost,
-                pair_plan.splat_radius_px,
-                pair_plan.reference_footprint_area_px2,
-            };
-            if (pair_plan.use_cell_rasterization) {
-                gpu_cell_pairs.push_back(gpu_pair);
-            } else {
-                gpu_splat_pairs.push_back(gpu_pair);
+        } else {
+            const int pack_grid = (source_count + kBlockSize - 1) / kBlockSize;
+            pack_sources_kernel<<<pack_grid, kBlockSize, 0, target_stream>>>(
+                device_sources,
+                static_cast<GPUSource*>(cache.d_src),
+                source_count);
+            const cudaError_t pack_error = cudaGetLastError();
+            if (pack_error != cudaSuccess) {
+                report_cuda_error(pack_error, "pack_sources_kernel", out_error);
+                return false;
             }
         }
 
-        if (!gpu_splat_pairs.empty()) {
-            std::vector<GPUSample> grid_samples = build_gpu_grid_samples(bucket_grid,
-                                                                         config.aperture_blades,
-                                                                         config.aperture_rotation_deg);
-            const int num_grid_samples = static_cast<int>(grid_samples.size());
-            if (num_grid_samples > 0) {
-                if (!ensure_buffer(cache.d_pairs, cache.pairs_bytes, gpu_splat_pairs.size() * sizeof(GPUPair), "d_pairs")) {
-                    cudaFree(d_spectral_samples);
-                    return false;
-                }
-                if (!ensure_buffer(cache.d_grid, cache.grid_bytes, grid_samples.size() * sizeof(GPUSample), "d_grid")) {
-                    cudaFree(d_spectral_samples);
-                    return false;
-                }
+        const cudaError_t memset_r_error =
+            cudaMemsetAsync(cache.d_out_r, 0, num_pixels * sizeof(float), target_stream);
+        if (memset_r_error != cudaSuccess) {
+            report_cuda_error(memset_r_error, "cudaMemsetAsync(d_out_r)", out_error);
+            return false;
+        }
+        const cudaError_t memset_g_error =
+            cudaMemsetAsync(cache.d_out_g, 0, num_pixels * sizeof(float), target_stream);
+        if (memset_g_error != cudaSuccess) {
+            report_cuda_error(memset_g_error, "cudaMemsetAsync(d_out_g)", out_error);
+            return false;
+        }
+        const cudaError_t memset_b_error =
+            cudaMemsetAsync(cache.d_out_b, 0, num_pixels * sizeof(float), target_stream);
+        if (memset_b_error != cudaSuccess) {
+            report_cuda_error(memset_b_error, "cudaMemsetAsync(d_out_b)", out_error);
+            return false;
+        }
 
-                GPU_CHECK(cudaMemcpy(cache.d_pairs,
-                                     gpu_splat_pairs.data(),
-                                     gpu_splat_pairs.size() * sizeof(GPUPair),
-                                     cudaMemcpyHostToDevice));
-                GPU_CHECK(cudaMemcpy(cache.d_grid,
-                                     grid_samples.data(),
-                                     grid_samples.size() * sizeof(GPUSample),
-                                     cudaMemcpyHostToDevice));
-
+        for (const GpuLaunchBucketCache& bucket : cache.launch_buckets) {
+            if (bucket.splat_pair_count > 0 && bucket.splat_grid_count > 0) {
                 const dim3 block(kBlockSize, 1, 1);
-                const dim3 grid(static_cast<unsigned>(gpu_splat_pairs.size() * gpu_sources.size()),
-                                static_cast<unsigned>((num_grid_samples + kBlockSize - 1) / kBlockSize),
+                const dim3 grid(static_cast<unsigned>(bucket.splat_pair_count * source_count),
+                                static_cast<unsigned>((bucket.splat_grid_count + kBlockSize - 1) / kBlockSize),
                                 1);
 
-                ghost_kernel<<<grid, block>>>(
+                ghost_kernel<<<grid, block, 0, target_stream>>>(
                     static_cast<Surface*>(cache.d_surfs),
                     num_surfaces,
                     lens.sensor_z,
-                    static_cast<GPUPair*>(cache.d_pairs),
-                    static_cast<int>(gpu_sources.size()),
+                    static_cast<GPUPair*>(bucket.d_splat_pairs),
+                    source_count,
                     static_cast<GPUSource*>(cache.d_src),
-                    static_cast<GPUSample*>(cache.d_grid),
-                    num_grid_samples,
+                    static_cast<GPUSample*>(bucket.d_splat_grid),
+                    bucket.splat_grid_count,
                     lens.surfaces[0].semi_aperture,
                     lens.surfaces[0].z - 20.0f,
                     sensor_half_w,
@@ -1525,70 +1936,37 @@ bool launch_ghost_cuda(const LensSystem& lens,
                     cache.d_out_g,
                     cache.d_out_b,
                     config.gain,
-                    1.0f / static_cast<float>(num_grid_samples),
-                    2.0f / static_cast<float>(bucket_grid),
+                    1.0f / static_cast<float>(bucket.splat_grid_count),
+                    2.0f / static_cast<float>(bucket.ray_grid),
                     config.aperture_blades,
                     config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
                     config.footprint_radius_bias,
                     config.footprint_clamp,
-                    d_spectral_samples,
-                    static_cast<int>(spectral_samples.size()));
+                    static_cast<GPUSpectralSampleDev*>(cache.d_spec),
+                    spectral_count);
 
-                cudaError_t error = cudaGetLastError();
-                if (error != cudaSuccess) {
-                    cudaFree(d_spectral_samples);
-                    report_cuda_error(error, "ghost_kernel", out_error);
-                    return false;
-                }
-
-                error = cudaDeviceSynchronize();
-                if (error != cudaSuccess) {
-                    cudaFree(d_spectral_samples);
-                    report_cuda_error(error, "cudaDeviceSynchronize", out_error);
+                const cudaError_t kernel_error = cudaGetLastError();
+                if (kernel_error != cudaSuccess) {
+                    report_cuda_error(kernel_error, "ghost_kernel", out_error);
                     return false;
                 }
             }
-        }
 
-        if (!gpu_cell_pairs.empty()) {
-            std::vector<GPUCell> grid_cells = build_gpu_grid_cells(bucket_grid,
-                                                                   config.aperture_blades,
-                                                                   config.aperture_rotation_deg,
-                                                                   config.cell_edge_inset);
-            const int num_grid_cells = static_cast<int>(grid_cells.size());
-            if (num_grid_cells > 0) {
-                if (!ensure_buffer(cache.d_pairs, cache.pairs_bytes, gpu_cell_pairs.size() * sizeof(GPUPair), "d_pairs")) {
-                    cudaFree(d_spectral_samples);
-                    return false;
-                }
-                if (!ensure_buffer(cache.d_grid, cache.grid_bytes, grid_cells.size() * sizeof(GPUCell), "d_grid")) {
-                    cudaFree(d_spectral_samples);
-                    return false;
-                }
-
-                GPU_CHECK(cudaMemcpy(cache.d_pairs,
-                                     gpu_cell_pairs.data(),
-                                     gpu_cell_pairs.size() * sizeof(GPUPair),
-                                     cudaMemcpyHostToDevice));
-                GPU_CHECK(cudaMemcpy(cache.d_grid,
-                                     grid_cells.data(),
-                                     grid_cells.size() * sizeof(GPUCell),
-                                     cudaMemcpyHostToDevice));
-
+            if (bucket.cell_pair_count > 0 && bucket.cell_grid_count > 0) {
                 const dim3 block(kBlockSize, 1, 1);
-                const dim3 grid(static_cast<unsigned>(gpu_cell_pairs.size() * gpu_sources.size()),
-                                static_cast<unsigned>((num_grid_cells + kBlockSize - 1) / kBlockSize),
+                const dim3 grid(static_cast<unsigned>(bucket.cell_pair_count * source_count),
+                                static_cast<unsigned>((bucket.cell_grid_count + kBlockSize - 1) / kBlockSize),
                                 1);
 
-                ghost_cell_kernel<<<grid, block>>>(
+                ghost_cell_kernel<<<grid, block, 0, target_stream>>>(
                     static_cast<Surface*>(cache.d_surfs),
                     num_surfaces,
                     lens.sensor_z,
-                    static_cast<GPUPair*>(cache.d_pairs),
-                    static_cast<int>(gpu_sources.size()),
+                    static_cast<GPUPair*>(bucket.d_cell_pairs),
+                    source_count,
                     static_cast<GPUSource*>(cache.d_src),
-                    static_cast<GPUCell*>(cache.d_grid),
-                    num_grid_cells,
+                    static_cast<GPUCell*>(bucket.d_cell_grid),
+                    bucket.cell_grid_count,
                     lens.surfaces[0].semi_aperture,
                     lens.surfaces[0].z - 20.0f,
                     sensor_half_w,
@@ -1599,38 +1977,184 @@ bool launch_ghost_cuda(const LensSystem& lens,
                     cache.d_out_g,
                     cache.d_out_b,
                     config.gain,
-                    1.0f / static_cast<float>(num_grid_cells),
+                    1.0f / static_cast<float>(bucket.cell_grid_count),
                     config.aperture_blades,
                     config.aperture_rotation_deg * 3.14159265358979323846f / 180.0f,
                     config.cell_edge_inset,
                     config.cell_coverage_bias,
-                    d_spectral_samples,
-                    static_cast<int>(spectral_samples.size()));
+                    static_cast<GPUSpectralSampleDev*>(cache.d_spec),
+                    spectral_count);
 
-                cudaError_t error = cudaGetLastError();
-                if (error != cudaSuccess) {
-                    cudaFree(d_spectral_samples);
-                    report_cuda_error(error, "ghost_cell_kernel", out_error);
-                    return false;
-                }
-
-                error = cudaDeviceSynchronize();
-                if (error != cudaSuccess) {
-                    cudaFree(d_spectral_samples);
-                    report_cuda_error(error, "cudaDeviceSynchronize", out_error);
+                const cudaError_t kernel_error = cudaGetLastError();
+                if (kernel_error != cudaSuccess) {
+                    report_cuda_error(kernel_error, "ghost_cell_kernel", out_error);
                     return false;
                 }
             }
         }
+
+        if (copy_to_host) {
+            const cudaError_t out_r_error = cudaMemcpyAsync(cache.h_out_r,
+                                                            cache.d_out_r,
+                                                            num_pixels * sizeof(float),
+                                                            cudaMemcpyDeviceToHost,
+                                                            target_stream);
+            if (out_r_error != cudaSuccess) {
+                report_cuda_error(out_r_error, "cudaMemcpyAsync(h_out_r)", out_error);
+                return false;
+            }
+            const cudaError_t out_g_error = cudaMemcpyAsync(cache.h_out_g,
+                                                            cache.d_out_g,
+                                                            num_pixels * sizeof(float),
+                                                            cudaMemcpyDeviceToHost,
+                                                            target_stream);
+            if (out_g_error != cudaSuccess) {
+                report_cuda_error(out_g_error, "cudaMemcpyAsync(h_out_g)", out_error);
+                return false;
+            }
+            const cudaError_t out_b_error = cudaMemcpyAsync(cache.h_out_b,
+                                                            cache.d_out_b,
+                                                            num_pixels * sizeof(float),
+                                                            cudaMemcpyDeviceToHost,
+                                                            target_stream);
+            if (out_b_error != cudaSuccess) {
+                report_cuda_error(out_b_error, "cudaMemcpyAsync(h_out_b)", out_error);
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    auto destroy_graph_cache = [&]() {
+        if (cache.graph_exec) {
+            cudaGraphExecDestroy(static_cast<cudaGraphExec_t>(cache.graph_exec));
+            cache.graph_exec = nullptr;
+        }
+        if (cache.graph) {
+            cudaGraphDestroy(static_cast<cudaGraph_t>(cache.graph));
+            cache.graph = nullptr;
+        }
+        cache.graph_key = 0;
+    };
+
+    if (cache.graph_key != graph_key || !cache.graph_exec) {
+        destroy_graph_cache();
+        GPU_CHECK(cudaStreamSynchronize(stream));
+
+        if (cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal) == cudaSuccess) {
+            if (!enqueue_render_commands(stream)) {
+                cudaGraph_t aborted_graph = nullptr;
+                cudaStreamEndCapture(stream, &aborted_graph);
+                if (aborted_graph) {
+                    cudaGraphDestroy(aborted_graph);
+                }
+                destroy_graph_cache();
+                return false;
+            }
+
+            cudaGraph_t captured_graph = nullptr;
+            const cudaError_t end_capture_error = cudaStreamEndCapture(stream, &captured_graph);
+            if (end_capture_error == cudaSuccess && captured_graph) {
+                cudaGraphExec_t graph_exec = nullptr;
+                const cudaError_t instantiate_error =
+                    cudaGraphInstantiate(&graph_exec, captured_graph, nullptr, nullptr, 0);
+                if (instantiate_error == cudaSuccess) {
+                    cache.graph = captured_graph;
+                    cache.graph_exec = graph_exec;
+                    cache.graph_key = graph_key;
+                } else {
+                    cudaGraphDestroy(captured_graph);
+                    destroy_graph_cache();
+                }
+            } else {
+                if (captured_graph) {
+                    cudaGraphDestroy(captured_graph);
+                }
+                destroy_graph_cache();
+            }
+        } else {
+            destroy_graph_cache();
+        }
     }
 
-    GPU_CHECK(cudaMemcpy(out_r, cache.d_out_r, num_pixels * sizeof(float), cudaMemcpyDeviceToHost));
-    GPU_CHECK(cudaMemcpy(out_g, cache.d_out_g, num_pixels * sizeof(float), cudaMemcpyDeviceToHost));
-    GPU_CHECK(cudaMemcpy(out_b, cache.d_out_b, num_pixels * sizeof(float), cudaMemcpyDeviceToHost));
+    if (cache.graph_exec && cache.graph_key == graph_key) {
+        GPU_CHECK(cudaGraphLaunch(static_cast<cudaGraphExec_t>(cache.graph_exec), stream));
+    } else if (!enqueue_render_commands(stream)) {
+        return false;
+    }
 
-    cudaFree(d_spectral_samples);
+    GPU_CHECK(cudaStreamSynchronize(stream));
+
+    if (copy_to_host) {
+        std::memcpy(out_r, cache.h_out_r, num_pixels * sizeof(float));
+        std::memcpy(out_g, cache.h_out_g, num_pixels * sizeof(float));
+        std::memcpy(out_b, cache.h_out_b, num_pixels * sizeof(float));
+    }
 
 #undef GPU_CHECK
 
     return true;
+}
+
+bool launch_ghost_cuda(const LensSystem& lens,
+                       const GhostRenderSetup& setup,
+                       const std::vector<BrightPixel>& sources,
+                       float sensor_half_w,
+                       float sensor_half_h,
+                       float* out_r,
+                       float* out_g,
+                       float* out_b,
+                       int width,
+                       int height,
+                       const GhostConfig& config,
+                       GpuBufferCache& cache,
+                       std::string* out_error)
+{
+    return launch_ghost_cuda_impl(lens,
+                                  setup,
+                                  &sources,
+                                  nullptr,
+                                  static_cast<int>(sources.size()),
+                                  sensor_half_w,
+                                  sensor_half_h,
+                                  out_r,
+                                  out_g,
+                                  out_b,
+                                  width,
+                                  height,
+                                  config,
+                                  cache,
+                                  true,
+                                  out_error);
+}
+
+bool launch_ghost_cuda_device(const LensSystem& lens,
+                              const GhostRenderSetup& setup,
+                              const BrightPixel* device_sources,
+                              int source_count,
+                              float sensor_half_w,
+                              float sensor_half_h,
+                              int width,
+                              int height,
+                              const GhostConfig& config,
+                              GpuBufferCache& cache,
+                              std::string* out_error)
+{
+    return launch_ghost_cuda_impl(lens,
+                                  setup,
+                                  nullptr,
+                                  device_sources,
+                                  source_count,
+                                  sensor_half_w,
+                                  sensor_half_h,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  width,
+                                  height,
+                                  config,
+                                  cache,
+                                  false,
+                                  out_error);
 }

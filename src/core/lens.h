@@ -17,6 +17,7 @@ struct Surface
     float semi_aperture; // clear semi-diameter (mm)
     int coating;         // AR coating layers (0 = uncoated)
     bool is_stop;        // is this the aperture stop?
+    float reflectance_scale = 1.0f; // artist multiplier, 1 = physical prescription
 
     // Computed by LensSystem::compute_geometry()
     float z; // axial position of surface vertex (mm)

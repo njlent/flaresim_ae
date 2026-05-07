@@ -2,6 +2,11 @@
 
 void GpuBufferCache::release()
 {
+    launch_buckets.clear();
+    lens_key = 0;
+    spec_key = 0;
+    setup_key = 0;
+    graph_key = 0;
 }
 
 bool cuda_ghost_renderer_compiled()
@@ -19,13 +24,32 @@ bool cuda_ghost_renderer_available(std::string* reason)
 
 bool launch_ghost_cuda(
     const LensSystem&,
-    const std::vector<GhostPairPlan>&,
+    const GhostRenderSetup&,
     const std::vector<BrightPixel>&,
     float,
     float,
     float*,
     float*,
     float*,
+    int,
+    int,
+    const GhostConfig&,
+    GpuBufferCache&,
+    std::string* out_error)
+{
+    if (out_error) {
+        *out_error = "FlareSim was built without CUDA support.";
+    }
+    return false;
+}
+
+bool launch_ghost_cuda_device(
+    const LensSystem&,
+    const GhostRenderSetup&,
+    const BrightPixel*,
+    int,
+    float,
+    float,
     int,
     int,
     const GhostConfig&,
