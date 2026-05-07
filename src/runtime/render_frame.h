@@ -29,7 +29,7 @@ struct FrameRenderSettings
     int aperture_blades = 0;
     float aperture_rotation_deg = 0.0f;
     float min_ghost = 1e-7f;
-    float flare_gain = 8000.0f;
+    float flare_gain = 4000.0f;
     float sky_brightness = 1.0f;
     float source_cap = 0.0f;
     bool manual_source_enabled = false;
@@ -39,7 +39,7 @@ struct FrameRenderSettings
     float manual_source_r = 1.0f;
     float manual_source_g = 1.0f;
     float manual_source_b = 1.0f;
-    float ghost_blur = 0.003f;
+    float ghost_blur = 0.0005f;
     int ghost_blur_passes = 3;
     GhostCleanupMode ghost_cleanup_mode = GhostCleanupMode::SharpAdaptive;
     float haze_gain = 0.0f;

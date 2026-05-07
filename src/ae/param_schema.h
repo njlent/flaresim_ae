@@ -102,7 +102,7 @@ struct AeUiParameterState
     float anamorphic_squeeze = 1.0f;
     int aperture_blades = 0;
     float aperture_rotation_deg = 0.0f;
-    float flare_gain = 8000.0f;
+    float flare_gain = 4000.0f;
     float sky_brightness = 1.0f;
     float threshold = 8.0f;
     float source_cap = 0.0f;
@@ -122,7 +122,7 @@ struct AeUiParameterState
     int preview_max_sources = 100;
     int preview_downsample = 8;
     int preview_spectral_samples_index = 1;
-    float ghost_blur = 0.003f;
+    float ghost_blur = 0.0005f;
     int ghost_blur_passes = 3;
     int ghost_cleanup_mode_index = 2;
     float haze_gain = 0.0f;
