@@ -26,6 +26,14 @@ A CUDA-accelerated Aftereffects plugin for physically-based lens flare simulatio
 
 AfterEffects 25.5 Windows + CUDA first.
 
+## EffectCraft
+
+This branch (`flaresim_ec`) also builds FlareSim for [EffectCraft](https://github.com/storytold/effectcraft)
+(0.13+) as a WebAssembly effect plug-in, `flaresim_ec.wasm`, from the same core. EffectCraft runs
+plug-ins single-threaded in an interpreter with a per-frame instruction budget, so the plug-in lowers
+quality automatically to fit it (Fit Render Budget). Install, build and limits:
+[docs/effectcraft.md](docs/effectcraft.md).
+
 ## Plugin Settings
 
 The UI is grouped to match the render pipeline: camera setup, aperture shaping, flare/source extraction, then reconstruction and post work.

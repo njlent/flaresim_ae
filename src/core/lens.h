@@ -3,6 +3,7 @@
 // ============================================================================
 #pragma once
 
+#include <iosfwd>
 #include <string>
 #include <vector>
 #include "fresnel.h"
@@ -40,6 +41,12 @@ struct LensSystem
 
     // Load a lens prescription from a .lens file.
     bool load(const char *filename);
+
+    // Parse a prescription already in memory (same format as a .lens file).
+    bool load_from_text(const char *text, const char *source_name = nullptr);
+
+    // Parse a prescription from any stream; source_name is used in messages.
+    bool parse(std::istream &stream, const char *source_name);
 
     // Compute surface z positions and sensor_z from thicknesses.
     void compute_geometry();

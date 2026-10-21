@@ -39,6 +39,20 @@ bool LensSystem::load(const char *filename)
         return false;
     }
 
+    return parse(file, filename);
+}
+
+bool LensSystem::load_from_text(const char *text, const char *source_name)
+{
+    if (!text)
+        return false;
+
+    std::istringstream stream(text);
+    return parse(stream, source_name ? source_name : "<memory>");
+}
+
+bool LensSystem::parse(std::istream &file, const char *filename)
+{
     surfaces.clear();
     name.clear();
     focal_length = 0;

@@ -3,6 +3,8 @@
 .vscode/
 build/
 build-ae/
+build-ec/
+tests/ec_host/target/
 out/
 bin/
 obj/

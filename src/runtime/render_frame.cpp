@@ -458,6 +458,36 @@ void FrameRenderCache::clear()
     starburst_b.clear();
 }
 
+GhostConfig build_ghost_config(const FrameRenderSettings& settings)
+{
+    GhostConfig ghost {};
+    ghost.ray_grid = settings.ray_grid;
+    ghost.min_intensity = settings.min_ghost;
+    ghost.gain = settings.flare_gain;
+    ghost.spectral_samples = settings.spectral_samples;
+    ghost.anamorphic_squeeze = settings.anamorphic_squeeze;
+    ghost.aperture_blades = settings.aperture_blades;
+    ghost.aperture_rotation_deg = settings.aperture_rotation_deg;
+    ghost.ghost_normalize = settings.ghost_normalize;
+    ghost.max_area_boost = settings.max_area_boost;
+    ghost.cleanup_mode = settings.ghost_cleanup_mode;
+    ghost.adaptive_quality = settings.adaptive_quality;
+    ghost.adaptive_sampling_strength = settings.adaptive_sampling_strength;
+    ghost.footprint_radius_bias = settings.footprint_radius_bias;
+    ghost.footprint_clamp = settings.footprint_clamp;
+    ghost.max_adaptive_pair_grid = settings.max_adaptive_pair_grid;
+    ghost.pair_start_index = settings.pair_start;
+    ghost.pair_count = settings.pair_count;
+    ghost.projected_cells_mode = settings.projected_cells_mode;
+    ghost.pupil_jitter = settings.pupil_jitter_mode;
+    ghost.pupil_jitter_seed = settings.pupil_jitter_seed;
+    ghost.spectral_jitter = settings.spectral_jitter_mode;
+    ghost.spectral_jitter_seed = settings.spectral_jitter_seed;
+    ghost.cell_coverage_bias = settings.cell_coverage_bias;
+    ghost.cell_edge_inset = settings.cell_edge_inset;
+    return ghost;
+}
+
 bool compute_camera_fov(const FrameRenderSettings& settings,
                         int width,
                         int height,
@@ -620,31 +650,7 @@ bool render_frame(
             outputs.flare_b.assign(np, 0.0f);
 
             if (!outputs.sources.empty()) {
-                GhostConfig ghost {};
-                ghost.ray_grid = settings.ray_grid;
-                ghost.min_intensity = settings.min_ghost;
-                ghost.gain = settings.flare_gain;
-                ghost.spectral_samples = settings.spectral_samples;
-                ghost.anamorphic_squeeze = settings.anamorphic_squeeze;
-                ghost.aperture_blades = settings.aperture_blades;
-                ghost.aperture_rotation_deg = settings.aperture_rotation_deg;
-                ghost.ghost_normalize = settings.ghost_normalize;
-                ghost.max_area_boost = settings.max_area_boost;
-                ghost.cleanup_mode = settings.ghost_cleanup_mode;
-                ghost.adaptive_quality = settings.adaptive_quality;
-                ghost.adaptive_sampling_strength = settings.adaptive_sampling_strength;
-                ghost.footprint_radius_bias = settings.footprint_radius_bias;
-                ghost.footprint_clamp = settings.footprint_clamp;
-                ghost.max_adaptive_pair_grid = settings.max_adaptive_pair_grid;
-                ghost.pair_start_index = settings.pair_start;
-                ghost.pair_count = settings.pair_count;
-                ghost.projected_cells_mode = settings.projected_cells_mode;
-                ghost.pupil_jitter = settings.pupil_jitter_mode;
-                ghost.pupil_jitter_seed = settings.pupil_jitter_seed;
-                ghost.spectral_jitter = settings.spectral_jitter_mode;
-                ghost.spectral_jitter_seed = settings.spectral_jitter_seed;
-                ghost.cell_coverage_bias = settings.cell_coverage_bias;
-                ghost.cell_edge_inset = settings.cell_edge_inset;
+                const GhostConfig ghost = build_ghost_config(settings);
 
                 const std::uint64_t ghost_setup_key = make_ghost_setup_key(
                     lens_key,

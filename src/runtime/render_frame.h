@@ -162,6 +162,9 @@ struct FrameRenderCache
     void clear();
 };
 
+// The ghost renderer configuration render_frame() uses for these settings.
+GhostConfig build_ghost_config(const FrameRenderSettings& settings);
+
 bool compute_camera_fov(const FrameRenderSettings& settings,
                         int width,
                         int height,

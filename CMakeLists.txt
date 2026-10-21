@@ -59,7 +59,17 @@ unset(_flaresim_ae_sdk_candidates)
 unset(_flaresim_ae_sdk_nested_candidates)
 unset(_flaresim_ae_sdk_requested_root)
 
-find_package(OpenMP)
+# wasi-sdk toolchain: build only the EffectCraft WebAssembly plug-in (no CUDA, OpenMP or AE SDK).
+if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+    set(FLARESIM_EC_WASM ON)
+    set(FLARESIM_ENABLE_CUDA OFF)
+    set(FLARESIM_AE_ENABLE_AE_PLUGIN OFF)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    add_compile_options(-fno-exceptions -O3)
+else()
+    set(FLARESIM_EC_WASM OFF)
+    find_package(OpenMP)
+endif()
 
 set(FLARESIM_CUDA_ENABLED OFF)
 
@@ -152,6 +162,11 @@ target_include_directories(flaresim_runtime
 )
 
 target_link_libraries(flaresim_runtime PUBLIC flaresim_core)
+
+if(FLARESIM_EC_WASM)
+    add_subdirectory(src/ec)
+    return()
+endif()
 
 add_subdirectory(src/ae)
 
