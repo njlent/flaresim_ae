@@ -5,8 +5,10 @@
  Flaresim AE</h1>
 
  <img src="https://img.shields.io/badge/AfterEffects Addon-050059"/> 
+ <img src="https://img.shields.io/badge/Photoshop Filter-001E36"/> 
  <br>
  <img src="https://custom-icon-badges.demolab.com/badge/AE 2025.5-0078D6?logo=windows11&logoColor=white"/> 
+ <img src="https://custom-icon-badges.demolab.com/badge/PS 2026-0078D6?logo=windows11&logoColor=white"/> 
  <img src="https://img.shields.io/badge/CUDA-76B900?logo=nvidia&logoColor=fff"/> 
 
 
@@ -15,21 +17,35 @@
 
 
 
-After Effects port of FlareSim.
+FlareSim ported to After Effects and Photoshop.
 
-A CUDA-accelerated Aftereffects plugin for physically-based lens flare simulation. FlareSim traces rays through a real lens prescription to produce ghost reflections that respond correctly to source position, wavelength, and aperture shape — without look-up textures or artist-painted elements.
+FlareSim simulates lens flares physically. It traces rays through a real lens prescription, so the ghost reflections move with the light source, split by wavelength and take the shape of the aperture. There are no lookup textures and no painted flare elements.
+
+Both plugins share one CUDA renderer, with a CPU/OpenMP fallback when no CUDA device is available. The same settings give the same render in either host.
 
 > [!IMPORTANT]
 > This is mostly for personal exploration and NOT production tested or stable.
 
-## Supported versions: 
+## Supported versions
 
-AfterEffects 25.5 Windows + CUDA first.
+| Host | Plugin | Tested with | Bit depths |
+| --- | --- | --- | --- |
+| After Effects | `FlareSimAE.aex` effect | AE 2025 (25.5), Windows | 8, 16, 32 bpc |
+| Photoshop | `FlareSimPS.8bf` filter | PS 2026 (27.6), Windows | 8, 16, 32 bpc RGB |
 
-## Plugin Settings
+Windows only for now. CUDA runs on NVIDIA GPUs; other machines use the CPU path, which is a lot slower.
 
-The UI is grouped to match the render pipeline: camera setup, aperture shaping, flare/source extraction, then reconstruction and post work.
-Defaults below match the current plugin build.
+## Building and installing
+
+Build steps for both plugins are in [docs/build.md](docs/build.md). Each needs its Adobe SDK, which isn't in this repo. Download the After Effects SDK and the Photoshop Plug-In and Connection SDK from the [Adobe Developer Console](https://developer.adobe.com/console) (Downloads).
+
+- After Effects: copy `FlareSimAE.aex` into `<After Effects>\Support Files\Plug-ins\Effects\`.
+- Photoshop: run `scripts/install_ps_plugin.ps1`. It asks for admin rights and copies the filter, `cudart64_12.dll` and `assets/lenses` into `<Photoshop>\Plug-ins\FlareSim\`. Restart Photoshop afterwards.
+
+## Plugin settings
+
+Both hosts show the same controls, grouped in render order: camera setup, aperture shaping, flare/source extraction, then reconstruction and post work.
+The defaults below match the current build. A few controls only exist in one host; see [View and host-specific controls](#view-and-host-specific-controls).
 
 ### Lens
 
@@ -137,12 +153,13 @@ Guidance:
 - perf spikes in hard shots: keep `Adaptive Sampling` disabled, or cap `Max Pair Grid`
 - pair isolation: raise `Pair Start`, then set `Pair Count = 1` to inspect one active pair at a time
 
-### View + AE-only controls
+### View and host-specific controls
 
-| Setting | Values / range | Default | Notes |
-| --- | --- | --- | --- |
-| View | `Composite`, `Flare Only`, `Bloom Only`, `Sources`, `Diagnostics` | `Composite` | Debug/output selection inside After Effects. |
-| Mask Layer | AE layer selector | none | Limits source detection to the chosen layer's visible content in comp space while flare/haze/starburst still render across the full frame. |
+| Setting | Values / range | Default | Hosts | Notes |
+| --- | --- | --- | --- | --- |
+| View | `Composite`, `Flare Only`, `Bloom Only`, `Sources`, `Diagnostics` | `Composite` | AE, PS | Output selection. In Photoshop, `Flare Only` on a duplicate layer gives you the flare on its own layer. |
+| Mask Layer | AE layer selector | none | AE | Limits source detection to the chosen layer's visible content in comp space. Flare, haze and starburst still render across the full frame. |
+| Auto Seed | `Off`, `On` | `On` | AE | Seeds Stratified jitter from the frame number. Photoshop has no timeline, so it always uses `Jitter Seed`. |
 
 Mask Layer behavior:
 - only affects source detection
@@ -154,17 +171,17 @@ Mask Layer behavior:
 
 ## Photoshop filter
 
-`FlareSimPS.8bf` is a Filter-menu plug-in (`Filter > FlareSim > FlareSim...`) built on the same runtime as the AE effect, so the same settings give the same render.
-Built and tested against Photoshop 2026 (27.6) on Windows, with CUDA when available and the CPU/OpenMP fallback otherwise.
+The filter is at `Filter > FlareSim > FlareSim...`. It works on RGB documents in 8, 16 and 32 bits per channel.
 
-- RGB documents in 8, 16 and **32 bits per channel**. 32-bit documents are linear HDR: source detection sees real scene values and the result keeps over-range values (`allowOverrangeColors`), so use 32-bit when `Threshold` should mean what it says. 8/16-bit values are 0..1, so detection needs a threshold below 1 there.
-- The whole document is the camera frame. A selection limits where the flare is written, not where sources are detected or where ghosts land.
-- Works as a Smart Filter; double-click it to re-open the dialog with its stored settings.
-- On a layer with transparency, colour is premultiplied for the render and written back as straight alpha. With `Manual Source` on, the filter draws a flare onto an empty layer.
-- The dialog has a live preview (fit, half or full resolution). Click or drag in the preview to place the manual source; positions outside the image give off-frame sources.
-- All controls from the AE effect except `Mask Layer` and `Auto Seed` (Photoshop has no layers-as-parameters or timeline). `View` is available, so `Flare Only` can render the flare onto its own layer.
+Use 32-bit if you can. A 32-bit document is linear HDR, so source detection sees real scene values and the result keeps values above 1.0. In 8- and 16-bit documents every pixel tops out at 1.0, and the default `Threshold` of 8 finds nothing. Set `Threshold` just below 1 (around `0.9`-`0.98`) and raise `Flare Gain` a lot (around `40000`) to get a visible flare there. The status line under the preview reports how many image sources the current settings detect. If it finds none, it shows the brightest pixel next to the threshold.
 
-Install with `scripts/install_ps_plugin.ps1` (copies the plug-in, `cudart64_12.dll` and `assets/lenses` into `<Photoshop>\Plug-ins\FlareSim\`), then restart Photoshop.
+How it behaves:
+- The whole document is the camera frame. A selection limits where the flare is written. It doesn't change where sources are detected or where ghosts land.
+- It works as a Smart Filter. Double-click the filter entry to reopen the dialog with its stored settings.
+- On a layer with transparency, the filter premultiplies colour for the render and writes straight alpha back. With `Manual Source` on, it can draw a flare onto an empty layer.
+- The preview renders at fit, half or full resolution in the background. Click or drag in it to place the manual source. Positions outside the image give off-frame sources.
+- The dialog remembers the last settings you confirmed with OK. Scripted runs and actions don't change them.
+- The render can't be cancelled once it starts, and the plugin holds the whole document in RAM as 32-bit float.
 
 Scripting and actions: the filter's event is `stringIDToTypeID("flareSimPS")` with one text key `FsSt` holding `flaresim-ps 1` followed by `key=value` lines. The keys (`lens`, `flare_gain`, `ray_grid`, `view`, ...) are listed in `src/ps/ps_settings.cpp`; popups take their label text. Missing keys use defaults, never the last-used settings, so a script renders the same every time.
 
