@@ -372,6 +372,11 @@ bool render_frame_to_float_image(
     return true;
 }
 
+std::size_t last_render_source_count()
+{
+    return thread_render_context().outputs.sources.size();
+}
+
 bool render_frame_to_pixels(
     const std::string& asset_root,
     const AeParameterState& state,

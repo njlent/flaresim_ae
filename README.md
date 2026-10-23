@@ -152,6 +152,28 @@ Mask Layer behavior:
 - practical use: isolate which tracked highlights emit flares without cutting off the flare itself
 
 
+## Photoshop filter
+
+`FlareSimPS.8bf` is a Filter-menu plug-in (`Filter > FlareSim > FlareSim...`) built on the same runtime as the AE effect, so the same settings give the same render.
+Built and tested against Photoshop 2026 (27.6) on Windows, with CUDA when available and the CPU/OpenMP fallback otherwise.
+
+- RGB documents in 8, 16 and **32 bits per channel**. 32-bit documents are linear HDR: source detection sees real scene values and the result keeps over-range values (`allowOverrangeColors`), so use 32-bit when `Threshold` should mean what it says. 8/16-bit values are 0..1, so detection needs a threshold below 1 there.
+- The whole document is the camera frame. A selection limits where the flare is written, not where sources are detected or where ghosts land.
+- Works as a Smart Filter; double-click it to re-open the dialog with its stored settings.
+- On a layer with transparency, colour is premultiplied for the render and written back as straight alpha. With `Manual Source` on, the filter draws a flare onto an empty layer.
+- The dialog has a live preview (fit, half or full resolution). Click or drag in the preview to place the manual source; positions outside the image give off-frame sources.
+- All controls from the AE effect except `Mask Layer` and `Auto Seed` (Photoshop has no layers-as-parameters or timeline). `View` is available, so `Flare Only` can render the flare onto its own layer.
+
+Install with `scripts/install_ps_plugin.ps1` (copies the plug-in, `cudart64_12.dll` and `assets/lenses` into `<Photoshop>\Plug-ins\FlareSim\`), then restart Photoshop.
+
+Scripting and actions: the filter's event is `stringIDToTypeID("flareSimPS")` with one text key `FsSt` holding `flaresim-ps 1` followed by `key=value` lines. The keys (`lens`, `flare_gain`, `ray_grid`, `view`, ...) are listed in `src/ps/ps_settings.cpp`; popups take their label text. Missing keys use defaults, never the last-used settings, so a script renders the same every time.
+
+```js
+var desc = new ActionDescriptor();
+desc.putString(charIDToTypeID("FsSt"), "flaresim-ps 1\nlens=double-gauss\nflare_gain=2000\nview=Flare Only\n");
+executeAction(stringIDToTypeID("flareSimPS"), desc, DialogModes.NO);
+```
+
 ## License
 
 Unless noted otherwise, original project material in this repository is licensed under the
