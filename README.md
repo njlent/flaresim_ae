@@ -2,7 +2,7 @@
 
  <h1> <img src="docs/icon.png" width="100px">
  <br/>
- Flaresim AE</h1>
+ Flaresim AE + PS</h1>
 
  <img src="https://img.shields.io/badge/AfterEffects Addon-050059"/> 
  <img src="https://img.shields.io/badge/Photoshop Filter-001E36"/> 
