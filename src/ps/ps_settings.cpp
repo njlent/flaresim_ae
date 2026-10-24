@@ -136,6 +136,7 @@ const PsParamDesc kParams[] = {
     make_float("cell_coverage", "Cell Coverage", kAdvanced, &S::cell_coverage_bias, 0.5f, 2.5f, 0.1f, kFloatMax, 2),
     make_float("cell_edge_inset", "Cell Edge Inset", kAdvanced, &S::cell_edge_inset, 0.0f, 0.45f, 0.0f, kFloatMax, 2),
 
+    make_choice("color_space", "Color Space", kOutput, &S::color_space_index, build_color_space_popup_string),
     make_choice("view", "View", kOutput, &S::view_mode_index, build_output_view_popup_string),
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bloom.h"
+#include "color_space.h"
 #include "ghost.h"
 #include "ghost_cuda.h"
 #include "image.h"
@@ -8,6 +9,7 @@
 #include "starburst.h"
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 struct FrameRenderSettings
@@ -68,6 +70,9 @@ struct FrameRenderSettings
     float cell_coverage_bias = 1.0f;
     float cell_edge_inset = 0.1f;
     BloomConfig bloom {};
+    // Space of the input image and of the output. render_frame itself always
+    // works in linear Rec.709; the host bridges convert at the edges.
+    WorkingColorSpace working_space = WorkingColorSpace::LinearRec709;
 };
 
 struct FrameRenderPlan
@@ -160,6 +165,26 @@ struct FrameRenderCache
     std::vector<float> starburst_b;
 
     void clear();
+};
+
+// Progress and cancellation for render_frame on the current thread. While a
+// ScopedRenderProgress is alive, render_frame reports the finished fraction
+// (0..1) to the callback between stages and between chunks of flare sources;
+// returning false cancels the render, and render_frame returns false without
+// caching partial results. Without a scope, renders run unchunked as before.
+using RenderProgressCallback = std::function<bool(float fraction)>;
+
+class ScopedRenderProgress
+{
+public:
+    explicit ScopedRenderProgress(RenderProgressCallback callback);
+    ~ScopedRenderProgress();
+    ScopedRenderProgress(const ScopedRenderProgress&) = delete;
+    ScopedRenderProgress& operator=(const ScopedRenderProgress&) = delete;
+
+private:
+    RenderProgressCallback callback_;
+    const RenderProgressCallback* previous_ = nullptr;
 };
 
 bool compute_camera_fov(const FrameRenderSettings& settings,

@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <vector>
 
 namespace {
 
@@ -373,70 +374,9 @@ __global__ void expand_alpha_kernel(const float* input_pixels,
     out_px[3] = fmaxf(input_px[3], rgb_alpha);
 }
 
-__global__ void cluster_sorted_sources_kernel(const BrightPixel* sorted_candidates,
-                                              int candidate_count,
-                                              BrightPixel* out_sources,
-                                              int max_sources,
-                                              int cluster_radius_px,
-                                              int image_width,
-                                              float tan_half_fov_h)
-{
-    if (blockIdx.x != 0 || threadIdx.x != 0) {
-        return;
-    }
-
-    for (int i = 0; i < max_sources; ++i) {
-        out_sources[i] = BrightPixel {};
-    }
-
-    if (candidate_count <= 0 || max_sources <= 0) {
-        return;
-    }
-
-    const bool use_cluster = cluster_radius_px > 0 && image_width > 0 && tan_half_fov_h > 0.0f;
-    const float angle_per_px = use_cluster ? (2.0f * tan_half_fov_h / static_cast<float>(image_width)) : 0.0f;
-    const float threshold = use_cluster ? (static_cast<float>(cluster_radius_px) * angle_per_px) : 0.0f;
-    const float threshold_sq = threshold * threshold;
-
-    int out_count = 0;
-    for (int candidate_index = 0; candidate_index < candidate_count; ++candidate_index) {
-        const BrightPixel candidate = sorted_candidates[candidate_index];
-        const float candidate_luma = bright_pixel_luma(candidate);
-        if (!(candidate_luma > 0.0f)) {
-            break;
-        }
-
-        bool merged = false;
-        if (use_cluster) {
-            for (int source_index = 0; source_index < out_count; ++source_index) {
-                BrightPixel& merged_source = out_sources[source_index];
-                const float delta_x = merged_source.angle_x - candidate.angle_x;
-                const float delta_y = merged_source.angle_y - candidate.angle_y;
-                if (delta_x * delta_x + delta_y * delta_y > threshold_sq) {
-                    continue;
-                }
-
-                const float merged_luma = bright_pixel_luma(merged_source);
-                const float sum_luma = merged_luma + candidate_luma;
-                if (sum_luma > 0.0f) {
-                    merged_source.angle_x =
-                        (merged_source.angle_x * merged_luma + candidate.angle_x * candidate_luma) / sum_luma;
-                    merged_source.angle_y =
-                        (merged_source.angle_y * merged_luma + candidate.angle_y * candidate_luma) / sum_luma;
-                }
-                merged_source.r += candidate.r;
-                merged_source.g += candidate.g;
-                merged_source.b += candidate.b;
-                merged = true;
-                break;
-            }
-        }
-
-        if (!merged && out_count < max_sources) {
-            out_sources[out_count++] = candidate;
-        }
-    }
-}
+// Brightness of the detected blocks drawn behind clustered sources; matches
+// the CPU Sources view.
+constexpr float kClusterMemberLuma = 0.2f;
 
 __global__ void draw_source_block_kernel(const BrightPixel* sources,
                                          int source_index,
@@ -481,6 +421,44 @@ __global__ void draw_source_block_kernel(const BrightPixel* sources,
         out_px[1] *= 0.25f;
         out_px[0] *= 0.25f;
     }
+}
+
+__global__ void draw_cluster_members_kernel(const BrightPixel* candidates,
+                                            int candidate_count,
+                                            int stride,
+                                            float tan_half_h,
+                                            float tan_half_v,
+                                            float member_luma,
+                                            float* output_pixels,
+                                            int output_row_floats,
+                                            int width,
+                                            int height)
+{
+    const long long block_pixels = static_cast<long long>(stride) * stride;
+    const long long index = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (index >= block_pixels * candidate_count) {
+        return;
+    }
+    const BrightPixel member = candidates[index / block_pixels];
+    const float luma = bright_pixel_luma(member);
+    if (!(luma > 0.0f)) {
+        return;
+    }
+    // Same block lookup as bright_pixel_block on the host.
+    const float px = (tanf(member.angle_x) / (2.0f * tan_half_h) + 0.5f) * static_cast<float>(width);
+    const float py = (tanf(member.angle_y) / (2.0f * tan_half_v) + 0.5f) * static_cast<float>(height);
+    const int local = static_cast<int>(index % block_pixels);
+    const int x = static_cast<int>(floorf(px / static_cast<float>(stride))) * stride + local % stride;
+    const int y = static_cast<int>(floorf(py / static_cast<float>(stride))) * stride + local / stride;
+    if (x < 0 || x >= width || y < 0 || y >= height) {
+        return;
+    }
+    const float dim = member_luma / luma;
+    float* out_px =
+        output_pixels + static_cast<std::size_t>(y) * output_row_floats + static_cast<std::size_t>(x) * 4u;
+    out_px[0] = member.b * dim;
+    out_px[1] = member.g * dim;
+    out_px[2] = member.r * dim;
 }
 
 __global__ void rasterize_haze_source_kernel(const BrightPixel* sources,
@@ -681,9 +659,26 @@ bool ensure_rgb_buffers(float*& r,
                         std::string* out_error)
 {
     const std::size_t needed_bytes = needed_floats * sizeof(float);
-    return ensure_device_bytes(reinterpret_cast<void*&>(r), current_bytes, needed_bytes, out_error) &&
-           ensure_device_bytes(reinterpret_cast<void*&>(g), current_bytes, needed_bytes, out_error) &&
-           ensure_device_bytes(reinterpret_cast<void*&>(b), current_bytes, needed_bytes, out_error);
+    if (r && g && b && needed_bytes <= current_bytes) {
+        return true;
+    }
+    // One size covers all three planes, so they grow together. (Growing them
+    // one by one against the shared size reallocated only the first.)
+    cudaFree(r);
+    cudaFree(g);
+    cudaFree(b);
+    r = g = b = nullptr;
+    current_bytes = 0;
+    std::size_t r_bytes = 0;
+    std::size_t g_bytes = 0;
+    std::size_t b_bytes = 0;
+    if (!ensure_device_bytes(reinterpret_cast<void*&>(r), r_bytes, needed_bytes, out_error) ||
+        !ensure_device_bytes(reinterpret_cast<void*&>(g), g_bytes, needed_bytes, out_error) ||
+        !ensure_device_bytes(reinterpret_cast<void*&>(b), b_bytes, needed_bytes, out_error)) {
+        return false;
+    }
+    current_bytes = needed_bytes;
+    return true;
 }
 
 bool blur_channel(float* src, float* tmp, float* dst, int width, int height, int radius, int passes)
@@ -766,6 +761,8 @@ void GpuFrameRenderCache::release()
     cudaFree(d_candidates);
     cudaFree(d_sources);
     cudaFree(d_starburst_psf);
+    cudaFree(d_rec709_input);
+    d_rec709_input = nullptr; rec709_input_bytes = 0;
     d_scene_bgra = nullptr; scene_floats = 0;
     d_bloom_r = d_bloom_g = d_bloom_b = nullptr; bloom_floats = 0;
     d_haze_r = d_haze_g = d_haze_b = nullptr; haze_floats = 0;
@@ -779,7 +776,9 @@ void GpuFrameRenderCache::release()
     starburst_psf_key = 0; starburst_psf = {};
 }
 
-bool render_frame_cuda_bgra128(const LensSystem& lens,
+// Renders a linear Rec.709 image; render_frame_cuda_bgra128 converts other
+// working spaces around it.
+static bool render_frame_cuda_bgra128_rec709(const LensSystem& lens,
                                const FrameRenderSettings& settings,
                                AeOutputView view,
                                const float* input_pixels,
@@ -803,6 +802,8 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
     const FrameRenderPlan plan = build_output_view_render_plan(view);
     const bool need_sources = plan.need_source_output || plan.need_flare || plan.need_haze || plan.need_starburst;
     int source_count = 0;
+    // Detected blocks before clustering, sorted to the front of d_candidates.
+    int candidate_count = 0;
     float fov_h = 0.0f;
     float fov_v = 0.0f;
     if (need_sources && !compute_camera_fov(settings, width, height, fov_h, fov_v)) {
@@ -870,13 +871,14 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
             return false;
         }
 
+        int valid_count = 0;
         try {
             auto candidates_begin = thrust::device_pointer_cast(cache.d_candidates);
             thrust::sort(thrust::device,
                          candidates_begin,
                          candidates_begin + static_cast<std::ptrdiff_t>(max_candidates),
                          BrightPixelIntensityGreater {});
-            const int valid_count =
+            valid_count =
                 static_cast<int>(thrust::count_if(thrust::device,
                                                   candidates_begin,
                                                   candidates_begin + static_cast<std::ptrdiff_t>(max_candidates),
@@ -884,9 +886,36 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
             source_count = settings.max_sources > 0
                                ? std::min(valid_count, settings.max_sources)
                                : valid_count;
+            candidate_count = valid_count;
         } catch (const std::exception& error) {
             report_error(error.what(), out_error);
             return false;
+        }
+
+        // Clustering runs on the host with the CPU path's implementation so
+        // both backends group sources the same way. Candidates with energy
+        // are sorted to the front, so only those are copied.
+        std::vector<BrightPixel> clustered_sources;
+        const bool cluster_on_host = settings.cluster_radius_px > 0 && source_count > 0;
+        if (cluster_on_host) {
+            clustered_sources.resize(static_cast<std::size_t>(valid_count));
+            const cudaError_t download_error = cudaMemcpy(clustered_sources.data(),
+                                                          cache.d_candidates,
+                                                          clustered_sources.size() * sizeof(BrightPixel),
+                                                          cudaMemcpyDeviceToHost);
+            if (download_error != cudaSuccess) {
+                report_error(cudaGetErrorString(download_error), out_error);
+                return false;
+            }
+            cluster_bright_pixels(clustered_sources,
+                                  settings.cluster_radius_px,
+                                  stride,
+                                  width,
+                                  height,
+                                  std::tan(fov_h * 0.5f),
+                                  std::tan(fov_v * 0.5f));
+            limit_bright_pixels(clustered_sources, static_cast<std::size_t>(std::max(settings.max_sources, 0)));
+            source_count = static_cast<int>(clustered_sources.size());
         }
 
         BrightPixel manual_source {};
@@ -903,18 +932,18 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
             }
 
             if (detected_source_count > 0) {
-                const int precluster_count =
-                    std::min<int>(static_cast<int>(max_candidates),
-                                  std::max(detected_source_count * 8, detected_source_count));
-                cluster_sorted_sources_kernel<<<1, 1>>>(cache.d_candidates,
-                                                        precluster_count,
-                                                        cache.d_sources,
-                                                        detected_source_count,
-                                                        settings.cluster_radius_px,
-                                                        width,
-                                                        std::tan(fov_h * 0.5f));
-                if (cudaGetLastError() != cudaSuccess) {
-                    report_error("cluster_sorted_sources_kernel failed.", out_error);
+                const cudaError_t copy_error =
+                    cluster_on_host
+                        ? cudaMemcpy(cache.d_sources,
+                                     clustered_sources.data(),
+                                     static_cast<std::size_t>(detected_source_count) * sizeof(BrightPixel),
+                                     cudaMemcpyHostToDevice)
+                        : cudaMemcpy(cache.d_sources,
+                                     cache.d_candidates,
+                                     static_cast<std::size_t>(detected_source_count) * sizeof(BrightPixel),
+                                     cudaMemcpyDeviceToDevice);
+                if (copy_error != cudaSuccess) {
+                    report_error(cudaGetErrorString(copy_error), out_error);
                     return false;
                 }
             }
@@ -1003,6 +1032,17 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
                 !blur_channel(cache.ghost_cache.d_out_g, cache.d_work0_g, cache.d_work1_g, width, height, radius, settings.ghost_blur_passes) ||
                 !blur_channel(cache.ghost_cache.d_out_b, cache.d_work0_b, cache.d_work1_b, width, height, radius, settings.ghost_blur_passes)) {
                 report_error("Failed to blur flare buffers.", out_error);
+                return false;
+            }
+        }
+        const int cluster_soften = cluster_softening_radius_px(settings.cluster_radius_px, settings.downsample);
+        if (cluster_soften > 0) {
+            if (!ensure_rgb_buffers(cache.d_work0_r, cache.d_work0_g, cache.d_work0_b, cache.work0_floats, np, out_error) ||
+                !ensure_rgb_buffers(cache.d_work1_r, cache.d_work1_g, cache.d_work1_b, cache.work1_floats, np, out_error) ||
+                !blur_channel(cache.ghost_cache.d_out_r, cache.d_work0_r, cache.d_work1_r, width, height, cluster_soften, 1) ||
+                !blur_channel(cache.ghost_cache.d_out_g, cache.d_work0_g, cache.d_work1_g, width, height, cluster_soften, 1) ||
+                !blur_channel(cache.ghost_cache.d_out_b, cache.d_work0_b, cache.d_work1_b, width, height, cluster_soften, 1)) {
+                report_error("Failed to soften clustered flare buffers.", out_error);
                 return false;
             }
         }
@@ -1104,6 +1144,17 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
                                                                             height,
                                                                             span);
             }
+            const int cluster_soften = cluster_softening_radius_px(settings.cluster_radius_px, settings.downsample);
+            if (cluster_soften > 0) {
+                if (!ensure_rgb_buffers(cache.d_work0_r, cache.d_work0_g, cache.d_work0_b, cache.work0_floats, np, out_error) ||
+                    !ensure_rgb_buffers(cache.d_work1_r, cache.d_work1_g, cache.d_work1_b, cache.work1_floats, np, out_error) ||
+                    !blur_channel(cache.d_starburst_r, cache.d_work0_r, cache.d_work1_r, width, height, cluster_soften, 1) ||
+                    !blur_channel(cache.d_starburst_g, cache.d_work0_g, cache.d_work1_g, width, height, cluster_soften, 1) ||
+                    !blur_channel(cache.d_starburst_b, cache.d_work0_b, cache.d_work1_b, width, height, cluster_soften, 1)) {
+                    report_error("Failed to soften clustered starburst buffers.", out_error);
+                    return false;
+                }
+            }
         }
     }
 
@@ -1194,6 +1245,22 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         const float tan_half_h = std::tan(fov_h * 0.5f);
         const float tan_half_v = std::tan(fov_v * 0.5f);
         const int block = std::max(3, settings.downsample);
+        // With clustering on, every detected block is shown dim so each
+        // merged region is visible around the single source it became.
+        if (view == AeOutputView::Sources && settings.cluster_radius_px > 0 && candidate_count > 0) {
+            const int stride = std::max(1, settings.downsample);
+            const long long threads = static_cast<long long>(stride) * stride * candidate_count;
+            draw_cluster_members_kernel<<<static_cast<unsigned>((threads + 255) / 256), 256>>>(cache.d_candidates,
+                                                                                            candidate_count,
+                                                                                            stride,
+                                                                                            tan_half_h,
+                                                                                            tan_half_v,
+                                                                                            kClusterMemberLuma,
+                                                                                            output_pixels,
+                                                                                            output_row_floats,
+                                                                                            width,
+                                                                                            height);
+        }
         const dim3 source_grid((block + kBlockSize2D - 1) / kBlockSize2D,
                                (block + kBlockSize2D - 1) / kBlockSize2D,
                                1);
@@ -1219,5 +1286,114 @@ bool render_frame_cuda_bgra128(const LensSystem& lens,
         return false;
     }
 
+    return true;
+}
+
+namespace {
+
+struct DeviceColorMatrix
+{
+    float m[9];
+};
+
+// BGRA rows in, BGRA rows out; alpha is copied. src and dst may alias.
+__global__ void convert_bgra_kernel(const float* src,
+                                    int src_row_floats,
+                                    float* dst,
+                                    int dst_row_floats,
+                                    int width,
+                                    int height,
+                                    DeviceColorMatrix matrix)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height) {
+        return;
+    }
+    const float* in = src + static_cast<std::size_t>(y) * src_row_floats + static_cast<std::size_t>(x) * 4u;
+    float* out = dst + static_cast<std::size_t>(y) * dst_row_floats + static_cast<std::size_t>(x) * 4u;
+    const float b = in[0];
+    const float g = in[1];
+    const float r = in[2];
+    const float a = in[3];
+    const float* m = matrix.m;
+    out[2] = m[0] * r + m[1] * g + m[2] * b;
+    out[1] = m[3] * r + m[4] * g + m[5] * b;
+    out[0] = m[6] * r + m[7] * g + m[8] * b;
+    out[3] = a;
+}
+
+DeviceColorMatrix device_matrix(const ColorMatrix& matrix)
+{
+    DeviceColorMatrix out {};
+    std::memcpy(out.m, matrix.m, sizeof(out.m));
+    return out;
+}
+
+} // namespace
+
+bool render_frame_cuda_bgra128(const LensSystem& lens,
+                               const FrameRenderSettings& settings,
+                               AeOutputView view,
+                               const float* input_pixels,
+                               float* output_pixels,
+                               int width,
+                               int height,
+                               int input_row_floats,
+                               int output_row_floats,
+                               const float* mask_pixels,
+                               int mask_row_floats,
+                               GpuFrameRenderCache& cache,
+                               GhostRenderBackend* out_ghost_backend,
+                               std::string* out_error)
+{
+    // A mask without its own row size shares the input's.
+    const int mask_rows = mask_pixels ? (mask_row_floats > 0 ? mask_row_floats : input_row_floats) : 0;
+    if (settings.working_space == WorkingColorSpace::LinearRec709 || width <= 0 || height <= 0) {
+        return render_frame_cuda_bgra128_rec709(lens, settings, view, input_pixels, output_pixels, width, height,
+                                                input_row_floats, output_row_floats, mask_pixels, mask_rows,
+                                                cache, out_ghost_backend, out_error);
+    }
+
+    // Same edges as the CPU bridge: input and manual source colour into
+    // linear Rec.709, the composited output back to the working space.
+    const ColorMatrix& to_rec709 = working_to_rec709_matrix(settings.working_space);
+    FrameRenderSettings rec709_settings = settings;
+    rec709_settings.working_space = WorkingColorSpace::LinearRec709;
+    apply_color_matrix(to_rec709,
+                       rec709_settings.manual_source_r,
+                       rec709_settings.manual_source_g,
+                       rec709_settings.manual_source_b);
+
+    const int rec709_row_floats = width * 4;
+    const std::size_t floats = static_cast<std::size_t>(rec709_row_floats) * static_cast<std::size_t>(height);
+    if (!ensure_device_bytes(reinterpret_cast<void*&>(cache.d_rec709_input),
+                             cache.rec709_input_bytes,
+                             floats * sizeof(float),
+                             out_error)) {
+        return false;
+    }
+    const dim3 block(kBlockSize2D, kBlockSize2D, 1);
+    const dim3 grid((width + kBlockSize2D - 1) / kBlockSize2D, (height + kBlockSize2D - 1) / kBlockSize2D, 1);
+    convert_bgra_kernel<<<grid, block>>>(input_pixels, input_row_floats, cache.d_rec709_input, rec709_row_floats,
+                                         width, height, device_matrix(to_rec709));
+    if (cudaGetLastError() != cudaSuccess) {
+        report_error("convert_bgra_kernel failed.", out_error);
+        return false;
+    }
+
+    if (!render_frame_cuda_bgra128_rec709(lens, rec709_settings, view, cache.d_rec709_input, output_pixels, width,
+                                          height, rec709_row_floats, output_row_floats, mask_pixels, mask_rows,
+                                          cache, out_ghost_backend, out_error)) {
+        return false;
+    }
+
+    convert_bgra_kernel<<<grid, block>>>(output_pixels, output_row_floats, output_pixels, output_row_floats,
+                                         width, height, device_matrix(rec709_to_working_matrix(settings.working_space)));
+    const cudaError_t error = cudaDeviceSynchronize();
+    if (error != cudaSuccess) {
+        report_error(cudaGetErrorString(error), out_error);
+        return false;
+    }
     return true;
 }

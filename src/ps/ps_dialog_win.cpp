@@ -2,7 +2,9 @@
 
 #include "builtin_lenses.h"
 #include "ps_image.h"
+#include "ps_presets.h"
 #include "ps_settings.h"
+#include "render_frame.h"
 #include "ps_version.h"
 
 #include <windows.h>
@@ -10,6 +12,7 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
@@ -18,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -25,6 +29,8 @@
 namespace {
 
 constexpr UINT kPreviewReadyMessage = WM_APP + 1;
+// wParam: finished fraction in permille; lParam: request generation.
+constexpr UINT kPreviewProgressMessage = WM_APP + 2;
 
 constexpr int kIdManufacturer = 1100;
 constexpr int kIdLens = 1101;
@@ -32,6 +38,10 @@ constexpr int kIdPreviewEnable = 1102;
 constexpr int kIdPreviewResolution = 1103;
 constexpr int kIdDefaults = 1104;
 constexpr int kIdStatus = 1105;
+constexpr int kIdPreset = 1106;
+constexpr int kIdPresetSave = 1107;
+constexpr int kIdPresetDelete = 1108;
+constexpr int kIdColorSpace = 1109;
 constexpr int kIdParamBase = 2000;
 constexpr int kIdsPerParam = 4;
 
@@ -84,6 +94,16 @@ std::wstring window_text(HWND hwnd)
     GetWindowTextW(hwnd, text.data(), length + 1);
     text.resize(static_cast<std::size_t>(std::max(length, 0)));
     return text;
+}
+
+std::wstring trim(const std::wstring& text)
+{
+    const auto first = text.find_first_not_of(L" \t");
+    if (first == std::wstring::npos) {
+        return {};
+    }
+    const auto last = text.find_last_not_of(L" \t");
+    return text.substr(first, last - first + 1);
 }
 
 // Locale-independent so a host that called setlocale (e.g. German decimal
@@ -211,8 +231,17 @@ public:
             std::lock_guard<std::mutex> lock(mutex_);
             pending_ = request;
             has_pending_ = true;
+            cancel_requested_ = false;
         }
         wake_.notify_all();
+    }
+
+    // Stops the running render at its next progress check without starting another.
+    void cancel()
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        has_pending_ = false;
+        cancel_requested_ = true;
     }
 
     bool take_result(PreviewResult& out)
@@ -244,10 +273,12 @@ private:
         }
     }
 
-    bool newer_request_pending()
+    // True when the current render is no longer wanted: a newer request
+    // arrived, the preview was switched off, or the dialog is closing.
+    bool should_stop()
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        return has_pending_ || quit_;
+        return has_pending_ || quit_ || cancel_requested_;
     }
 
     void publish(PreviewResult&& result)
@@ -287,8 +318,13 @@ private:
     void run()
     {
         const FloatImageBuffer& image = *context_.image;
+        const ColorMatrix& to_rec709 = working_to_rec709_matrix(context_.document_space);
         for (std::size_t i = 0; i < image.r.size(); ++i) {
-            peak_luminance_ = std::max(peak_luminance_, 0.2126f * image.r[i] + 0.7152f * image.g[i] + 0.0722f * image.b[i]);
+            float r = image.r[i];
+            float g = image.g[i];
+            float b = image.b[i];
+            apply_color_matrix(to_rec709, r, g, b);
+            peak_luminance_ = std::max(peak_luminance_, 0.2126f * r + 0.7152f * g + 0.0722f * b);
         }
 
         for (;;) {
@@ -313,6 +349,7 @@ private:
                 publish(std::move(result));
                 continue;
             }
+            resolve_auto_working_space(state, context_.document_space);
 
             const int factor = proxy_factor(request);
             const FloatImageBuffer* input = context_.image;
@@ -326,8 +363,22 @@ private:
                 ps_scale_state_for_proxy(state, factor);
             }
 
-            const bool ok = render_frame_to_float_image(context_.asset_root, state, *input, output_);
-            if (newer_request_pending()) {
+            bool ok = false;
+            {
+                int posted_permille = -1;
+                const std::uint64_t generation = request.generation;
+                ScopedRenderProgress progress([&](float fraction) {
+                    const int permille = static_cast<int>(fraction * 1000.0f);
+                    if (permille >= posted_permille + 10) {
+                        posted_permille = permille;
+                        PostMessageW(notify_, kPreviewProgressMessage, static_cast<WPARAM>(permille),
+                                     static_cast<LPARAM>(generation));
+                    }
+                    return !should_stop();
+                });
+                ok = render_frame_to_float_image(context_.asset_root, state, *input, output_);
+            }
+            if (should_stop()) {
                 continue;
             }
 
@@ -340,13 +391,16 @@ private:
             }
 
             ps_make_display_bitmap(output_, context_.linear_document, request.display_width,
-                                   request.display_height, result.pixels);
+                                   request.display_height, result.pixels, state.working_space);
             result.width = request.display_width;
             result.height = request.display_height;
             result.status = describe_sources(request.state, last_render_source_count()) + L" · Preview " +
                             std::to_wstring(input->width) + L"×" + std::to_wstring(input->height) +
                             (factor > 1 ? L" (1/" + std::to_wstring(factor) + L")" : std::wstring(L" (full)")) +
                             L" · " + std::to_wstring(elapsed.count()) + L" ms";
+            if (state.working_space != WorkingColorSpace::LinearRec709) {
+                result.status += L" · " + widen(working_space_label(state.working_space));
+            }
             publish(std::move(result));
         }
     }
@@ -358,6 +412,7 @@ private:
     std::condition_variable wake_;
     bool quit_ = false;
     bool has_pending_ = false;
+    bool cancel_requested_ = false;
     PreviewRequest pending_ {};
     bool has_result_ = false;
     PreviewResult result_ {};
@@ -497,6 +552,9 @@ private:
             case kPreviewReadyMessage:
                 self->on_preview_ready();
                 return TRUE;
+            case kPreviewProgressMessage:
+                self->on_preview_progress(static_cast<int>(wparam), static_cast<std::uint64_t>(lparam));
+                return TRUE;
             case WM_DESTROY:
                 self->worker_.reset();
                 return FALSE;
@@ -609,12 +667,39 @@ private:
         preview_ = create(kPreviewClass, L"", WS_BORDER, hwnd_, 0);
         SetWindowLongPtrW(preview_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
+        preset_folder_ = context_.preset_folder.empty() ? ps_default_preset_folder() : context_.preset_folder;
+        preset_label_ = create(WC_STATICW, L"Preset", SS_LEFT, hwnd_, 0);
+        SendMessageW(preset_label_, WM_SETFONT, reinterpret_cast<WPARAM>(bold_font_), FALSE);
+        preset_combo_ = create(WC_COMBOBOXW, L"", CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP, hwnd_, kIdPreset);
+        SendMessageW(preset_combo_, CB_LIMITTEXT, 100, 0);
+        SendMessageW(preset_combo_, CB_SETCUEBANNER, 0, reinterpret_cast<LPARAM>(L"Type a name and Save, or pick a preset"));
+        preset_save_ = create(WC_BUTTONW, L"Save", BS_PUSHBUTTON | WS_TABSTOP, hwnd_, kIdPresetSave);
+        preset_delete_ = create(WC_BUTTONW, L"Delete", BS_PUSHBUTTON | WS_TABSTOP, hwnd_, kIdPresetDelete);
+
         lens_label_ = create(WC_STATICW, L"Lens", SS_LEFT, hwnd_, 0);
         SendMessageW(lens_label_, WM_SETFONT, reinterpret_cast<WPARAM>(bold_font_), FALSE);
         manufacturer_ = create(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, hwnd_, kIdManufacturer);
         lens_ = create(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, hwnd_, kIdLens);
         for (const std::string& label : ps_split_choice_labels(build_lens_manufacturer_popup_string())) {
             SendMessageW(manufacturer_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(widen(label).c_str()));
+        }
+
+        // Up here rather than in the settings list: it describes the
+        // document, and 32-bit documents without a profile need it set by hand.
+        color_space_label_ = create(WC_STATICW, L"Color Space", SS_LEFT, hwnd_, 0);
+        SendMessageW(color_space_label_, WM_SETFONT, reinterpret_cast<WPARAM>(bold_font_), FALSE);
+        color_space_ = create(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, hwnd_, kIdColorSpace);
+        {
+            const std::vector<std::string> labels = ps_split_choice_labels(build_color_space_popup_string());
+            for (std::size_t i = 0; i < labels.size(); ++i) {
+                const std::wstring label =
+                    i == 0 ? L"Auto (" + widen(working_space_label(context_.document_space)) +
+                                 (context_.document_profile_known  ? L", from the document profile)"
+                                  : context_.linear_document       ? L", no matching profile)"
+                                                                   : L")")
+                           : widen(labels[i]);
+                SendMessageW(color_space_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+            }
         }
 
         panel_ = CreateWindowExW(WS_EX_CONTROLPARENT, kPanelClass, L"",
@@ -636,6 +721,7 @@ private:
         cancel_ = create(WC_BUTTONW, L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, hwnd_, IDCANCEL);
 
         sync_controls_from_state();
+        refresh_presets(ps_find_matching_preset(preset_folder_, working_));
 
         // Size to ~80% of the monitor work area, centred on the host window.
         HMONITOR monitor = MonitorFromWindow(context_.parent_window ? static_cast<HWND>(context_.parent_window) : hwnd_,
@@ -700,6 +786,17 @@ private:
                     }
                     break;
             }
+            if (std::string_view(desc.key) == "color_space") {
+                // Shown as the top-level Color Space row instead.
+                if (row.label) {
+                    DestroyWindow(row.label);
+                }
+                DestroyWindow(row.value);
+                row.label = nullptr;
+                row.value = nullptr;
+                rows_.push_back(row);
+                continue;
+            }
             rows_.push_back(row);
             row_order_.push_back(row);
         }
@@ -720,7 +817,7 @@ private:
         const int right_x = client.right - margin - panel_width;
         const int bottom_y = client.bottom - margin - bottom_height;
 
-        HDWP batch = BeginDeferWindowPos(16);
+        HDWP batch = BeginDeferWindowPos(20);
         auto place = [&](HWND child, int x, int y, int w, int h) {
             batch = DeferWindowPos(batch, child, nullptr, x, y, std::max(w, 0), std::max(h, 0), SWP_NOZORDER | SWP_NOACTIVATE);
         };
@@ -728,10 +825,20 @@ private:
         place(preview_, margin, margin, right_x - gap - margin, bottom_y - gap - margin);
 
         int y = margin;
+        const int preset_button_width = scale(64);
+        place(preset_label_, right_x, y + scale(3), panel_width, scale(20));
+        y += scale(24);
+        place(preset_combo_, right_x, y, panel_width - 2 * (preset_button_width + scale(6)), scale(300));
+        place(preset_save_, right_x + panel_width - 2 * preset_button_width - scale(6), y, preset_button_width, combo_height);
+        place(preset_delete_, right_x + panel_width - preset_button_width, y, preset_button_width, combo_height);
+        y += combo_height + gap;
         place(lens_label_, right_x, y + scale(3), panel_width, scale(20));
         y += scale(24);
         place(manufacturer_, right_x, y, scale(150), scale(300));
         place(lens_, right_x + scale(156), y, panel_width - scale(156), scale(400));
+        y += combo_height + gap;
+        place(color_space_label_, right_x, y + scale(3), scale(110), scale(20));
+        place(color_space_, right_x + scale(116), y, panel_width - scale(116), scale(300));
         y += combo_height + gap;
         place(panel_, right_x, y, panel_width, bottom_y - gap - y);
 
@@ -941,6 +1048,7 @@ private:
     {
         updating_ = true;
         sync_lens_controls();
+        SendMessageW(color_space_, CB_SETCURSEL, static_cast<WPARAM>(working_.color_space_index - 1), 0);
         for (const ParamRow& row : rows_) {
             sync_row(row);
         }
@@ -1025,8 +1133,13 @@ private:
     {
         switch (id) {
             case IDOK: {
-                // Enter inside a value field commits that field instead of closing.
+                // Enter in the preset box saves the preset; inside a value
+                // field it commits that field. Neither closes the dialog.
                 HWND focus = GetFocus();
+                if (focus && (focus == preset_combo_ || GetParent(focus) == preset_combo_)) {
+                    save_preset();
+                    return TRUE;
+                }
                 if (focus && GetParent(focus) == panel_) {
                     const ParamRow* row = row_for_control(GetDlgCtrlID(focus));
                     if (row && row->value == focus &&
@@ -1048,6 +1161,24 @@ private:
                 request_preview();
                 return TRUE;
             }
+            case kIdPreset:
+                if (code == CBN_SELCHANGE && !updating_) {
+                    const LRESULT selection = SendMessageW(preset_combo_, CB_GETCURSEL, 0, 0);
+                    if (selection >= 0 && static_cast<std::size_t>(selection) < presets_.size()) {
+                        load_preset(presets_[static_cast<std::size_t>(selection)]);
+                    }
+                }
+                return TRUE;
+            case kIdPresetSave:
+                if (code == BN_CLICKED) {
+                    save_preset();
+                }
+                return TRUE;
+            case kIdPresetDelete:
+                if (code == BN_CLICKED) {
+                    delete_preset();
+                }
+                return TRUE;
             case kIdManufacturer:
                 if (code == CBN_SELCHANGE && !updating_) {
                     const LRESULT selection = SendMessageW(manufacturer_, CB_GETCURSEL, 0, 0);
@@ -1057,6 +1188,15 @@ private:
                         updating_ = true;
                         sync_lens_controls();
                         updating_ = false;
+                        request_preview();
+                    }
+                }
+                return TRUE;
+            case kIdColorSpace:
+                if (code == CBN_SELCHANGE && !updating_) {
+                    const LRESULT selection = SendMessageW(color_space_, CB_GETCURSEL, 0, 0);
+                    if (selection >= 0) {
+                        working_.color_space_index = static_cast<int>(selection) + 1;
                         request_preview();
                     }
                 }
@@ -1089,7 +1229,7 @@ private:
     void close(int code)
     {
         SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(32514)));
-        // Joins the worker; a running preview render finishes first.
+        // Joins the worker; a running preview render stops at its next progress check.
         worker_.reset();
         EndDialog(hwnd_, code);
     }
@@ -1110,6 +1250,18 @@ private:
         return {x, y, x + w, y + h};
     }
 
+    // The space the document is rendered and displayed in: the dropdown's
+    // choice, or the detected one for Auto.
+    WorkingColorSpace chosen_space() const
+    {
+        bool automatic = true;
+        WorkingColorSpace space = WorkingColorSpace::LinearRec709;
+        if (!color_space_from_popup(working_.color_space_index, automatic, space) || automatic) {
+            return context_.document_space;
+        }
+        return space;
+    }
+
     void request_preview()
     {
         if (!worker_ || !preview_) {
@@ -1117,9 +1269,12 @@ private:
         }
         const RECT target = image_rect();
         if (!preview_enabled_) {
+            worker_->cancel();
+            render_progress_ = -1;
+            ++generation_;
             // Show the untouched document so the user can still compare.
             ps_make_display_bitmap(*context_.image, context_.linear_document, target.right - target.left,
-                                   target.bottom - target.top, display_pixels_);
+                                   target.bottom - target.top, display_pixels_, chosen_space());
             display_width_ = target.right - target.left;
             display_height_ = target.bottom - target.top;
             SetWindowTextW(status_, L"Preview off");
@@ -1135,7 +1290,22 @@ private:
         request.display_height = target.bottom - target.top;
         request.generation = ++generation_;
         worker_->submit(request);
+        render_progress_ = 0;
         SetWindowTextW(status_, L"Rendering preview…");
+        InvalidateRect(preview_, nullptr, FALSE);
+    }
+
+    void on_preview_progress(int permille, std::uint64_t generation)
+    {
+        // lParam carries only pointer-width bits of the generation.
+        if (generation != static_cast<std::uint64_t>(static_cast<LPARAM>(generation_)) || render_progress_ < 0) {
+            return;
+        }
+        render_progress_ = std::clamp(permille, 0, 1000);
+        const std::wstring status = L"Rendering preview… " + std::to_wstring(render_progress_ / 10) +
+                                    L"%  ·  untick Preview to stop";
+        SetWindowTextW(status_, status.c_str());
+        InvalidateRect(preview_, nullptr, FALSE);
     }
 
     void on_preview_ready()
@@ -1147,6 +1317,10 @@ private:
         if (!worker_->take_result(result)) {
             return;
         }
+        // A render that finished just before Preview was unticked.
+        if (!preview_enabled_) {
+            return;
+        }
         if (!result.pixels.empty()) {
             display_pixels_ = std::move(result.pixels);
             display_width_ = result.width;
@@ -1156,6 +1330,9 @@ private:
         std::wstring status = result.status;
         if (result.generation != generation_) {
             status += L" · updating…";
+        } else {
+            render_progress_ = -1;
+            InvalidateRect(preview_, nullptr, FALSE);
         }
         status += L"  ·  click the preview to place the manual source";
         SetWindowTextW(status_, status.c_str());
@@ -1208,11 +1385,110 @@ private:
             }
         }
 
+        if (render_progress_ >= 0) {
+            // Thin strip along the bottom edge while a preview renders.
+            const int strip = std::max(2, scale(3));
+            RECT track {0, client.bottom - strip, client.right, client.bottom};
+            HBRUSH track_brush = CreateSolidBrush(RGB(70, 70, 70));
+            FillRect(dc, &track, track_brush);
+            DeleteObject(track_brush);
+            RECT fill = track;
+            fill.right = static_cast<LONG>(static_cast<long long>(client.right) * render_progress_ / 1000);
+            HBRUSH fill_brush = CreateSolidBrush(RGB(255, 200, 40));
+            FillRect(dc, &fill, fill_brush);
+            DeleteObject(fill_brush);
+        }
+
         BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, SRCCOPY);
         SelectObject(dc, old_surface);
         DeleteObject(surface);
         DeleteDC(dc);
         EndPaint(preview_, &ps);
+    }
+
+    void refresh_presets(const std::string& select)
+    {
+        updating_ = true;
+        SendMessageW(preset_combo_, CB_RESETCONTENT, 0, 0);
+        presets_ = ps_list_presets(preset_folder_);
+        int index = -1;
+        for (std::size_t i = 0; i < presets_.size(); ++i) {
+            SendMessageW(preset_combo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(widen(presets_[i]).c_str()));
+            if (presets_[i] == select) {
+                index = static_cast<int>(i);
+            }
+        }
+        if (index >= 0) {
+            SendMessageW(preset_combo_, CB_SETCURSEL, static_cast<WPARAM>(index), 0);
+        } else {
+            SetWindowTextW(preset_combo_, widen(select).c_str());
+        }
+        updating_ = false;
+    }
+
+    void show_message(const std::wstring& text, UINT icon = MB_ICONWARNING)
+    {
+        MessageBoxW(hwnd_, text.c_str(), L"FlareSim", MB_OK | icon);
+    }
+
+    static std::wstring quoted(const std::string& name) { return L"\u201c" + widen(name) + L"\u201d"; }
+
+    void load_preset(const std::string& name)
+    {
+        AeUiParameterState loaded {};
+        if (!ps_load_preset(preset_folder_, name, loaded)) {
+            show_message(L"Couldn't read the preset " + quoted(name) + L".");
+            return;
+        }
+        working_ = loaded;
+        sync_controls_from_state();
+        request_preview();
+    }
+
+    void save_preset()
+    {
+        const std::string name = narrow(trim(window_text(preset_combo_)));
+        if (name.empty()) {
+            show_message(L"Type a name for the preset in the Preset box, then press Save.", MB_ICONINFORMATION);
+            SetFocus(preset_combo_);
+            return;
+        }
+        if (!ps_valid_preset_name(name)) {
+            show_message(L"Preset names can't contain \\ / : * ? \" < > | or end with a dot.");
+            SetFocus(preset_combo_);
+            return;
+        }
+        if (ps_preset_exists(preset_folder_, name)) {
+            const std::wstring question = L"Replace the preset " + quoted(name) + L" with the current settings?";
+            if (MessageBoxW(hwnd_, question.c_str(), L"FlareSim", MB_YESNO | MB_ICONQUESTION) != IDYES) {
+                return;
+            }
+        }
+        if (!ps_save_preset(preset_folder_, name, working_)) {
+            show_message(L"Couldn't save the preset to " + preset_folder_.wstring() + L".");
+            return;
+        }
+        refresh_presets(name);
+    }
+
+    void delete_preset()
+    {
+        const std::string name = narrow(trim(window_text(preset_combo_)));
+        if (!ps_preset_exists(preset_folder_, name)) {
+            show_message(name.empty() ? std::wstring(L"Pick the preset to delete first.")
+                                      : L"There is no preset called " + quoted(name) + L".",
+                         MB_ICONINFORMATION);
+            return;
+        }
+        const std::wstring question = L"Delete the preset " + quoted(name) + L"?";
+        if (MessageBoxW(hwnd_, question.c_str(), L"FlareSim", MB_YESNO | MB_ICONQUESTION) != IDYES) {
+            return;
+        }
+        if (!ps_delete_preset(preset_folder_, name)) {
+            show_message(L"Couldn't delete the preset file in " + preset_folder_.wstring() + L".");
+            return;
+        }
+        refresh_presets({});
     }
 
     void place_source(int x, int y)
@@ -1243,9 +1519,15 @@ private:
     AeUiParameterState working_;
     HWND hwnd_ = nullptr;
     HWND preview_ = nullptr;
+    HWND preset_label_ = nullptr;
+    HWND preset_combo_ = nullptr;
+    HWND preset_save_ = nullptr;
+    HWND preset_delete_ = nullptr;
     HWND lens_label_ = nullptr;
     HWND manufacturer_ = nullptr;
     HWND lens_ = nullptr;
+    HWND color_space_label_ = nullptr;
+    HWND color_space_ = nullptr;
     HWND panel_ = nullptr;
     HWND preview_enable_ = nullptr;
     HWND preview_resolution_ = nullptr;
@@ -1264,6 +1546,10 @@ private:
     bool dragging_ = false;
     bool preview_enabled_ = true;
     std::uint64_t generation_ = 0;
+    // Preview render progress in permille; -1 when no render is running.
+    int render_progress_ = -1;
+    std::filesystem::path preset_folder_;
+    std::vector<std::string> presets_;
     std::unique_ptr<PreviewWorker> worker_;
     std::vector<std::uint32_t> display_pixels_;
     int display_width_ = 0;

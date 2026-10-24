@@ -92,6 +92,36 @@ runCase("smart32", function () {
     saveTiff(doc, "out32_smart.tif", false);
 });
 
+// The preset cases go through scripts/photoshop/flaresim.jsxinc, the helper
+// library users include from their own scripts.
+$.evalFile(new File(CONFIG.library));
+var KEY_PRESET = charIDToTypeID("FsPr");
+
+runCase("preset32", function () {
+    var doc = app.open(new File(CONFIG.dir + "/in32.tif"));
+    var reply = flareSim(CONFIG.presetName);
+    log.push("preset32 recorded_preset=" + (reply.hasKey(KEY_PRESET) ? reply.getString(KEY_PRESET) : ""));
+    saveTiff(doc, "out32_preset.tif", false);
+});
+
+runCase("preset_override32", function () {
+    var doc = app.open(new File(CONFIG.dir + "/in32.tif"));
+    var reply = flareSim(CONFIG.presetName, CONFIG.presetOverride);
+    // Overridden settings no longer equal the preset, so no name is recorded.
+    log.push("preset_override32 recorded_preset=" + (reply.hasKey(KEY_PRESET) ? reply.getString(KEY_PRESET) : ""));
+    saveTiff(doc, "out32_preset_override.tif", false);
+});
+
+runCase("missing_preset", function () {
+    app.open(new File(CONFIG.dir + "/in32.tif"));
+    try {
+        flareSim("__flaresim_no_such_preset__");
+        log.push("missing_preset: no error");
+    } catch (e) {
+        log.push("missing_preset: error " + e);
+    }
+});
+
 runCase("layer32", function () {
     var doc = app.documents.add(CONFIG.width, CONFIG.height, 72, "flaresim_layer32", NewDocumentMode.RGB,
                                 DocumentFill.TRANSPARENT, 1, BitsPerChannelType.THIRTYTWO);

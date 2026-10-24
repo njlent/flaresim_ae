@@ -122,10 +122,22 @@
                                 },
                                 "Parameters": [
                                     {
+                                        "ParamName": "preset",
+                                        "ParamKeyword": "FsPr",
+                                        "ParamType": "TEXT",
+                                        "ParamDescription": "Name of a saved FlareSim preset; settings text overrides its keys",
+                                        "ParamFlagBits": {
+                                            "Optional": true
+                                        }
+                                    },
+                                    {
                                         "ParamName": "settings",
                                         "ParamKeyword": "FsSt",
                                         "ParamType": "TEXT",
-                                        "ParamDescription": "FlareSim settings as flaresim-ps key=value text"
+                                        "ParamDescription": "FlareSim settings as flaresim-ps key=value text",
+                                        "ParamFlagBits": {
+                                            "Optional": true
+                                        }
                                     }
                                 ]
                             }

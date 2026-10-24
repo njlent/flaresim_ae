@@ -91,4 +91,4 @@ Layout:
 Tests:
 - `flaresim_ps_smoke` (ctest): settings round trip, pixel conversion at every depth, proxy scaling, 32-bit render.
 - `flaresim_ps_dialog_harness --capture <prefix>`: opens the dialog outside Photoshop on a synthetic HDR image, captures it, clicks the preview and presses OK.
-- `python tests/ps_host/run_host_test.py`: drives the installed plug-in in Photoshop over COM (via `cscript`; PowerShell's COM binding fails on Photoshop's type library) and compares 8/16/32-bit, selection, multi-band, Smart Filter and transparent-layer results against `flaresim_ps_reference`.
+- `python tests/ps_host/run_host_test.py`: drives the installed plug-in in Photoshop over COM (via `cscript`; PowerShell's COM binding fails on Photoshop's type library) and compares 8/16/32-bit, selection, multi-band, Smart Filter, transparent-layer and preset (by name, with overrides, missing) results against `flaresim_ps_reference`. It writes a temporary `__flaresim_host_test__` preset to `%APPDATA%\FlareSim\presets` and removes it afterwards.

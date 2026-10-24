@@ -25,6 +25,7 @@ WIDTH, HEIGHT = 960, 540
 # Large enough that a 32-bit RGB read needs several advanceState bands.
 LARGE_WIDTH, LARGE_HEIGHT = 4000, 2250
 SELECTION = (120, 90, 700, 410)  # left, top, right, bottom
+PRESET_NAME = "__flaresim_host_test__"
 
 
 def settings_text(**overrides):
@@ -119,6 +120,14 @@ def main():
     s32 = settings_text()
     sldr = settings_text(threshold=0.9, flare_gain=40000)
     slayer = settings_text(manual_source="on", source_x=0.3, source_y=0.4, source_intensity=200, threshold=1000)
+    # The preset lives in the real preset folder for the duration of the run.
+    spreset = settings_text(flare_gain=1500, cluster_radius=8, aperture_blades=6)
+    preset_override = {"flare_gain": 500}
+    spreset_override = settings_text(flare_gain=500, cluster_radius=8, aperture_blades=6)
+    preset_dir = Path(os.environ["APPDATA"]) / "FlareSim" / "presets"
+    preset_file = preset_dir / f"{PRESET_NAME}.flaresim"
+    preset_dir.mkdir(parents=True, exist_ok=True)
+    preset_file.write_text(spreset, encoding="utf-8")
 
     config = {
         "dir": work.as_posix(),
@@ -129,6 +138,9 @@ def main():
         "height": HEIGHT,
         "baseDocuments": 0,
         "selection": list(SELECTION),
+        "library": (REPO / "scripts" / "photoshop" / "flaresim.jsxinc").as_posix(),
+        "presetName": PRESET_NAME,
+        "presetOverride": preset_override,
     }
     jsx = work / "host_test.jsx"
     jsx.write_text("var CONFIG = " + json.dumps(config) + ";\n" +
@@ -139,7 +151,11 @@ def main():
     last_used_before = last_used.read_bytes() if last_used.exists() else None
 
     print(f"work dir: {work}")
-    print(run_photoshop(jsx.as_posix(), args.keep_open).strip())
+    try:
+        log = run_photoshop(jsx.as_posix(), args.keep_open).strip()
+    finally:
+        preset_file.unlink(missing_ok=True)
+    print(log)
 
     ok = True
 
@@ -180,6 +196,19 @@ def main():
     ok &= report("16-bit flare added", float((out16 - ldr).sum()) > 0, f"sum {float((out16 - ldr).sum()):.4g}")
     out8 = tifffile.imread(work / "out8.tif").astype(np.float32)[..., :3] / 255.0
     ok &= compare("8-bit flat vs reference", out8, ref_ldr, 3.0 / 255.0)
+
+    # Presets: by name, by name with an override, and a missing name.
+    out_preset = tifffile.imread(work / "out32_preset.tif").astype(np.float32)[..., :3]
+    ok &= compare("32-bit preset by name vs reference", out_preset, reference(build_dir, work, "preset", hdr, spreset), 2e-3)
+    ok &= report("preset name recorded in descriptor", f"preset32 recorded_preset={PRESET_NAME}" in log,
+                 next((line for line in log.splitlines() if line.startswith("preset32 ")), "no log line"))
+    out_override = tifffile.imread(work / "out32_preset_override.tif").astype(np.float32)[..., :3]
+    ok &= compare("32-bit preset + override vs reference", out_override,
+                  reference(build_dir, work, "preset_override", hdr, spreset_override), 2e-3)
+    ok &= report("overridden preset not recorded as the preset", "preset_override32 recorded_preset=" in log.splitlines(),
+                 next((line for line in log.splitlines() if line.startswith("preset_override32 ")), "no log line"))
+    ok &= report("missing preset raises an error", "missing_preset: error" in log,
+                 next((line for line in log.splitlines() if line.startswith("missing_preset")), "no log line"))
 
     # Transparent layer + manual source: flare must create alpha.
     layer = tifffile.imread(work / "out32_layer.tif").astype(np.float32)

@@ -2,7 +2,7 @@
 // image. With --capture <prefix> it saves window captures, clicks the preview
 // to place the manual source, presses OK and prints the resulting settings.
 //
-// usage: flaresim_ps_dialog_harness [--capture <prefix>] [--wait-ms <ms>] [--settings <file>]
+// usage: flaresim_ps_dialog_harness [--capture <prefix>] [--wait-ms <ms>] [--settings <file>] [--presets <folder>]
 
 #include "ps_dialog.h"
 #include "ps_settings.h"
@@ -133,6 +133,7 @@ int main(int argc, char** argv)
 
     std::string capture_prefix;
     std::string settings_path;
+    std::string preset_folder;
     int wait_ms = 6000;
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::strcmp(argv[i], "--capture") == 0) {
@@ -141,6 +142,8 @@ int main(int argc, char** argv)
             wait_ms = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--settings") == 0) {
             settings_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--presets") == 0) {
+            preset_folder = argv[++i];
         }
     }
 
@@ -150,6 +153,7 @@ int main(int argc, char** argv)
     context.linear_document = true;
     context.asset_root = FLARESIM_REPO_ROOT;
     context.document_description = "harness 1600x900 32-bit";
+    context.preset_folder = preset_folder;
 
     AeUiParameterState state = ps_default_ui_state();
     if (!settings_path.empty()) {

@@ -4,12 +4,34 @@
 #include "source_extract.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 
 namespace {
+
+thread_local const RenderProgressCallback* t_render_progress = nullptr;
+
+// Stage boundaries reported to ScopedRenderProgress. Ghost tracing is nearly
+// all of the work, so it gets most of the range.
+constexpr float kProgressSourcesDone = 0.05f;
+constexpr float kProgressGhostsDone = 0.9f;
+constexpr float kProgressHazeDone = 0.95f;
+// Sources are traced in up to this many launches when progress is wanted.
+// Each launch costs one full-frame readback (about 25 ms at 4000x2250), so
+// chunks aim to take kTargetChunkMs: long enough that readbacks stay a small
+// share, short enough that progress moves and a cancel lands quickly.
+constexpr std::size_t kMaxGhostChunks = 16;
+constexpr double kTargetChunkMs = 250.0;
+
+// Returns false when the installed callback asked to cancel.
+bool report_progress(float fraction)
+{
+    return !t_render_progress || (*t_render_progress)(std::clamp(fraction, 0.0f, 1.0f));
+}
 
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
 constexpr std::uint64_t kFnvPrime = 1099511628211ull;
@@ -414,6 +436,17 @@ const LensSystem& select_art_directed_lens(const LensSystem& lens,
 
 } // namespace
 
+ScopedRenderProgress::ScopedRenderProgress(RenderProgressCallback callback)
+    : callback_(std::move(callback)), previous_(t_render_progress)
+{
+    t_render_progress = callback_ ? &callback_ : nullptr;
+}
+
+ScopedRenderProgress::~ScopedRenderProgress()
+{
+    t_render_progress = previous_;
+}
+
 void FrameRenderCache::clear()
 {
     scene_key = 0;
@@ -581,8 +614,11 @@ bool render_frame(
             outputs.sources = outputs.detected_sources;
             cluster_bright_pixels(outputs.sources,
                                   settings.cluster_radius_px,
-                                  input.width,
-                                  std::tan(fov_h * 0.5f));
+                                  settings.downsample,
+                                  scene_input.width,
+                                  scene_input.height,
+                                  std::tan(fov_h * 0.5f),
+                                  std::tan(fov_v * 0.5f));
             limit_bright_pixels(outputs.sources, static_cast<std::size_t>(settings.max_sources));
 
             BrightPixel manual_source {};
@@ -599,6 +635,10 @@ bool render_frame(
                 cache->sources = outputs.sources;
             }
         }
+    }
+
+    if (!report_progress(kProgressSourcesDone)) {
+        return false;
     }
 
     LensSystem adjusted_lens;
@@ -680,20 +720,85 @@ bool render_frame(
                     }
                 }
 
-                render_ghosts(
-                    render_lens,
-                    outputs.sources,
-                    fov_h,
-                    fov_v,
-                    outputs.flare_r.data(),
-                    outputs.flare_g.data(),
-                    outputs.flare_b.data(),
-                    input.width,
-                    input.height,
-                    ghost,
-                    ghost_setup,
-                    cache ? &cache->ghost_gpu_cache : nullptr,
-                    &outputs.ghost_backend);
+                // Ghosts add up linearly per source, so tracing the sources in
+                // chunks gives the same image while letting a progress callback
+                // report and cancel between chunks.
+                const std::size_t source_total = outputs.sources.size();
+                const std::size_t chunk_count =
+                    t_render_progress ? std::min(source_total, kMaxGhostChunks) : std::size_t {1};
+                if (chunk_count <= 1) {
+                    render_ghosts(
+                        render_lens,
+                        outputs.sources,
+                        fov_h,
+                        fov_v,
+                        outputs.flare_r.data(),
+                        outputs.flare_g.data(),
+                        outputs.flare_b.data(),
+                        input.width,
+                        input.height,
+                        ghost,
+                        ghost_setup,
+                        cache ? &cache->ghost_gpu_cache : nullptr,
+                        &outputs.ghost_backend);
+                } else {
+                    // The first chunk is 1/kMaxGhostChunks of the sources; its
+                    // time sizes the rest so each takes about kTargetChunkMs.
+                    // Fast renders then use a few large chunks and pay for few
+                    // readbacks. Equal sizes after the first let the CUDA
+                    // renderer reuse its launch graph.
+                    std::size_t per_chunk = (source_total + chunk_count - 1) / chunk_count;
+                    std::vector<BrightPixel> chunk;
+                    GhostRenderBackend first_backend = GhostRenderBackend::CPU;
+                    for (std::size_t begin = 0; begin < source_total;) {
+                        const std::size_t end = std::min(source_total, begin + per_chunk);
+                        const auto chunk_started = std::chrono::steady_clock::now();
+                        chunk.assign(outputs.sources.begin() + static_cast<std::ptrdiff_t>(begin),
+                                     outputs.sources.begin() + static_cast<std::ptrdiff_t>(end));
+                        GhostChunk position {};
+                        position.clear = begin == 0;
+                        position.finish = end == source_total;
+                        render_ghosts(
+                            render_lens,
+                            chunk,
+                            fov_h,
+                            fov_v,
+                            outputs.flare_r.data(),
+                            outputs.flare_g.data(),
+                            outputs.flare_b.data(),
+                            input.width,
+                            input.height,
+                            ghost,
+                            ghost_setup,
+                            cache ? &cache->ghost_gpu_cache : nullptr,
+                            &outputs.ghost_backend,
+                            position);
+                        // CUDA chunks sum on the device and CPU chunks sum in
+                        // the output buffers; a CUDA failure part-way through
+                        // would mix the two and lose the earlier chunks.
+                        if (begin == 0) {
+                            first_backend = outputs.ghost_backend;
+                        } else if (outputs.ghost_backend != first_backend) {
+                            return false;
+                        }
+                        const float done = static_cast<float>(end) / static_cast<float>(source_total);
+                        if (!report_progress(kProgressSourcesDone +
+                                             (kProgressGhostsDone - kProgressSourcesDone) * done)) {
+                            return false;
+                        }
+                        if (begin == 0 && end < source_total) {
+                            const double first_ms = std::chrono::duration<double, std::milli>(
+                                                        std::chrono::steady_clock::now() - chunk_started)
+                                                        .count();
+                            const std::size_t rest = source_total - end;
+                            const double rest_ms = first_ms * static_cast<double>(rest) / static_cast<double>(end);
+                            const std::size_t rest_chunks = std::clamp<std::size_t>(
+                                static_cast<std::size_t>(std::llround(rest_ms / kTargetChunkMs)), 1, kMaxGhostChunks - 1);
+                            per_chunk = (rest + rest_chunks - 1) / rest_chunks;
+                        }
+                        begin = end;
+                    }
+                }
             }
 
             outputs.stats.recomputed_ghosts = true;
@@ -725,6 +830,21 @@ bool render_frame(
                          radius,
                          settings.ghost_blur_passes);
         }
+
+        const int cluster_soften = cluster_softening_radius_px(settings.cluster_radius_px, settings.downsample);
+        if (cluster_soften > 0) {
+            box_blur_rgb(outputs.flare_r.data(),
+                         outputs.flare_g.data(),
+                         outputs.flare_b.data(),
+                         input.width,
+                         input.height,
+                         cluster_soften,
+                         1);
+        }
+    }
+
+    if (!report_progress(kProgressGhostsDone)) {
+        return false;
     }
 
     if (plan.need_haze) {
@@ -784,6 +904,10 @@ bool render_frame(
         }
     }
 
+    if (!report_progress(kProgressHazeDone)) {
+        return false;
+    }
+
     if (plan.need_starburst) {
         const std::uint64_t starburst_key = make_starburst_key(source_key, settings);
         const bool starburst_cache_hit = cache && cache->has_starburst && cache->starburst_key == starburst_key;
@@ -833,6 +957,16 @@ bool render_frame(
                                  input.height,
                                  0,
                                  0);
+                const int cluster_soften = cluster_softening_radius_px(settings.cluster_radius_px, settings.downsample);
+                if (cluster_soften > 0) {
+                    box_blur_rgb(outputs.starburst_r.data(),
+                                 outputs.starburst_g.data(),
+                                 outputs.starburst_b.data(),
+                                 input.width,
+                                 input.height,
+                                 cluster_soften,
+                                 1);
+                }
             }
 
             outputs.stats.recomputed_starburst = true;
@@ -883,5 +1017,6 @@ bool render_frame(
         }
     }
 
+    report_progress(1.0f);
     return true;
 }

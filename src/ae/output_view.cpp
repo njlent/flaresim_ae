@@ -1,9 +1,14 @@
 #include "output_view.h"
 
+#include "source_extract.h"
+
 #include <algorithm>
 #include <cmath>
 
 namespace {
+
+// Brightness of the detected blocks drawn behind clustered sources.
+constexpr float kClusterMemberLuma = 0.2f;
 
 RgbImageView composite_input_view(const RgbImageView& input, const FrameRenderOutputs& outputs)
 {
@@ -66,6 +71,31 @@ void draw_sources(const FrameRenderSettings& settings,
     const float tan_half_h = std::tan(fov_h * 0.5f);
     const float tan_half_v = std::tan(fov_v * 0.5f);
     const int block = std::max(3, settings.downsample);
+
+    // With clustering on, every detected block is shown dim so each merged
+    // region is visible around the single source it became.
+    if (!diagnostics_mode && settings.cluster_radius_px > 0) {
+        const int stride = std::max(1, settings.downsample);
+        for (const BrightPixel& member : outputs.detected_sources) {
+            int bx = 0;
+            int by = 0;
+            bright_pixel_block(member, stride, output.width, output.height, tan_half_h, tan_half_v, bx, by);
+            const float luma = 0.2126f * member.r + 0.7152f * member.g + 0.0722f * member.b;
+            const float dim = luma > 0.0f ? kClusterMemberLuma / luma : 0.0f;
+            const int x0 = std::max(0, bx * stride);
+            const int y0 = std::max(0, by * stride);
+            const int x1 = std::min(output.width, bx * stride + stride);
+            const int y1 = std::min(output.height, by * stride + stride);
+            for (int y = y0; y < y1; ++y) {
+                for (int x = x0; x < x1; ++x) {
+                    const int i = y * output.width + x;
+                    output.r[i] = member.r * dim;
+                    output.g[i] = member.g * dim;
+                    output.b[i] = member.b * dim;
+                }
+            }
+        }
+    }
 
     for (const BrightPixel& source : outputs.sources) {
         const float ndc_x = std::tan(source.angle_x) / (2.0f * tan_half_h);

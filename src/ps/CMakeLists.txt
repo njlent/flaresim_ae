@@ -1,5 +1,6 @@
 add_library(flaresim_ps_adapter STATIC
     ps_image.cpp
+    ps_presets.cpp
     ps_settings.cpp
 )
 

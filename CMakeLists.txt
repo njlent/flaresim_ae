@@ -149,6 +149,7 @@ endif()
 
 add_library(flaresim_core STATIC
     src/core/bloom.cpp
+    src/core/color_space.cpp
     src/core/ghost.cpp
     src/core/lens.cpp
     src/core/post_process.cpp

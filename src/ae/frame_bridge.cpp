@@ -1,5 +1,6 @@
 #include "frame_bridge.h"
 
+#include "color_space.h"
 #include "lens_resolution.h"
 #include "output_view.h"
 
@@ -20,6 +21,8 @@ struct ThreadRenderContext
     FloatImageBuffer input_image;
     FloatImageBuffer mask_image;
     FloatImageBuffer output_image;
+    // Input converted to linear Rec.709 when the working space differs.
+    FloatImageBuffer rec709_input;
     FrameRenderOutputs outputs;
     std::vector<float> detection_mask_values;
     bool lens_loaded = false;
@@ -330,9 +333,25 @@ bool render_frame_to_float_image(
 
     output.alpha = input.alpha;
 
-    const FrameRenderSettings settings = build_frame_render_settings(state);
+    FrameRenderSettings settings = build_frame_render_settings(state);
     const FrameRenderPlan plan = build_output_view_render_plan(state.view);
-    const RgbImageView input_view = make_rgb_view(input);
+
+    // The renderer works in linear Rec.709. Other working spaces are
+    // converted in here and back out after compositing; the manual source
+    // colour is given in the working space too.
+    const bool convert_space = settings.working_space != WorkingColorSpace::LinearRec709;
+    RgbImageView input_view = make_rgb_view(input);
+    if (convert_space) {
+        const ColorMatrix& to_rec709 = working_to_rec709_matrix(settings.working_space);
+        context.rec709_input.width = input.width;
+        context.rec709_input.height = input.height;
+        context.rec709_input.r = input.r;
+        context.rec709_input.g = input.g;
+        context.rec709_input.b = input.b;
+        apply_color_matrix(to_rec709, make_mutable_rgb_view(context.rec709_input));
+        apply_color_matrix(to_rec709, settings.manual_source_r, settings.manual_source_g, settings.manual_source_b);
+        input_view = make_rgb_view(context.rec709_input);
+    }
     const bool use_detection_mask = detection_mask && validate_image(*detection_mask) &&
                                     detection_mask->width == input.width &&
                                     detection_mask->height == input.height;
@@ -366,6 +385,9 @@ bool render_frame_to_float_image(
             outputs,
             make_mutable_rgb_view(output))) {
         return false;
+    }
+    if (convert_space) {
+        apply_color_matrix(rec709_to_working_matrix(settings.working_space), make_mutable_rgb_view(output));
     }
 
     expand_alpha_from_rgb(output);

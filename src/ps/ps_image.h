@@ -59,9 +59,11 @@ void ps_scale_state_for_proxy(AeParameterState& state, int factor);
 
 // Area-resamples to dst_width x dst_height BGRA8 for GDI. Colour is treated as
 // premultiplied and composited over a checkerboard. linear_to_srgb encodes 32-bit
-// linear documents for display.
+// linear documents for display; space is the colour space they are in and is
+// converted to Rec.709 primaries first.
 void ps_make_display_bitmap(const FloatImageBuffer& image,
                             bool linear_to_srgb,
                             int dst_width,
                             int dst_height,
-                            std::vector<std::uint32_t>& out_bgra);
+                            std::vector<std::uint32_t>& out_bgra,
+                            WorkingColorSpace space = WorkingColorSpace::LinearRec709);

@@ -256,14 +256,20 @@ void ps_scale_state_for_proxy(AeParameterState& state, int factor)
     const float ratio = static_cast<float>(proxy_stride) / static_cast<float>(full_stride);
     state.downsample = proxy_stride;
     state.flare_gain *= ratio * ratio;
-    state.cluster_radius_px = static_cast<int>(std::lround(static_cast<double>(state.cluster_radius_px) / factor));
+    // A small radius must not round to 0, which would switch clustering off
+    // in the preview only.
+    if (state.cluster_radius_px > 0) {
+        state.cluster_radius_px =
+            std::max(1, static_cast<int>(std::lround(static_cast<double>(state.cluster_radius_px) / factor)));
+    }
 }
 
 void ps_make_display_bitmap(const FloatImageBuffer& image,
                             bool linear_to_srgb,
                             int dst_width,
                             int dst_height,
-                            std::vector<std::uint32_t>& out_bgra)
+                            std::vector<std::uint32_t>& out_bgra,
+                            WorkingColorSpace space)
 {
     out_bgra.clear();
     if (!image_ok(image) || dst_width <= 0 || dst_height <= 0) {
@@ -299,9 +305,15 @@ void ps_make_display_bitmap(const FloatImageBuffer& image,
             const float checker = (((x >> 3) + (y >> 3)) & 1) ? 0.8f : 0.6f;
             const float backdrop = (linear_to_srgb ? checker * checker : checker) * (1.0f - alpha);
 
-            const std::uint32_t pr = encode_display(static_cast<float>(r * inv) + backdrop, linear_to_srgb);
-            const std::uint32_t pg = encode_display(static_cast<float>(g * inv) + backdrop, linear_to_srgb);
-            const std::uint32_t pb = encode_display(static_cast<float>(b * inv) + backdrop, linear_to_srgb);
+            float dr = static_cast<float>(r * inv);
+            float dg = static_cast<float>(g * inv);
+            float db = static_cast<float>(b * inv);
+            if (space != WorkingColorSpace::LinearRec709) {
+                apply_color_matrix(working_to_rec709_matrix(space), dr, dg, db);
+            }
+            const std::uint32_t pr = encode_display(dr + backdrop, linear_to_srgb);
+            const std::uint32_t pg = encode_display(dg + backdrop, linear_to_srgb);
+            const std::uint32_t pb = encode_display(db + backdrop, linear_to_srgb);
             out_bgra[static_cast<std::size_t>(y) * static_cast<std::size_t>(dst_width) + static_cast<std::size_t>(x)] =
                 pb | (pg << 8) | (pr << 16) | 0xFF000000u;
         }

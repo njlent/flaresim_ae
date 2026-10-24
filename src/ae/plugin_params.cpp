@@ -28,6 +28,7 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
     const std::string pupil_jitter_popup = build_pupil_jitter_mode_popup_string();
     const std::string projected_cells_popup = build_projected_cells_mode_popup_string();
     const std::string view_popup = build_output_view_popup_string();
+    const std::string color_space_popup = build_color_space_popup_string();
 
     AEFX_CLR_STRUCT(def);
     def.flags = PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS;
@@ -718,6 +719,14 @@ PF_Err PluginHandleParamSetup(PF_InData* in_data, PF_OutData* out_data, PF_Param
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_ID_POST_SECTION_END);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Color Space",
+                  static_cast<A_short>(color_space_popup_count()),
+                  static_cast<A_short>(defaults.color_space_index),
+                  color_space_popup.data(),
+                  PF_ParamFlag_NONE,
+                  PARAM_ID_COLOR_SPACE);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX("View",

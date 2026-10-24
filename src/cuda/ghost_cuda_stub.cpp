@@ -35,7 +35,9 @@ bool launch_ghost_cuda(
     int,
     const GhostConfig&,
     GpuBufferCache&,
-    std::string* out_error)
+    std::string* out_error,
+    bool,
+    bool)
 {
     if (out_error) {
         *out_error = "FlareSim was built without CUDA support.";

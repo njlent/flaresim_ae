@@ -96,7 +96,7 @@ Notes:
 | Ray Grid | `1`-`2048` | `128` | Base ray density for ghost tracing. Main quality/perf lever. |
 | Downsample | `1`-`12` | `2` | Source extraction block size. Higher = faster, fewer detected highlights. |
 | Max Sources | `0`-`2048` | `256` | `0` means unlimited. Otherwise keeps only the brightest detected sources. |
-| Cluster Radius | `0`-`256` | `0` | Merges nearby detected sources before ghost tracing. `0` disables clustering. |
+| Cluster Radius | `0`-`256` | `0` | Renders bright areas with fewer sources while keeping their shape. Sources whose blocks are less than this many pixels apart link into one area. Each area is then split into cells about twice the radius across, and each cell becomes one source with that cell's summed brightness. The ghosts and starburst are softened by the radius to make up for the merge. Small lights stay one source each. On a lit facade, `8` rendered 12 times faster with about 2% flare difference. Larger radii are faster and softer. In the Sources view, merged blocks show dim around the sources they became. `0` disables clustering. |
 | Preview Mode | `Off`, `On` | `Off` | Overrides quality controls below for faster interactive previews. |
 | Preview Ray Grid | `1`-`128` | `16` | Ray grid used while Preview Mode is on. |
 | Preview Max Sources | `0`-`512` | `100` | Source cap used while Preview Mode is on. |
@@ -157,6 +157,7 @@ Guidance:
 
 | Setting | Values / range | Default | Hosts | Notes |
 | --- | --- | --- | --- | --- |
+| Color Space | `Auto`, `Linear Rec.709 / sRGB`, `ACEScg`, `ACES2065-1`, `Linear Rec.2020`, `Linear Display P3` | `Auto` | AE, PS | Scene-linear space of the image. The flare is rendered in linear Rec.709 internally and converted back, so it looks the same in every space; the manual source colour is read in this space. `Auto` uses the document's ICC profile for 32-bit Photoshop documents (8/16-bit documents stay Rec.709 / sRGB), and the OCIO working space in After Effects projects that use OCIO colour management (Rec.709 otherwise). |
 | View | `Composite`, `Flare Only`, `Bloom Only`, `Sources`, `Diagnostics` | `Composite` | AE, PS | Output selection. In Photoshop, `Flare Only` on a duplicate layer gives you the flare on its own layer. |
 | Mask Layer | AE layer selector | none | AE | Limits source detection to the chosen layer's visible content in comp space. Flare, haze and starburst still render across the full frame. |
 | Auto Seed | `Off`, `On` | `On` | AE | Seeds Stratified jitter from the frame number. Photoshop has no timeline, so it always uses `Jitter Seed`. |
@@ -181,13 +182,51 @@ How it behaves:
 - On a layer with transparency, the filter premultiplies colour for the render and writes straight alpha back. With `Manual Source` on, it can draw a flare onto an empty layer.
 - The preview renders at fit, half or full resolution in the background. Click or drag in it to place the manual source. Positions outside the image give off-frame sources.
 - The dialog remembers the last settings you confirmed with OK. Scripted runs and actions don't change them.
-- The render can't be cancelled once it starts, and the plugin holds the whole document in RAM as 32-bit float.
+- The plugin holds the whole document in RAM as 32-bit float.
+- `Color Space` sits at the top of the dialog, under Lens. Its `Auto` entry names what it found, for example `Auto (ACEScg, from the document profile)`. For a 32-bit ACEScg document without a profile, pick `ACEScg` there; the choice is saved with the dialog's last-used settings and in presets, so it sticks. The preview converts from the chosen space to sRGB for display, and the status line names the space when it isn't Rec.709.
 
-Scripting and actions: the filter's event is `stringIDToTypeID("flareSimPS")` with one text key `FsSt` holding `flaresim-ps 1` followed by `key=value` lines. The keys (`lens`, `flare_gain`, `ray_grid`, `view`, ...) are listed in `src/ps/ps_settings.cpp`; popups take their label text. Missing keys use defaults, never the last-used settings, so a script renders the same every time.
+### Progress and cancelling
+
+The preview shows its progress as a strip along the bottom of the preview and a percentage in the status line. Changing a setting stops the running preview and starts a new one. To stop previews while you change several settings, untick `Preview`. Tick it again to render once with the final settings.
+
+When you press OK, Photoshop shows its progress bar for the full render. Press Esc to cancel. The render checks for a cancel between batches of flare sources (up to 16 per render), so with only a few sources it can take a moment to stop.
+
+### Presets
+
+The Preset row at the top of the dialog saves the current settings, including the lens, under a name:
+- Save: type a name in the Preset box and press Save (or Enter). Saving under an existing name asks before replacing it.
+- Load: pick a preset from the list.
+- Delete: pick it, then press Delete.
+
+Each preset is a text file, `%APPDATA%\FlareSim\presets\<name>.flaresim`, in the same `key=value` format the scripting key uses. Copy the files to share presets or move them to another machine.
+
+### Actions
+
+Record the filter in an action as usual. The step stores the full settings, so it plays back the same on a machine without your presets. When the settings equal a saved preset, the step also records the preset's name, so the Actions panel shows which preset it used. Turn on the step's dialog toggle to adjust the settings each time the action runs.
+
+### Scripting
+
+`scripts/install_ps_plugin.ps1` also installs `File > Scripts > FlareSim Preset...`, which applies a preset picked from a list, and `flaresim.jsxinc`, a helper library for your own scripts:
+
+```js
+//@include "flaresim.jsxinc"
+flareSim("Golden hour");                                     // a saved preset
+flareSim("Golden hour", {flare_gain: 2500});                 // the preset with one value changed
+flareSim(null, {lens: "double-gauss", view: "Flare Only"});  // defaults plus these values
+flareSim("Golden hour", null, true);                         // open the dialog with the preset
+flareSimListPresets();                                       // ["Golden hour", ...]
+```
+
+Without the library, call the filter's event `stringIDToTypeID("flareSimPS")` directly. It takes two optional text keys:
+- `FsPr`: a preset name. If no preset has that name and there's no `FsSt` either, the call throws an error.
+- `FsSt`: settings as `flaresim-ps 1` followed by `key=value` lines. These go on top of the preset.
+
+The keys (`lens`, `flare_gain`, `ray_grid`, `view`, ...) are the ones in a preset file and in `src/ps/ps_settings.cpp`. Popups take their label text, and switches take `on`/`off`. Keys you leave out come from the preset, or from the defaults when there is no preset, never from the last dialog session, so a script renders the same every time.
 
 ```js
 var desc = new ActionDescriptor();
-desc.putString(charIDToTypeID("FsSt"), "flaresim-ps 1\nlens=double-gauss\nflare_gain=2000\nview=Flare Only\n");
+desc.putString(charIDToTypeID("FsPr"), "Golden hour");
+desc.putString(charIDToTypeID("FsSt"), "flaresim-ps 1\nflare_gain=2000\nview=Flare Only\n");
 executeAction(stringIDToTypeID("flareSimPS"), desc, DialogModes.NO);
 ```
 

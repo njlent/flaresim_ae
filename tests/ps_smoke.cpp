@@ -1,14 +1,20 @@
 #include "builtin_lenses.h"
 #include "frame_bridge.h"
 #include "ps_image.h"
+#include "ps_presets.h"
 #include "ps_settings.h"
+#include "render_frame.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -219,6 +225,12 @@ void test_preview_proxy()
     CHECK(near(state.flare_gain, 25.0, 1.0e-3));
     CHECK(state.cluster_radius_px == 2);
 
+    // A small radius stays on in the preview instead of rounding to 0.
+    AeParameterState small_radius {};
+    small_radius.cluster_radius_px = 1;
+    ps_scale_state_for_proxy(small_radius, 4);
+    CHECK(small_radius.cluster_radius_px == 1);
+
     AeParameterState coarse {};
     coarse.downsample = 8;
     coarse.flare_gain = 50.0f;
@@ -282,6 +294,172 @@ void test_render_32bit()
     CHECK(proxy_added > 0.75 * added && proxy_added < 1.25 * added);
 }
 
+FloatImageBuffer make_many_sources_scene()
+{
+    FloatImageBuffer input = make_image(192, 108, 0.04f, 0.05f, 0.08f, 1.0f);
+    for (int k = 0; k < 40; ++k) {
+        const int x = 8 + (k * 37) % 176;
+        const int y = 6 + (k * 23) % 96;
+        const std::size_t i = static_cast<std::size_t>(y) * 192 + x;
+        input.r[i] = 50.0f + 10.0f * k;
+        input.g[i] = 45.0f + 9.0f * k;
+        input.b[i] = 40.0f + 8.0f * k;
+    }
+    return input;
+}
+
+AeParameterState many_sources_state()
+{
+    AeUiParameterState ui = ps_default_ui_state();
+    ui.ray_grid = 16;
+    ui.downsample = 1;
+    ui.max_sources = 0;
+    AeParameterState state {};
+    CHECK(ps_build_parameter_state(ui, state));
+    return state;
+}
+
+// Each call runs on its own thread so the runtime's per-thread caches cannot
+// hand back an earlier result.
+template <typename Fn>
+void on_fresh_thread(Fn&& fn)
+{
+    std::thread(std::forward<Fn>(fn)).join();
+}
+
+double max_abs_diff(const FloatImageBuffer& a, const FloatImageBuffer& b, double& out_peak)
+{
+    double diff = 0.0;
+    out_peak = 0.0;
+    for (std::size_t i = 0; i < a.r.size(); ++i) {
+        diff = std::max({diff, std::abs(double(a.r[i]) - b.r[i]), std::abs(double(a.g[i]) - b.g[i]),
+                         std::abs(double(a.b[i]) - b.b[i])});
+        out_peak = std::max({out_peak, double(a.r[i]), double(a.g[i]), double(a.b[i])});
+    }
+    return diff;
+}
+
+void test_progress_and_cancel()
+{
+    const FloatImageBuffer input = make_many_sources_scene();
+    const AeParameterState state = many_sources_state();
+
+    FloatImageBuffer plain;
+    bool plain_ok = false;
+    on_fresh_thread([&] { plain_ok = render_frame_to_float_image(FLARESIM_REPO_ROOT, state, input, plain); });
+    CHECK(plain_ok);
+
+    // With a progress scope the sources are traced in chunks; the image must not change.
+    FloatImageBuffer chunked;
+    bool chunked_ok = false;
+    std::vector<float> fractions;
+    std::size_t sources = 0;
+    on_fresh_thread([&] {
+        ScopedRenderProgress progress([&](float fraction) {
+            fractions.push_back(fraction);
+            return true;
+        });
+        chunked_ok = render_frame_to_float_image(FLARESIM_REPO_ROOT, state, input, chunked);
+        sources = last_render_source_count();
+    });
+    CHECK(chunked_ok);
+    CHECK(sources >= 16);
+    // At least one chunk boundary before the last chunk, i.e. the render was split.
+    const auto split = std::count_if(fractions.begin(), fractions.end(), [](float f) { return f > 0.051f && f < 0.899f; });
+    CHECK(split >= 1);
+    CHECK(!fractions.empty() && near(fractions.back(), 1.0, 1e-6));
+    for (std::size_t i = 1; i < fractions.size(); ++i) {
+        CHECK(fractions[i] >= fractions[i - 1]);
+    }
+    double peak = 0.0;
+    const double diff = max_abs_diff(plain, chunked, peak);
+    std::printf("chunked vs single launch: max diff %.3g of peak %.4g over %zu progress steps\n", diff, peak,
+                fractions.size());
+    CHECK(diff <= 1e-4 * std::max(peak, 1.0));
+
+    // Cancelling stops the render, and the next render on that thread is
+    // complete rather than built from the cancelled one's leftovers.
+    on_fresh_thread([&] {
+        bool cancelled_ok = true;
+        int calls = 0;
+        {
+            ScopedRenderProgress progress([&](float fraction) {
+                ++calls;
+                return fraction < 0.2f;
+            });
+            FloatImageBuffer partial;
+            cancelled_ok = render_frame_to_float_image(FLARESIM_REPO_ROOT, state, input, partial);
+        }
+        CHECK(!cancelled_ok);
+        CHECK(calls >= 2);
+
+        FloatImageBuffer after;
+        CHECK(render_frame_to_float_image(FLARESIM_REPO_ROOT, state, input, after));
+        double after_peak = 0.0;
+        CHECK(max_abs_diff(plain, after, after_peak) <= 1e-4 * std::max(after_peak, 1.0));
+    });
+}
+
+void test_presets()
+{
+    CHECK(ps_valid_preset_name("Sun flare 2"));
+    CHECK(ps_valid_preset_name("Sonne \xC3\x9C"));
+    CHECK(!ps_valid_preset_name(""));
+    CHECK(!ps_valid_preset_name("a/b"));
+    CHECK(!ps_valid_preset_name("a\\b"));
+    CHECK(!ps_valid_preset_name("what?"));
+    CHECK(!ps_valid_preset_name("dot."));
+    CHECK(!ps_valid_preset_name(" lead"));
+    CHECK(!ps_valid_preset_name(std::string(101, 'x')));
+
+    namespace fs = std::filesystem;
+    const fs::path folder = fs::temp_directory_path() / ("flaresim_ps_smoke_presets_" + std::to_string(std::rand()));
+    std::error_code ec;
+    fs::remove_all(folder, ec);
+
+    CHECK(ps_list_presets(folder).empty());
+    CHECK(ps_find_matching_preset(folder, ps_default_ui_state()).empty());
+
+    AeUiParameterState warm = ps_default_ui_state();
+    warm.flare_gain = 1234.5f;
+    warm.cluster_radius_px = 24;
+    CHECK(ps_set_lens_id(warm, "double-gauss"));
+    AeUiParameterState cool = ps_default_ui_state();
+    cool.threshold = 2.5f;
+    cool.manual_source_enabled = true;
+
+    CHECK(ps_save_preset(folder, "beta", warm));
+    CHECK(ps_save_preset(folder, "Alpha", cool));
+    CHECK(ps_save_preset(folder, "Sonne \xC3\x9C", cool));
+    CHECK(!ps_save_preset(folder, "bad/name", cool));
+
+    const std::vector<std::string> names = ps_list_presets(folder);
+    CHECK(names.size() == 3);
+    CHECK(names.size() == 3 && names[0] == "Alpha" && names[1] == "beta" && names[2] == "Sonne \xC3\x9C");
+
+    AeUiParameterState loaded = ps_default_ui_state();
+    CHECK(ps_load_preset(folder, "beta", loaded));
+    CHECK(ps_serialize_settings(loaded) == ps_serialize_settings(warm));
+    CHECK(ps_preset_exists(folder, "Sonne \xC3\x9C"));
+    CHECK(!ps_load_preset(folder, "missing", loaded));
+
+    // Matching goes by settings, so the first equal preset in list order wins.
+    CHECK(ps_find_matching_preset(folder, warm) == "beta");
+    CHECK(ps_find_matching_preset(folder, cool) == "Alpha");
+    CHECK(ps_find_matching_preset(folder, ps_default_ui_state()).empty());
+
+    // Saving over an existing preset replaces it.
+    CHECK(ps_save_preset(folder, "beta", cool));
+    CHECK(ps_load_preset(folder, "beta", loaded));
+    CHECK(near(loaded.threshold, 2.5, 1e-6));
+
+    CHECK(ps_delete_preset(folder, "Alpha"));
+    CHECK(!ps_delete_preset(folder, "Alpha"));
+    CHECK(ps_list_presets(folder).size() == 2);
+
+    fs::remove_all(folder, ec);
+}
+
 } // namespace
 
 int main()
@@ -291,6 +469,8 @@ int main()
     test_pixel_round_trips();
     test_preview_proxy();
     test_render_32bit();
+    test_progress_and_cancel();
+    test_presets();
 
     if (g_failures != 0) {
         std::fprintf(stderr, "flaresim_ps_smoke: %d failure(s)\n", g_failures);

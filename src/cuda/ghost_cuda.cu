@@ -1523,6 +1523,7 @@ bool launch_ghost_cuda_impl(const LensSystem& lens,
                             const GhostConfig& config,
                             GpuBufferCache& cache,
                             bool copy_to_host,
+                            bool clear_output,
                             std::string* out_error)
 {
     if ((copy_to_host && (!out_r || !out_g || !out_b)) || width <= 0 || height <= 0) {
@@ -1855,6 +1856,8 @@ bool launch_ghost_cuda_impl(const LensSystem& lens,
     hash_append_value(graph_key, spec_key);
     hash_append_value(graph_key, setup_key);
     hash_append_value(graph_key, source_count);
+    hash_append_value(graph_key, copy_to_host);
+    hash_append_value(graph_key, clear_output);
     hash_append_value(graph_key, width);
     hash_append_value(graph_key, height);
     hash_append_value(graph_key, sensor_half_w);
@@ -1891,23 +1894,25 @@ bool launch_ghost_cuda_impl(const LensSystem& lens,
             }
         }
 
-        const cudaError_t memset_r_error =
-            cudaMemsetAsync(cache.d_out_r, 0, num_pixels * sizeof(float), target_stream);
-        if (memset_r_error != cudaSuccess) {
-            report_cuda_error(memset_r_error, "cudaMemsetAsync(d_out_r)", out_error);
-            return false;
-        }
-        const cudaError_t memset_g_error =
-            cudaMemsetAsync(cache.d_out_g, 0, num_pixels * sizeof(float), target_stream);
-        if (memset_g_error != cudaSuccess) {
-            report_cuda_error(memset_g_error, "cudaMemsetAsync(d_out_g)", out_error);
-            return false;
-        }
-        const cudaError_t memset_b_error =
-            cudaMemsetAsync(cache.d_out_b, 0, num_pixels * sizeof(float), target_stream);
-        if (memset_b_error != cudaSuccess) {
-            report_cuda_error(memset_b_error, "cudaMemsetAsync(d_out_b)", out_error);
-            return false;
+        if (clear_output) {
+            const cudaError_t memset_r_error =
+                cudaMemsetAsync(cache.d_out_r, 0, num_pixels * sizeof(float), target_stream);
+            if (memset_r_error != cudaSuccess) {
+                report_cuda_error(memset_r_error, "cudaMemsetAsync(d_out_r)", out_error);
+                return false;
+            }
+            const cudaError_t memset_g_error =
+                cudaMemsetAsync(cache.d_out_g, 0, num_pixels * sizeof(float), target_stream);
+            if (memset_g_error != cudaSuccess) {
+                report_cuda_error(memset_g_error, "cudaMemsetAsync(d_out_g)", out_error);
+                return false;
+            }
+            const cudaError_t memset_b_error =
+                cudaMemsetAsync(cache.d_out_b, 0, num_pixels * sizeof(float), target_stream);
+            if (memset_b_error != cudaSuccess) {
+                report_cuda_error(memset_b_error, "cudaMemsetAsync(d_out_b)", out_error);
+                return false;
+            }
         }
 
         for (const GpuLaunchBucketCache& bucket : cache.launch_buckets) {
@@ -2109,7 +2114,9 @@ bool launch_ghost_cuda(const LensSystem& lens,
                        int height,
                        const GhostConfig& config,
                        GpuBufferCache& cache,
-                       std::string* out_error)
+                       std::string* out_error,
+                       bool clear_output,
+                       bool copy_output)
 {
     return launch_ghost_cuda_impl(lens,
                                   setup,
@@ -2125,7 +2132,8 @@ bool launch_ghost_cuda(const LensSystem& lens,
                                   height,
                                   config,
                                   cache,
-                                  true,
+                                  copy_output,
+                                  clear_output,
                                   out_error);
 }
 
@@ -2156,5 +2164,6 @@ bool launch_ghost_cuda_device(const LensSystem& lens,
                                   config,
                                   cache,
                                   false,
+                                  true,
                                   out_error);
 }

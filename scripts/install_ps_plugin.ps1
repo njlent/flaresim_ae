@@ -5,6 +5,7 @@ Installs FlareSimPS.8bf, its lens assets and the CUDA runtime into Photoshop.
 .DESCRIPTION
 Copies into "<Photoshop>\Plug-ins\FlareSim\":
   FlareSimPS.8bf, cudart64_12.dll (when found) and assets\lenses.
+Copies "FlareSim Preset.jsx" and flaresim.jsxinc into "<Photoshop>\Presets\Scripts\".
 Photoshop must be restarted to pick up a new or updated plug-in.
 Relaunches itself elevated when the Plug-ins folder is not writable.
 
@@ -74,6 +75,15 @@ $assets = Join-Path $target "assets"
 if (Test-Path $assets) { Remove-Item $assets -Recurse -Force }
 New-Item -ItemType Directory -Force $assets | Out-Null
 Copy-Item (Join-Path $repo "assets\lenses") $assets -Recurse -Force
+
+# File > Scripts > "FlareSim Preset..." and the helper library it includes.
+$scripts = Join-Path $PhotoshopDir "Presets\Scripts"
+if (Test-Path $scripts) {
+    Copy-Item (Join-Path $repo "scripts\photoshop\FlareSim Preset.jsx") $scripts -Force
+    Copy-Item (Join-Path $repo "scripts\photoshop\flaresim.jsxinc") $scripts -Force
+} else {
+    Write-Warning "$scripts not found; skipped the FlareSim Preset script."
+}
 
 Write-Host "Installed FlareSim to $target"
 Get-ChildItem $target | Select-Object Name, Length | Format-Table -AutoSize

@@ -1,6 +1,7 @@
 #include "asset_root.h"
 #include "bloom.h"
 #include "builtin_lenses.h"
+#include "color_space.h"
 #include "frame_bridge.h"
 #include "ghost_cuda.h"
 #include "ghost.h"
@@ -13,8 +14,10 @@
 #include "render_frame.h"
 #include "source_extract.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -93,19 +96,113 @@ void test_source_extract()
     const auto cap_rejected_sources = extract_bright_pixels(img, 2.5f, 1, 1.0f, 1.0f, 2.0f);
     assert(cap_rejected_sources.empty());
 
-    std::vector<BrightPixel> clustered_sources = {
-        {.angle_x = 0.0f, .angle_y = 0.0f, .r = 4.0f, .g = 4.0f, .b = 4.0f},
-        {.angle_x = 0.005f, .angle_y = 0.002f, .r = 2.0f, .g = 2.0f, .b = 2.0f},
-        {.angle_x = 0.25f, .angle_y = 0.1f, .r = 1.0f, .g = 1.0f, .b = 1.0f},
+    // The cluster tests below place sources by hand on a 1920x1080 frame
+    // with downsample 1, so source spacing in pixels is block spacing.
+    const float tan_half = std::tan(60.0f * 0.5f * 3.14159265358979323846f / 180.0f);
+    const float tan_half_v = tan_half * 1080.0f / 1920.0f;
+    const float angle_per_px = 2.0f * tan_half / 1920.0f;
+    auto at_px = [&](float x_px, float y_px, float value) {
+        // Pixel centres, as extract_bright_pixels places them.
+        const float x = (std::floor(x_px) + 0.5f) / 1920.0f - 0.5f;
+        const float y = (std::floor(y_px) + 0.5f) / 1080.0f - 0.5f;
+        return BrightPixel {.angle_x = std::atan(x * 2.0f * tan_half),
+                            .angle_y = std::atan(y * 2.0f * tan_half_v),
+                            .r = value, .g = value, .b = value};
     };
-    cluster_bright_pixels(clustered_sources,
-                          10,
-                          1920,
-                          std::tan(60.0f * 0.5f * 3.14159265358979323846f / 180.0f));
+
+    std::vector<BrightPixel> clustered_sources = {
+        at_px(960.0f, 540.0f, 4.0f),
+        at_px(968.0f, 543.0f, 2.0f),
+        at_px(1400.0f, 700.0f, 1.0f),
+    };
+    cluster_bright_pixels(clustered_sources, 10, 1, 1920, 1080, tan_half, tan_half_v);
     assert(clustered_sources.size() == 2);
     assert(clustered_sources[0].r > 5.9f);
     assert(clustered_sources[0].angle_x > 0.0f);
-    assert(clustered_sources[0].angle_x < 0.005f);
+    assert(clustered_sources[0].angle_x < 8.0f * angle_per_px);
+
+    auto total_r = [](const std::vector<BrightPixel>& sources) {
+        double sum = 0.0;
+        for (const BrightPixel& source : sources) {
+            sum += source.r;
+        }
+        return sum;
+    };
+
+    // Links chain: a row of sources each closer than the radius to the next
+    // is one region even though its ends are far apart. The region keeps its
+    // length as a row of sources about 2 * radius apart, with all of the
+    // energy. A source well past the radius from the row stays apart.
+    std::vector<BrightPixel> chain;
+    for (int i = 0; i < 40; ++i) {
+        chain.push_back(at_px(700.0f + i * 8.0f, 540.0f, 1.0f));
+    }
+    chain.push_back(at_px(700.0f + 39 * 8.0f + 14.0f, 540.0f, 0.5f));
+    cluster_bright_pixels(chain, 10, 1, 1920, 1080, tan_half, tan_half_v);
+    assert(chain.size() == 16 + 1);  // 313 px row in 20 px cells, plus the loner
+    assert(std::abs(total_r(chain) - 40.5) < 1e-3);
+    float chain_min = 1.0f;
+    float chain_max = -1.0f;
+    for (const BrightPixel& source : chain) {
+        if (source.r > 0.75f) {
+            chain_min = std::min(chain_min, source.angle_x);
+            chain_max = std::max(chain_max, source.angle_x);
+        }
+    }
+    assert((chain_max - chain_min) / angle_per_px > 280.0f);
+
+    // A filled disc of sources (a large highlight) keeps its round outline
+    // with a fraction of the sources and all of the energy.
+    std::vector<BrightPixel> disc;
+    for (int y = -30; y <= 30; y += 2) {
+        for (int x = -30; x <= 30; x += 2) {
+            if (x * x + y * y <= 900) {
+                disc.push_back(at_px(960.0f + x, 540.0f + y, 2.0f));
+            }
+        }
+    }
+    const std::size_t disc_count = disc.size();
+    cluster_bright_pixels(disc, 4, 1, 1920, 1080, tan_half, tan_half_v);
+    assert(disc.size() > 30 && disc.size() < disc_count / 8);
+    assert(std::abs(total_r(disc) - 2.0 * static_cast<double>(disc_count)) < 1e-2);
+
+    // A lit facade extracted at downsample 4: each source sits at its block's
+    // brightest pixel, so neighbours land anywhere from 1 to 7 pixels apart.
+    // The facade must split into an even grid of cells, not scattered
+    // fragments, and a dark gap keeps two facades apart only while the radius
+    // is smaller than the gap.
+    {
+        const int w = 400;
+        const int h = 300;
+        std::vector<float> fr(static_cast<std::size_t>(w) * h, 0.0f);
+        std::uint32_t seed = 12345u;
+        auto lit = [&](int x0, int y0, int x1, int y1) {
+            for (int y = y0; y < y1; ++y) {
+                for (int x = x0; x < x1; ++x) {
+                    seed = seed * 1664525u + 1013904223u;
+                    fr[static_cast<std::size_t>(y) * w + x] = 2.0f + static_cast<float>(seed >> 8) / 16777216.0f;
+                }
+            }
+        };
+        lit(100, 40, 180, 160);  // facade, 80 x 120 px
+        lit(196, 40, 260, 160);  // second facade, 64 x 120 px, 16 px gap
+        const RgbImageView facade {fr.data(), fr.data(), fr.data(), w, h};
+        const float fov = 1.0f;
+        const float fov_v = 2.0f * std::atan(std::tan(fov * 0.5f) * h / w);
+        const auto detected = extract_bright_pixels(facade, 1.0f, 4, fov, fov_v);
+        assert(detected.size() > 500);
+        auto clusters_for = [&](int radius) {
+            std::vector<BrightPixel> sources = detected;
+            cluster_bright_pixels(sources, radius, 4, w, h, std::tan(fov * 0.5f), std::tan(fov_v * 0.5f));
+            assert(std::abs(total_r(sources) - total_r(detected)) < 1e-3 * total_r(detected));
+            return sources.size();
+        };
+        assert(clusters_for(1) == detected.size());   // 2 px cells: below the 4 px blocks
+        assert(clusters_for(4) == 10 * 15 + 8 * 15);  // 8 px cells
+        assert(clusters_for(16) == 3 * 4 + 2 * 4);    // 32 px cells, facades apart
+        assert(clusters_for(17) == 5 * 4);            // gap bridged: one 160 x 120 region
+        assert(clusters_for(200) == 1);
+    }
 }
 
 void test_source_limit()
@@ -1316,6 +1413,199 @@ void test_frame_bridge_cuda_device()
 #endif
 }
 
+void test_color_space()
+{
+    const WorkingColorSpace spaces[] = {
+        WorkingColorSpace::LinearRec709,
+        WorkingColorSpace::ACEScg,
+        WorkingColorSpace::ACES2065_1,
+        WorkingColorSpace::LinearRec2020,
+        WorkingColorSpace::LinearDisplayP3,
+    };
+    for (const WorkingColorSpace space : spaces) {
+        for (int c = 0; c < 3; ++c) {
+            float rgb[3] = {0.0f, 0.0f, 0.0f};
+            rgb[c] = 1.0f;
+            apply_color_matrix(working_to_rec709_matrix(space), rgb[0], rgb[1], rgb[2]);
+            apply_color_matrix(rec709_to_working_matrix(space), rgb[0], rgb[1], rgb[2]);
+            for (int k = 0; k < 3; ++k) {
+                assert(std::abs(rgb[k] - (k == c ? 1.0f : 0.0f)) < 1e-5f);
+            }
+        }
+        // White stays white: the matrices adapt the white point.
+        float r = 1.0f;
+        float g = 1.0f;
+        float b = 1.0f;
+        apply_color_matrix(working_to_rec709_matrix(space), r, g, b);
+        assert(std::abs(r - 1.0f) < 1e-4f && std::abs(g - 1.0f) < 1e-4f && std::abs(b - 1.0f) < 1e-4f);
+    }
+
+    struct NameCase
+    {
+        const char* name;
+        bool known;
+        WorkingColorSpace space;
+    };
+    const NameCase names[] = {
+        {"ACEScg", true, WorkingColorSpace::ACEScg},
+        {"ACES - ACEScg", true, WorkingColorSpace::ACEScg},
+        {"lin_ap1", true, WorkingColorSpace::ACEScg},
+        {"ACES2065-1", true, WorkingColorSpace::ACES2065_1},
+        {"Linear Rec.2020", true, WorkingColorSpace::LinearRec2020},
+        {"Linear P3-D65", true, WorkingColorSpace::LinearDisplayP3},
+        {"lin_rec709", true, WorkingColorSpace::LinearRec709},
+        {"ACEScct", false, WorkingColorSpace::LinearRec709},
+        {"Utility - Raw", false, WorkingColorSpace::LinearRec709},
+    };
+    for (const NameCase& item : names) {
+        WorkingColorSpace found = WorkingColorSpace::LinearRec709;
+        assert(working_space_from_name(item.name, found) == item.known);
+        if (item.known) {
+            assert(found == item.space);
+        }
+    }
+
+    // A minimal ICC matrix profile with ACEScg colorants (D50, s15Fixed16).
+    {
+        const double colorants[3][3] = {
+            {0.6899115164, 0.2845279995, -0.0060452510},  // rXYZ
+            {0.1497877436, 0.6716655209, 0.0099963870},   // gXYZ
+            {0.1245964164, 0.0438064796, 0.8211534666},   // bXYZ
+        };
+        std::vector<unsigned char> icc(132 + 3 * 12 + 3 * 20, 0);
+        auto put32 = [&](std::size_t at, std::uint32_t v) {
+            icc[at] = static_cast<unsigned char>(v >> 24);
+            icc[at + 1] = static_cast<unsigned char>(v >> 16);
+            icc[at + 2] = static_cast<unsigned char>(v >> 8);
+            icc[at + 3] = static_cast<unsigned char>(v);
+        };
+        auto tag = [](const char* t) {
+            return (static_cast<std::uint32_t>(t[0]) << 24) | (static_cast<std::uint32_t>(t[1]) << 16) |
+                   (static_cast<std::uint32_t>(t[2]) << 8) | static_cast<std::uint32_t>(t[3]);
+        };
+        put32(0, static_cast<std::uint32_t>(icc.size()));
+        put32(16, tag("RGB "));
+        put32(128, 3);
+        const char* tags[3] = {"rXYZ", "gXYZ", "bXYZ"};
+        for (int c = 0; c < 3; ++c) {
+            const std::size_t data = 132 + 36 + 20 * static_cast<std::size_t>(c);
+            put32(132 + 12 * c, tag(tags[c]));
+            put32(132 + 12 * c + 4, static_cast<std::uint32_t>(data));
+            put32(132 + 12 * c + 8, 20);
+            put32(data, tag("XYZ "));
+            for (int k = 0; k < 3; ++k) {
+                put32(data + 8 + 4 * k, static_cast<std::uint32_t>(static_cast<std::int32_t>(std::lround(colorants[c][k] * 65536.0))));
+            }
+        }
+        WorkingColorSpace found = WorkingColorSpace::LinearRec709;
+        assert(working_space_from_icc_profile(icc.data(), icc.size(), found));
+        assert(found == WorkingColorSpace::ACEScg);
+        assert(!working_space_from_icc_profile(icc.data(), 100, found));
+    }
+
+    // The flare is linear in the image, so rendering an ACEScg image in
+    // ACEScg gives the Rec.709 render of the same scene converted to ACEScg.
+    std::string asset_root;
+    assert(find_flaresim_asset_root(FLARESIM_REPO_ROOT, asset_root));
+    constexpr int width = 16;
+    constexpr int height = 12;
+    constexpr int row_floats = width * 4;
+    std::vector<float> rec709_in(row_floats * height, 0.0f);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            float* px = rec709_in.data() + y * row_floats + x * 4;
+            px[0] = 0.05f + 0.01f * x;  // B
+            px[1] = 0.04f;
+            px[2] = 0.02f + 0.01f * y;  // R
+            px[3] = 1.0f;
+        }
+    }
+    float* hot = rec709_in.data() + 4 * row_floats + 9 * 4;
+    hot[0] = 3.0f;
+    hot[1] = 9.0f;
+    hot[2] = 14.0f;
+    std::vector<float> aces_in = rec709_in;
+    for (std::size_t i = 0; i < aces_in.size(); i += 4) {
+        apply_color_matrix(rec709_to_working_matrix(WorkingColorSpace::ACEScg), aces_in[i + 2], aces_in[i + 1], aces_in[i]);
+    }
+
+    AeParameterState state {};
+    state.threshold = 0.5f;
+    state.downsample = 1;
+    state.ray_grid = 8;
+    state.flare_gain = 100.0f;
+    state.starburst_gain = 0.1f;
+    state.bloom.threshold = 0.5f;
+    state.bloom.strength = 0.3f;
+    state.bloom.passes = 1;
+    state.bloom.octaves = 1;
+    state.manual_source_enabled = true;
+    state.manual_source_x = 0.2f;
+    state.manual_source_y = 0.7f;
+    state.manual_source_r = 1.0f;
+    state.manual_source_g = 0.5f;
+    state.manual_source_b = 0.25f;
+    state.view = AeOutputView::Composite;
+    state.working_space_auto = false;
+
+    auto check_equivalent = [&](auto render) {
+        std::vector<float> rec709_out(row_floats * height, 0.0f);
+        std::vector<float> aces_out(row_floats * height, 0.0f);
+        AeParameterState rec709_state = state;
+        rec709_state.working_space = WorkingColorSpace::LinearRec709;
+        AeParameterState aces_state = state;
+        aces_state.working_space = WorkingColorSpace::ACEScg;
+        // The manual colour is given in the working space.
+        apply_color_matrix(rec709_to_working_matrix(WorkingColorSpace::ACEScg),
+                           aces_state.manual_source_r, aces_state.manual_source_g, aces_state.manual_source_b);
+        render(rec709_state, rec709_in, rec709_out);
+        render(aces_state, aces_in, aces_out);
+        float peak = 0.0f;
+        float worst = 0.0f;
+        for (std::size_t i = 0; i < rec709_out.size(); i += 4) {
+            float r = rec709_out[i + 2];
+            float g = rec709_out[i + 1];
+            float b = rec709_out[i];
+            apply_color_matrix(rec709_to_working_matrix(WorkingColorSpace::ACEScg), r, g, b);
+            peak = std::max({peak, std::abs(r), std::abs(g), std::abs(b)});
+            worst = std::max({worst, std::abs(r - aces_out[i + 2]), std::abs(g - aces_out[i + 1]),
+                              std::abs(b - aces_out[i])});
+        }
+        assert(peak > 1.0f);
+        assert(worst < 1e-4f * peak);
+    };
+    check_equivalent([&](const AeParameterState& s, const std::vector<float>& in, std::vector<float>& out) {
+        assert(render_frame_to_bgra128_host_buffer(asset_root, s, in.data(), out.data(), width, height, row_floats,
+                                                   row_floats));
+    });
+#if FLARESIM_TEST_HAS_CUDA_RUNTIME
+    std::string reason;
+    if (cuda_ghost_renderer_compiled() && cuda_ghost_renderer_available(&reason)) {
+        check_equivalent([&](const AeParameterState& s, const std::vector<float>& in, std::vector<float>& out) {
+            float* d_in = nullptr;
+            float* d_out = nullptr;
+            assert(cudaMalloc(&d_in, in.size() * sizeof(float)) == cudaSuccess);
+            assert(cudaMalloc(&d_out, out.size() * sizeof(float)) == cudaSuccess);
+            assert(cudaMemcpy(d_in, in.data(), in.size() * sizeof(float), cudaMemcpyHostToDevice) == cudaSuccess);
+            assert(render_frame_to_bgra128_device_buffer(asset_root, s, d_in, d_out, width, height, row_floats,
+                                                         row_floats));
+            assert(cudaMemcpy(out.data(), d_out, out.size() * sizeof(float), cudaMemcpyDeviceToHost) == cudaSuccess);
+            cudaFree(d_in);
+            cudaFree(d_out);
+        });
+    }
+#endif
+
+    // Auto follows the host's working space; an explicit choice does not.
+    AeParameterState automatic {};
+    resolve_auto_working_space(automatic, WorkingColorSpace::ACEScg);
+    assert(automatic.working_space == WorkingColorSpace::ACEScg);
+    AeParameterState fixed {};
+    fixed.working_space_auto = false;
+    resolve_auto_working_space(fixed, WorkingColorSpace::ACEScg);
+    assert(fixed.working_space == WorkingColorSpace::LinearRec709);
+}
+
 void test_param_schema()
 {
     assert(parameter_count() > 100);
@@ -1367,7 +1657,8 @@ void test_param_schema()
     assert(cell_coverage_bias_param() + 1 == cell_edge_inset_param());
     assert(cell_edge_inset_param() + 1 == advanced_ghosts_section_end_param());
     assert(advanced_ghosts_section_end_param() + 1 == post_section_end_param());
-    assert(post_section_end_param() + 1 == view_mode_param());
+    assert(post_section_end_param() + 1 == color_space_param());
+    assert(color_space_param() + 1 == view_mode_param());
     assert(mask_layer_param() + 1 == parameter_count());
     assert(PARAM_ID_HAZE_GAIN == 19);
     assert(PARAM_ID_SPECTRAL_SAMPLES == 24);
@@ -1601,6 +1892,7 @@ int main()
     test_frame_bridge();
     test_frame_bridge_cuda_device();
     test_param_schema();
+    test_color_space();
     std::cout << "flaresim_core_smoke: ok\n";
     return 0;
 }

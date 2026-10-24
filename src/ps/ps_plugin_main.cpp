@@ -2,18 +2,22 @@
 // runs the shared FlareSim runtime (the same path the AE plugin uses), and
 // writes the filtered area back. Settings travel as flaresim-ps text in the
 // parameters handle (Ctrl+F re-runs), the scripting descriptor (actions and
-// Smart Filters) and a last-used file under %APPDATA%.
+// Smart Filters) and a last-used file under %APPDATA%. The descriptor can also
+// name a preset, which scripts use to apply saved settings by name.
 
 #include "PIDefines.h"
 #include "PIFilter.h"
 #include "PIAbout.h"
 
 #include "asset_root.h"
+#include "color_space.h"
 #include "frame_bridge.h"
 #include "ps_dialog.h"
 #include "ps_image.h"
+#include "ps_presets.h"
 #include "ps_settings.h"
 #include "ps_version.h"
+#include "render_frame.h"
 
 #include <windows.h>
 #include <shlobj.h>
@@ -34,6 +38,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr DescriptorKeyID kKeySettings = 'FsSt';
+constexpr DescriptorKeyID kKeyPreset = 'FsPr';
 constexpr std::uint32_t kGlobalsMagic = 'FlSm';
 // Input bands are sized to stay well inside Photoshop's tile memory.
 constexpr std::int64_t kBandBytes = 32ll * 1024ll * 1024ll;
@@ -45,6 +50,9 @@ struct Globals
     // Set when the user pressed OK in the dialog. Scripted and action runs
     // must not overwrite the interactive last-used settings.
     bool dialog_confirmed = false;
+    // Preset whose settings equal the ones just rendered; recorded next to the
+    // settings so the Actions panel shows which preset an action step used.
+    std::string preset_name;
 };
 
 class PsError : public std::exception
@@ -183,31 +191,43 @@ void save_last_used(const std::string& text)
     file << text;
 }
 
-// Returns true when a descriptor was present; sets show_dialog from playInfo.
-// Settings missing from the descriptor fall back to defaults, never to the
-// last-used state, so a script or action renders the same every time.
-bool read_descriptor(FilterRecord* record, AeUiParameterState& state, bool& show_dialog)
+struct DescriptorInput
 {
+    bool present = false;
+    bool show_dialog = false;
+    std::string preset;
+    bool has_settings = false;
+    std::string settings;
+};
+
+DescriptorInput read_descriptor(FilterRecord* record)
+{
+    DescriptorInput input;
     PIDescriptorParameters* params = record->descriptorParameters;
     if (!params || !params->readDescriptorProcs || !params->descriptor) {
-        return false;
+        return input;
     }
     ReadDescriptorProcs* procs = params->readDescriptorProcs;
 
-    DescriptorKeyID keys[] = {kKeySettings, 0};
+    DescriptorKeyID keys[] = {kKeyPreset, kKeySettings, 0};
     PIReadDescriptor token = procs->openReadDescriptorProc(params->descriptor, keys);
-    state = ps_default_ui_state();
     if (token) {
         DescriptorKeyID key = 0;
         DescriptorTypeID type = 0;
         int32 flags = 0;
         while (procs->getKeyProc(token, &key, &type, &flags)) {
-            if (key == kKeySettings) {
-                Handle text = nullptr;
-                if (procs->getTextProc(token, &text) == noErr && text) {
-                    ps_deserialize_settings(read_handle_text(record, text), state);
-                    record->handleProcs->disposeProc(text);
+            if (key != kKeySettings && key != kKeyPreset) {
+                continue;
+            }
+            Handle text = nullptr;
+            if (procs->getTextProc(token, &text) == noErr && text) {
+                if (key == kKeySettings) {
+                    input.settings = read_handle_text(record, text);
+                    input.has_settings = true;
+                } else {
+                    input.preset = read_handle_text(record, text);
                 }
+                record->handleProcs->disposeProc(text);
             }
         }
         procs->closeReadDescriptorProc(token);
@@ -215,11 +235,43 @@ bool read_descriptor(FilterRecord* record, AeUiParameterState& state, bool& show
     record->handleProcs->disposeProc(params->descriptor);
     params->descriptor = nullptr;
 
-    show_dialog = params->playInfo == plugInDialogDisplay;
-    return true;
+    input.present = true;
+    input.show_dialog = params->playInfo == plugInDialogDisplay;
+    return input;
 }
 
-void write_descriptor(FilterRecord* record, const std::string& text)
+// Settings missing from the descriptor fall back to defaults (or to the named
+// preset), never to the last-used state, so a script or action renders the
+// same every time. The preset loads first and the settings text goes on top,
+// so a script can name a preset and override single keys. Recorded actions
+// carry the full settings, so they still play back if the preset is gone.
+void apply_descriptor(const DescriptorInput& input, AeUiParameterState& state)
+{
+    state = ps_default_ui_state();
+    if (!input.preset.empty() && !ps_load_preset(ps_default_preset_folder(), input.preset, state) &&
+        !input.has_settings) {
+        throw PsError(filterBadParameters,
+                      "FlareSim preset \"" + input.preset + "\" was not found in %APPDATA%\\FlareSim\\presets.");
+    }
+    if (input.has_settings && !ps_deserialize_settings(input.settings, state)) {
+        throw PsError(filterBadParameters, "FlareSim settings text must start with \"flaresim-ps 1\".");
+    }
+}
+
+bool put_text(FilterRecord* record, WriteDescriptorProcs* procs, PIWriteDescriptor token, DescriptorKeyID key,
+              const std::string& text)
+{
+    Handle handle = new_handle_with_text(record, text);
+    if (!handle) {
+        return false;
+    }
+    const bool ok = procs->putTextProc(token, key, handle) == noErr;
+    // The descriptor keeps its own copy.
+    record->handleProcs->disposeProc(handle);
+    return ok;
+}
+
+void write_descriptor(FilterRecord* record, const std::string& text, const std::string& preset_name)
 {
     PIDescriptorParameters* params = record->descriptorParameters;
     if (!params || !params->writeDescriptorProcs) {
@@ -230,13 +282,10 @@ void write_descriptor(FilterRecord* record, const std::string& text)
     if (!token) {
         return;
     }
-    Handle text_handle = new_handle_with_text(record, text);
-    if (text_handle) {
-        if (procs->putTextProc(token, kKeySettings, text_handle) == noErr) {
-            // The descriptor keeps its own copy.
-            record->handleProcs->disposeProc(text_handle);
-        }
+    if (!preset_name.empty()) {
+        put_text(record, procs, token, kKeyPreset, preset_name);
     }
+    put_text(record, procs, token, kKeySettings, text);
     if (params->descriptor) {
         record->handleProcs->disposeProc(params->descriptor);
         params->descriptor = nullptr;
@@ -378,8 +427,10 @@ void allocate(FloatImageBuffer& image, int width, int height)
     image.alpha.assign(np, 1.0f);
 }
 
-// Progress budget: 0..20 reading, 20..90 rendering, 90..100 writing.
-constexpr int32 kProgressTotal = 100;
+// Progress budget in permille: 0..200 reading, 200..900 rendering, 900..1000 writing.
+constexpr int32 kProgressTotal = 1000;
+constexpr int32 kProgressReadEnd = 200;
+constexpr int32 kProgressRenderEnd = 900;
 
 void read_document(FilterRecord* record, const DocumentLayout& layout, FloatImageBuffer& image)
 {
@@ -409,7 +460,7 @@ void read_document(FilterRecord* record, const DocumentLayout& layout, FloatImag
         if (!ps_read_pixels(band, map, layout.input_alpha, image, 0, top)) {
             throw PsError(filterBadParameters, "FlareSim could not read the document pixels.");
         }
-        record->progressProc(static_cast<int32>(20ll * bottom / height), kProgressTotal);
+        record->progressProc(static_cast<int32>(kProgressReadEnd * static_cast<std::int64_t>(bottom) / height), kProgressTotal);
         check_abort(record);
     }
 }
@@ -442,14 +493,18 @@ void write_document(FilterRecord* record, const DocumentLayout& layout, const Fl
         if (!ps_write_pixels(image, filter.left, top, map, layout.input_alpha, band)) {
             throw PsError(filterBadParameters, "FlareSim could not write the filtered pixels.");
         }
-        record->progressProc(90 + static_cast<int32>(10ll * (bottom - filter.top) / height), kProgressTotal);
+        record->progressProc(kProgressRenderEnd + static_cast<int32>((kProgressTotal - kProgressRenderEnd) *
+                                                                     static_cast<std::int64_t>(bottom - filter.top) / height),
+                             kProgressTotal);
         check_abort(record);
     }
 }
 
 // Renders on a short-lived thread so the runtime's thread_local caches (and
 // any CUDA resources they hold) are released at thread exit, never inside
-// DLL unload.
+// DLL unload. The main thread drives Photoshop's progress bar from the
+// render's own progress and turns Esc into a cancel, which the render picks up
+// between chunks of flare sources.
 bool render_on_worker(FilterRecord* record,
                       const std::string& asset_root,
                       const AeParameterState& state,
@@ -457,9 +512,15 @@ bool render_on_worker(FilterRecord* record,
                       FloatImageBuffer& output)
 {
     std::atomic<bool> done {false};
+    std::atomic<bool> cancel {false};
+    std::atomic<int> permille {0};
     bool ok = false;
     std::thread worker([&] {
         try {
+            ScopedRenderProgress progress([&](float fraction) {
+                permille.store(static_cast<int>(fraction * 1000.0f));
+                return !cancel.load();
+            });
             ok = render_frame_to_float_image(asset_root, state, input, output);
         } catch (...) {
             ok = false;
@@ -467,20 +528,16 @@ bool render_on_worker(FilterRecord* record,
         done.store(true);
     });
 
-    bool aborted = false;
-    int32 progress = 20;
     while (!done.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        // The render itself cannot be interrupted; remember the request and
-        // honour it once the worker is back.
-        if (!aborted && record->abortProc && record->abortProc()) {
-            aborted = true;
+        if (!cancel.load() && record->abortProc && record->abortProc()) {
+            cancel.store(true);
         }
-        progress = std::min<int32>(89, progress + 1);
-        record->progressProc(progress, kProgressTotal);
+        const std::int64_t span = kProgressRenderEnd - kProgressReadEnd;
+        record->progressProc(kProgressReadEnd + static_cast<int32>(span * permille.load() / 1000), kProgressTotal);
     }
     worker.join();
-    if (aborted) {
+    if (cancel.load()) {
         throw PsError(userCanceledErr);
     }
     return ok;
@@ -520,6 +577,26 @@ void do_prepare(FilterRecord* record)
     if (record->maxSpace > wanted) {
         record->maxSpace = static_cast<int32>(wanted);
     }
+}
+
+// What Color Space "Auto" means for this document. 32-bit documents hold
+// linear values in the primaries of their profile, so the profile's
+// colorants identify the space. 8/16-bit documents are gamma encoded; they
+// keep the Linear Rec.709 / sRGB behaviour.
+WorkingColorSpace document_working_space(const FilterRecord* record, const DocumentLayout& layout, bool& out_known)
+{
+    WorkingColorSpace space = WorkingColorSpace::LinearRec709;
+    out_known = false;
+    if (layout.depth != 32 || !record->canUseICCProfiles || !record->iCCprofileData || !record->handleProcs) {
+        return space;
+    }
+    const int32 size = record->handleProcs->getSizeProc(record->iCCprofileData);
+    Ptr data = record->handleProcs->lockProc(record->iCCprofileData, false);
+    if (data && size > 0) {
+        out_known = working_space_from_icc_profile(data, static_cast<std::size_t>(size), space);
+    }
+    record->handleProcs->unlockProc(record->iCCprofileData);
+    return space;
 }
 
 std::wstring describe(const DocumentLayout& layout)
@@ -563,7 +640,11 @@ void do_start(FilterRecord* record, Globals* globals)
     }
 
     bool show_dialog = globals->query_for_parameters;
-    read_descriptor(record, ui, show_dialog);
+    const DescriptorInput descriptor = read_descriptor(record);
+    if (descriptor.present) {
+        apply_descriptor(descriptor, ui);
+        show_dialog = descriptor.show_dialog;
+    }
 
     const std::string asset_root = resolve_asset_root();
     if (asset_root.empty()) {
@@ -573,12 +654,16 @@ void do_start(FilterRecord* record, Globals* globals)
 
     FloatImageBuffer input;
     read_document(record, layout, input);
+    bool document_profile_known = false;
+    const WorkingColorSpace document_space = document_working_space(record, layout, document_profile_known);
 
     if (show_dialog) {
         PsDialogContext context;
         context.parent_window = host_window(record);
         context.image = &input;
         context.linear_document = layout.depth == 32;
+        context.document_space = document_space;
+        context.document_profile_known = document_profile_known;
         context.asset_root = asset_root;
         context.document_description = to_utf8(describe(layout));
         const PsDialogResult result = ps_run_dialog(context, ui);
@@ -594,11 +679,13 @@ void do_start(FilterRecord* record, Globals* globals)
 
     const std::string text = ps_serialize_settings(ui);
     store_parameters_handle(record, text);
+    globals->preset_name = ps_find_matching_preset(ps_default_preset_folder(), ui);
 
     AeParameterState state {};
     if (!ps_build_parameter_state(ui, state)) {
         throw PsError(filterBadParameters, "FlareSim settings are invalid.");
     }
+    resolve_auto_working_space(state, document_space);
 
     FloatImageBuffer output;
     if (!render_on_worker(record, asset_root, state, input, output)) {
@@ -629,7 +716,7 @@ void do_finish(FilterRecord* record, Globals* globals)
     if (text.empty()) {
         return;
     }
-    write_descriptor(record, text);
+    write_descriptor(record, text, globals->preset_name);
     if (globals->dialog_confirmed) {
         save_last_used(text);
         globals->dialog_confirmed = false;

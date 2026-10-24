@@ -40,6 +40,22 @@ constexpr SensorPresetDescriptor kSensorPresets[] = {
 
 constexpr int kSpectralSamples[] = {3, 5, 7, 9, 11, 15, 21, 31};
 
+struct ColorSpaceDescriptor
+{
+    bool automatic;
+    WorkingColorSpace space;
+    std::string_view label;
+};
+
+constexpr ColorSpaceDescriptor kColorSpaces[] = {
+    {true, WorkingColorSpace::LinearRec709, "Auto"},
+    {false, WorkingColorSpace::LinearRec709, "Linear Rec.709 / sRGB"},
+    {false, WorkingColorSpace::ACEScg, "ACEScg"},
+    {false, WorkingColorSpace::ACES2065_1, "ACES2065-1"},
+    {false, WorkingColorSpace::LinearRec2020, "Linear Rec.2020"},
+    {false, WorkingColorSpace::LinearDisplayP3, "Linear Display P3"},
+};
+
 struct GhostCleanupModeDescriptor
 {
     GhostCleanupMode mode;
@@ -208,7 +224,8 @@ int cell_coverage_bias_param() { return pupil_jitter_auto_seed_param() + 1; }
 int cell_edge_inset_param() { return cell_coverage_bias_param() + 1; }
 int advanced_ghosts_section_end_param() { return cell_edge_inset_param() + 1; }
 int post_section_end_param() { return advanced_ghosts_section_end_param() + 1; }
-int view_mode_param() { return post_section_end_param() + 1; }
+int color_space_param() { return post_section_end_param() + 1; }
+int view_mode_param() { return color_space_param() + 1; }
 int mask_layer_param() { return view_mode_param() + 1; }
 int parameter_count() { return mask_layer_param() + 1; }
 
@@ -346,6 +363,15 @@ std::string build_projected_cells_mode_popup_string()
         labels[i] = kProjectedCellsModes[i].label.data();
     }
     return build_popup_string_from_labels(labels, std::size(kProjectedCellsModes));
+}
+
+std::string build_color_space_popup_string()
+{
+    const char* labels[std::size(kColorSpaces)] {};
+    for (std::size_t i = 0; i < std::size(kColorSpaces); ++i) {
+        labels[i] = kColorSpaces[i].label.data();
+    }
+    return build_popup_string_from_labels(labels, std::size(kColorSpaces));
 }
 
 std::string build_output_view_popup_string()
@@ -593,6 +619,21 @@ int output_view_popup_index(AeOutputView view)
     return 0;
 }
 
+int color_space_popup_count()
+{
+    return static_cast<int>(std::size(kColorSpaces));
+}
+
+bool color_space_from_popup(int popup_index, bool& out_automatic, WorkingColorSpace& out_space)
+{
+    if (popup_index < 1 || popup_index > static_cast<int>(std::size(kColorSpaces))) {
+        return false;
+    }
+    out_automatic = kColorSpaces[popup_index - 1].automatic;
+    out_space = kColorSpaces[popup_index - 1].space;
+    return true;
+}
+
 int output_view_popup_count()
 {
     return static_cast<int>(std::size(kOutputViews));
@@ -672,6 +713,12 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
         return false;
     }
 
+    bool working_space_auto = true;
+    WorkingColorSpace working_space = WorkingColorSpace::LinearRec709;
+    if (!color_space_from_popup(ui_state.color_space_index, working_space_auto, working_space)) {
+        return false;
+    }
+
     int spectral_samples = 3;
     if (!spectral_samples_from_popup(ui_state.spectral_samples_index, spectral_samples)) {
         return false;
@@ -703,6 +750,8 @@ bool apply_ui_parameter_state(const AeUiParameterState& ui_state, AeParameterSta
     }
 
     out_state.view = view;
+    out_state.working_space_auto = working_space_auto;
+    out_state.working_space = working_space;
     out_state.use_sensor_size = ui_state.use_sensor_size;
     out_state.sensor_preset_index = ui_state.sensor_preset_index;
     out_state.fov_h_deg = ui_state.fov_h_deg;
