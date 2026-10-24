@@ -34,6 +34,10 @@ bool render_frame_to_float_image(
     const FloatImageBuffer* detection_mask = nullptr
 );
 
+// Flare sources used by the last render_frame_to_float_image call on this
+// thread, including the manual source when it is enabled.
+std::size_t last_render_source_count();
+
 bool render_frame_to_pixels(
     const std::string& asset_root,
     const AeParameterState& state,

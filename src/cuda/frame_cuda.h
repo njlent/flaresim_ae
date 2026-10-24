@@ -16,6 +16,10 @@ struct GpuFrameRenderCache
     float* d_scene_bgra = nullptr;
     std::size_t scene_floats = 0;
 
+    // Input converted to linear Rec.709 for other working spaces (BGRA).
+    float* d_rec709_input = nullptr;
+    std::size_t rec709_input_bytes = 0;
+
     float* d_bloom_r = nullptr;
     float* d_bloom_g = nullptr;
     float* d_bloom_b = nullptr;

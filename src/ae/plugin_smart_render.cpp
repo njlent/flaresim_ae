@@ -2,8 +2,10 @@
 
 #include "AEFX_SuiteHelper.h"
 #include "AE_EffectCBSuites.h"
+#include "AE_GeneralPlug.h"
 
 #include "builtin_lenses.h"
+#include "color_space.h"
 #include "frame_bridge.h"
 #include "ghost_cuda.h"
 #include "param_schema.h"
@@ -38,6 +40,61 @@ void resolve_auto_pupil_seed(const PF_InData* in_data, AeParameterState& state)
     if (state.pupil_jitter_auto_seed &&
         state.pupil_jitter_mode == PupilJitterMode::Stratified) {
         state.pupil_jitter_seed = current_frame_seed(in_data);
+    }
+}
+
+// The project's OCIO working space when OCIO color management is on;
+// Linear Rec.709 otherwise or when the host cannot say.
+WorkingColorSpace host_working_space(const PF_InData* in_data)
+{
+    WorkingColorSpace space = WorkingColorSpace::LinearRec709;
+    if (!in_data || !in_data->pica_basicP) {
+        return space;
+    }
+    SPBasicSuite* basic = in_data->pica_basicP;
+    const void* color_suite_ptr = nullptr;
+    const void* memory_suite_ptr = nullptr;
+    if (basic->AcquireSuite(kAEGPColorSettingsSuite, kAEGPColorSettingsSuiteVersion6, &color_suite_ptr) != kSPNoError ||
+        !color_suite_ptr) {
+        return space;
+    }
+    if (basic->AcquireSuite(kAEGPMemorySuite, kAEGPMemorySuiteVersion1, &memory_suite_ptr) == kSPNoError &&
+        memory_suite_ptr) {
+        const auto* color = static_cast<const AEGP_ColorSettingsSuite6*>(color_suite_ptr);
+        const auto* memory = static_cast<const AEGP_MemorySuite1*>(memory_suite_ptr);
+        A_Boolean ocio_used = FALSE;
+        AEGP_MemHandle name_handle = nullptr;
+        if (color->AEGP_IsOCIOColorManagementUsed(0, &ocio_used) == A_Err_NONE && ocio_used &&
+            color->AEGPD_GetOCIOWorkingColorSpace(0, &name_handle) == A_Err_NONE && name_handle) {
+            AEGP_MemSize size = 0;
+            void* bytes = nullptr;
+            if (memory->AEGP_GetMemHandleSize(name_handle, &size) == A_Err_NONE &&
+                memory->AEGP_LockMemHandle(name_handle, &bytes) == A_Err_NONE && bytes) {
+                // The handle's encoding is not documented (UTF-8 or UTF-16);
+                // names match on ASCII letters and digits, so dropping zero
+                // bytes reads either.
+                std::string name;
+                const auto* chars = static_cast<const char*>(bytes);
+                for (AEGP_MemSize i = 0; i < size; ++i) {
+                    if (chars[i] != '\0') {
+                        name.push_back(chars[i]);
+                    }
+                }
+                working_space_from_name(name, space);
+                memory->AEGP_UnlockMemHandle(name_handle);
+            }
+            memory->AEGP_FreeMemHandle(name_handle);
+        }
+        basic->ReleaseSuite(kAEGPMemorySuite, kAEGPMemorySuiteVersion1);
+    }
+    basic->ReleaseSuite(kAEGPColorSettingsSuite, kAEGPColorSettingsSuiteVersion6);
+    return space;
+}
+
+void resolve_host_working_space(const PF_InData* in_data, AeParameterState& state)
+{
+    if (state.working_space_auto) {
+        resolve_auto_working_space(state, host_working_space(in_data));
     }
 }
 
@@ -116,6 +173,7 @@ bool read_ui_state_from_params(PF_ParamDef* params[], AeUiParameterState& out_st
     out_state.cell_coverage_bias = params[cell_coverage_bias_param()]->u.fs_d.value;
     out_state.cell_edge_inset = params[cell_edge_inset_param()]->u.fs_d.value;
     out_state.view_mode_index = params[view_mode_param()]->u.pd.value;
+    out_state.color_space_index = params[color_space_param()]->u.pd.value;
     return true;
 }
 
@@ -396,6 +454,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     PF_ParamDef cell_coverage_bias_param_def;
     PF_ParamDef cell_edge_inset_param_def;
     PF_ParamDef view_param_def;
+    PF_ParamDef color_space_param_def;
     PF_ParamDef mask_layer_param_def;
     AEFX_CLR_STRUCT(legacy_lens_param);
     AEFX_CLR_STRUCT(manufacturer_param);
@@ -459,6 +518,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     AEFX_CLR_STRUCT(cell_coverage_bias_param_def);
     AEFX_CLR_STRUCT(cell_edge_inset_param_def);
     AEFX_CLR_STRUCT(view_param_def);
+    AEFX_CLR_STRUCT(color_space_param_def);
     AEFX_CLR_STRUCT(mask_layer_param_def);
 
     bool legacy_lens_checked_out = false;
@@ -523,6 +583,7 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     bool cell_coverage_bias_checked_out = false;
     bool cell_edge_inset_checked_out = false;
     bool view_checked_out = false;
+    bool color_space_checked_out = false;
     bool mask_layer_checked_out = false;
 
     ERR(PF_CHECKOUT_PARAM(in_data,
@@ -1028,6 +1089,14 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
     view_checked_out = (err == PF_Err_NONE);
 
     ERR(PF_CHECKOUT_PARAM(in_data,
+                          color_space_param(),
+                          in_data->current_time,
+                          in_data->time_step,
+                          in_data->time_scale,
+                          &color_space_param_def));
+    color_space_checked_out = (err == PF_Err_NONE);
+
+    ERR(PF_CHECKOUT_PARAM(in_data,
                           mask_layer_param(),
                           in_data->current_time,
                           in_data->time_step,
@@ -1099,16 +1168,21 @@ PF_Err build_render_state_from_checked_out_params(PF_InData* in_data,
         ui_state.cell_coverage_bias = cell_coverage_bias_param_def.u.fs_d.value;
         ui_state.cell_edge_inset = cell_edge_inset_param_def.u.fs_d.value;
         ui_state.view_mode_index = view_param_def.u.pd.value;
+        ui_state.color_space_index = color_space_param_def.u.pd.value;
 
         if (!apply_ui_parameter_state(ui_state, out_state)) {
             err = PF_Err_BAD_CALLBACK_PARAM;
         } else {
             resolve_auto_pupil_seed(in_data, out_state);
+            resolve_host_working_space(in_data, out_state);
         }
     }
 
     if (view_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &view_param_def));
+    }
+    if (color_space_checked_out) {
+        ERR2(PF_CHECKIN_PARAM(in_data, &color_space_param_def));
     }
     if (mask_layer_checked_out) {
         ERR2(PF_CHECKIN_PARAM(in_data, &mask_layer_param_def));
@@ -1445,6 +1519,7 @@ PF_Err PluginHandleLegacyRender(PF_InData* in_data,
         return PF_COPY(&params[PARAM_INPUT]->u.ld, output, nullptr, nullptr);
     }
     resolve_auto_pupil_seed(in_data, state);
+    resolve_host_working_space(in_data, state);
 
     PF_EffectWorld* mask_world = nullptr;
     if (params[mask_layer_param()]) {

@@ -61,5 +61,13 @@ FrameRenderSettings build_frame_render_settings(const AeParameterState& state)
     settings.cell_coverage_bias = state.cell_coverage_bias;
     settings.cell_edge_inset = state.cell_edge_inset;
     settings.bloom = state.bloom;
+    settings.working_space = state.working_space;
     return settings;
+}
+
+void resolve_auto_working_space(AeParameterState& state, WorkingColorSpace host_space)
+{
+    if (state.working_space_auto) {
+        state.working_space = host_space;
+    }
 }

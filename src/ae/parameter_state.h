@@ -85,6 +85,12 @@ struct AeParameterState
     float cell_coverage_bias = 1.0f;
     float cell_edge_inset = 0.1f;
     BloomConfig bloom {};
+    // Auto takes the host's working space (see resolve_auto_working_space).
+    bool working_space_auto = true;
+    WorkingColorSpace working_space = WorkingColorSpace::LinearRec709;
 };
 
 FrameRenderSettings build_frame_render_settings(const AeParameterState& state);
+
+// Sets the working space of an Auto state to what the host reported.
+void resolve_auto_working_space(AeParameterState& state, WorkingColorSpace host_space);

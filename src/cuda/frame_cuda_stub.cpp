@@ -5,6 +5,8 @@ void GpuFrameRenderCache::release()
     ghost_cache.release();
     d_scene_bgra = nullptr;
     scene_floats = 0;
+    d_rec709_input = nullptr;
+    rec709_input_bytes = 0;
     d_bloom_r = nullptr;
     d_bloom_g = nullptr;
     d_bloom_b = nullptr;

@@ -3,6 +3,7 @@
 .vscode/
 build/
 build-ae/
+build-ps/
 out/
 bin/
 obj/
@@ -17,5 +18,6 @@ obj/
 *.exp
 *.dll
 *.aex
+*.8bf
 tests/ae_view_debug.jsx
 tests/ae_view_render_debug.jsx

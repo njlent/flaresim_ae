@@ -176,6 +176,18 @@ bool build_ghost_render_setup(const LensSystem& lens,
 //
 // out_r/g/b: pre-allocated output buffers (width × height), zeroed.
 // fov_h/fov_v: horizontal and vertical FOV in radians.
+// Where one render_ghosts call sits when a frame's sources are traced in
+// several chunks. The CPU renderer always adds into the output buffers. The
+// CUDA renderer sums into its own device buffers: clear zeroes them first and
+// finish copies the sum into the output buffers, so the chunks in between add
+// up on the GPU without a full-frame readback each. The defaults trace a whole
+// frame in one call.
+struct GhostChunk
+{
+    bool clear = true;
+    bool finish = true;
+};
+
 void render_ghosts(const LensSystem &lens,
                    const std::vector<BrightPixel> &sources,
                    float fov_h, float fov_v,
@@ -184,4 +196,5 @@ void render_ghosts(const LensSystem &lens,
                    const GhostConfig &config,
                    const GhostRenderSetup* setup = nullptr,
                    struct GpuBufferCache* gpu_cache = nullptr,
-                   GhostRenderBackend* out_backend = nullptr);
+                   GhostRenderBackend* out_backend = nullptr,
+                   const GhostChunk& chunk = {});

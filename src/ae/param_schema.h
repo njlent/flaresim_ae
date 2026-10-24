@@ -85,6 +85,7 @@ inline constexpr int PARAM_ID_ANAMORPHIC_SQUEEZE = 58;
 inline constexpr int PARAM_ID_SURFACE_ART_START = 59;
 inline constexpr int PARAM_ID_SURFACE_ART_COUNT = 60;
 inline constexpr int PARAM_ID_SURFACE_ART_GAIN = 61;
+inline constexpr int PARAM_ID_COLOR_SPACE = 62;
 
 struct AeUiParameterState
 {
@@ -150,6 +151,7 @@ struct AeUiParameterState
     float cell_coverage_bias = 1.0f;
     float cell_edge_inset = 0.1f;
     int view_mode_index = 1;
+    int color_space_index = 1;
 };
 
 int lens_section_start_param();
@@ -229,6 +231,7 @@ int advanced_ghosts_section_end_param();
 int post_section_end_param();
 int flare_section_end_param();
 int view_mode_param();
+int color_space_param();
 int mask_layer_param();
 int parameter_count();
 
@@ -250,6 +253,7 @@ std::string build_spectral_jitter_mode_popup_string();
 std::string build_ghost_cleanup_mode_popup_string();
 std::string build_pupil_jitter_mode_popup_string();
 std::string build_projected_cells_mode_popup_string();
+std::string build_color_space_popup_string();
 std::string build_output_view_popup_string();
 
 int lens_popup_index_for_builtin(const char* builtin_id);
@@ -280,6 +284,9 @@ bool pupil_jitter_mode_from_popup(int popup_index, PupilJitterMode& out_mode);
 int projected_cells_mode_popup_count();
 int projected_cells_mode_popup_index(ProjectedCellsMode mode);
 bool projected_cells_mode_from_popup(int popup_index, ProjectedCellsMode& out_mode);
+
+int color_space_popup_count();
+bool color_space_from_popup(int popup_index, bool& out_automatic, WorkingColorSpace& out_space);
 
 int output_view_popup_count();
 int output_view_popup_index(AeOutputView view);

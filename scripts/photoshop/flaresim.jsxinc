@@ -1,0 +1,75 @@
+// FlareSim scripting helpers for Photoshop (ExtendScript).
+//
+// Include from your own script and call flareSim():
+//
+//     //@include "flaresim.jsxinc"
+//     flareSim("Golden hour");                                // apply a saved preset
+//     flareSim("Golden hour", {flare_gain: 2500});            // preset, one value changed
+//     flareSim(null, {lens: "double-gauss", view: "Flare Only"}); // no preset: defaults + these
+//     flareSim("Golden hour", null, true);                    // open the dialog with the preset
+//
+// Setting keys are the ones in a saved preset file (open one in a text
+// editor). Popups take their label text ("Flare Only"), switches take on/off
+// or true/false. Keys you leave out come from the preset, or from the
+// defaults when there is no preset; never from the last dialog session.
+
+var FLARESIM_EVENT = "flareSimPS";
+var FLARESIM_KEY_PRESET = "FsPr";
+var FLARESIM_KEY_SETTINGS = "FsSt";
+
+// %APPDATA%\FlareSim\presets, where the dialog's Save button writes.
+function flareSimPresetFolder() {
+    return new Folder(Folder.userData + "/FlareSim/presets");
+}
+
+function flareSimListPresets() {
+    var folder = flareSimPresetFolder();
+    if (!folder.exists) {
+        return [];
+    }
+    var files = folder.getFiles("*.flaresim");
+    var names = [];
+    for (var i = 0; i < files.length; i++) {
+        if (files[i] instanceof File) {
+            names.push(File.decode(files[i].name).replace(/\.flaresim$/i, ""));
+        }
+    }
+    names.sort(function (a, b) {
+        var x = a.toLowerCase();
+        var y = b.toLowerCase();
+        return x < y ? -1 : (x > y ? 1 : 0);
+    });
+    return names;
+}
+
+// Turns {flare_gain: 2500, manual_source: true} into flaresim-ps settings text.
+function flareSimSettingsText(settings) {
+    var text = "flaresim-ps 1\n";
+    for (var key in settings) {
+        if (settings.hasOwnProperty(key)) {
+            var value = settings[key];
+            if (value === true) {
+                value = "on";
+            } else if (value === false) {
+                value = "off";
+            }
+            text += key + "=" + value + "\n";
+        }
+    }
+    return text;
+}
+
+// Applies FlareSim to the active layer. preset is a preset name or null;
+// settings is an object or flaresim-ps text and goes on top of the preset.
+// Throws if the preset does not exist and no settings were given.
+function flareSim(preset, settings, showDialog) {
+    var desc = new ActionDescriptor();
+    if (preset) {
+        desc.putString(charIDToTypeID(FLARESIM_KEY_PRESET), preset);
+    }
+    if (settings) {
+        desc.putString(charIDToTypeID(FLARESIM_KEY_SETTINGS),
+                       typeof settings === "string" ? settings : flareSimSettingsText(settings));
+    }
+    return executeAction(stringIDToTypeID(FLARESIM_EVENT), desc, showDialog ? DialogModes.ALL : DialogModes.NO);
+}

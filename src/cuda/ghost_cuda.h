@@ -98,7 +98,10 @@ bool launch_ghost_cuda(
     int height,
     const GhostConfig& config,
     GpuBufferCache& cache,
-    std::string* out_error = nullptr
+    std::string* out_error = nullptr,
+    // See GhostChunk: clear zeroes the device sums, copy_output copies them to out_*.
+    bool clear_output = true,
+    bool copy_output = true
 );
 
 bool launch_ghost_cuda_device(

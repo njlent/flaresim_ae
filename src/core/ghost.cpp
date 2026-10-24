@@ -1206,7 +1206,8 @@ void render_ghosts(const LensSystem &lens,
                    const GhostConfig &config,
                    const GhostRenderSetup* setup,
                    GpuBufferCache* gpu_cache,
-                   GhostRenderBackend* out_backend)
+                   GhostRenderBackend* out_backend,
+                   const GhostChunk& chunk)
 {
     if (out_backend) {
         *out_backend = GhostRenderBackend::CPU;
@@ -1281,7 +1282,9 @@ void render_ghosts(const LensSystem &lens,
                               height,
                               config,
                               cuda_cache,
-                              &cuda_error)) {
+                              &cuda_error,
+                              chunk.clear,
+                              chunk.finish)) {
             if (out_backend) {
                 *out_backend = GhostRenderBackend::CUDA;
             }
